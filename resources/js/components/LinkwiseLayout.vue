@@ -198,7 +198,7 @@ import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterr
 // version-specific issues.
 const LINKWISE_VERSION = '1.0.0-dev';
 const DEBUG_EXPORT_URL = '/cp/linkwise/debug-export';
-const DOCS_URL = 'https://github.com/arturrossbach-cloud/statamic-linkwise#readme';
+const DOCS_URL = 'https://github.com/arturrossbach/statamic-linkwise#readme';
 
 // Support channels surfaced on every Linkwise page (footer + Help dropdown).
 // Designed for minimum friction: GitHub issue + email + diagnostic ZIP, three
@@ -206,7 +206,7 @@ const DOCS_URL = 'https://github.com/arturrossbach-cloud/statamic-linkwise#readm
 // still get the report. Update GITHUB_ISSUES_NEW_URL after a possible repo
 // transfer (e.g. inkline/linkwise) — the bug.yml template name is stable.
 const SUPPORT_EMAIL = 'linkwise.support@gmail.com';
-const GITHUB_ISSUES_NEW_URL = 'https://github.com/arturrossbach-cloud/statamic-linkwise/issues/new?template=bug.yml';
+const GITHUB_ISSUES_NEW_URL = 'https://github.com/arturrossbach/statamic-linkwise/issues/new?template=bug.yml';
 
 export default {
     components: { Head, Link, Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal },

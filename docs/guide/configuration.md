@@ -98,4 +98,4 @@ Toggles `target="_blank"` on all newly-inserted links via the Bard mark extensio
 
 - Open the **Statamic CP → Linkwise** main nav to start using the dashboard
 - Settings UI lives at **Settings → Linkwise**
-- Bug or question? [Open an issue on GitHub](https://github.com/arturrossbach-cloud/statamic-linkwise/issues)
+- Bug or question? [Open an issue on GitHub](https://github.com/arturrossbach/statamic-linkwise/issues)

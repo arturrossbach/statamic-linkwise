@@ -22,8 +22,8 @@ export default defineConfig({
             {
                 text: 'v1.0',
                 items: [
-                    { text: 'Changelog', link: 'https://github.com/arturrossbach-cloud/statamic-linkwise/blob/master/CHANGELOG.md' },
-                    { text: 'License', link: 'https://github.com/arturrossbach-cloud/statamic-linkwise/blob/master/LICENSE.md' },
+                    { text: 'Changelog', link: 'https://github.com/arturrossbach/statamic-linkwise/blob/master/CHANGELOG.md' },
+                    { text: 'License', link: 'https://github.com/arturrossbach/statamic-linkwise/blob/master/LICENSE.md' },
                     { text: 'Statamic Marketplace', link: 'https://statamic.com/addons' },
                 ],
             },
@@ -43,7 +43,7 @@ export default defineConfig({
         },
 
         socialLinks: [
-            { icon: 'github', link: 'https://github.com/arturrossbach-cloud/statamic-linkwise' },
+            { icon: 'github', link: 'https://github.com/arturrossbach/statamic-linkwise' },
         ],
 
         footer: {
@@ -52,7 +52,7 @@ export default defineConfig({
         },
 
         editLink: {
-            pattern: 'https://github.com/arturrossbach-cloud/statamic-linkwise/edit/master/docs/:path',
+            pattern: 'https://github.com/arturrossbach/statamic-linkwise/edit/master/docs/:path',
             text: 'Edit this page on GitHub',
         },
 

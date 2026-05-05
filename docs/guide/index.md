@@ -26,5 +26,5 @@ All data stays on your server in `storage/linkwise/`. No SaaS callbacks. No tele
 - **[Configuration →](/guide/configuration)** — config file vs. CP settings
 
 ::: info More guides coming
-Tab-by-tab walkthroughs (Overview, Links Report, Broken Links, Domains, Auto-Linking, Target Keywords, URL Changer), production setup, troubleshooting and the full FAQ are being written. Check back soon — or [open an issue](https://github.com/arturrossbach-cloud/statamic-linkwise/issues) if you have a specific question.
+Tab-by-tab walkthroughs (Overview, Links Report, Broken Links, Domains, Auto-Linking, Target Keywords, URL Changer), production setup, troubleshooting and the full FAQ are being written. Check back soon — or [open an issue](https://github.com/arturrossbach/statamic-linkwise/issues) if you have a specific question.
 :::

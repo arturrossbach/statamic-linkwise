@@ -20,10 +20,10 @@
             "role": "Developer"
         }
     ],
-    "homepage": "https://github.com/arturrossbach-cloud/statamic-linkwise",
+    "homepage": "https://github.com/arturrossbach/statamic-linkwise",
     "support": {
-        "issues": "https://github.com/arturrossbach-cloud/statamic-linkwise/issues",
-        "source": "https://github.com/arturrossbach-cloud/statamic-linkwise",
+        "issues": "https://github.com/arturrossbach/statamic-linkwise/issues",
+        "source": "https://github.com/arturrossbach/statamic-linkwise",
         "email": "linkwise.support@gmail.com"
     },
     "require": {

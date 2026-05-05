@@ -11,7 +11,7 @@ hero:
           link: /guide/installation
         - theme: alt
           text: View on GitHub
-          link: https://github.com/arturrossbach-cloud/statamic-linkwise
+          link: https://github.com/arturrossbach/statamic-linkwise
 
 features:
     - icon: 🔗
