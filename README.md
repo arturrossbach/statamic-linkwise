@@ -20,7 +20,7 @@ Built specifically for Statamic 6 with Inertia, native UI components, and editor
 ## Installation
 
 ```bash
-composer require inkline/linkwise
+composer require arturrossbach/linkwise
 ```
 
 Auto-registers via `AddonServiceProvider`. Open Control Panel → **Linkwise** in the nav. First visit triggers a content scan.

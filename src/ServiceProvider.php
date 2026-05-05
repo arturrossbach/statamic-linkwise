@@ -69,6 +69,45 @@ class ServiceProvider extends AddonServiceProvider
             $this->mergeAddonSettingsIntoConfig();
         });
 
+        // Log ValidationException on Linkwise routes. Laravel's default
+        // exception reporter EXCLUDES ValidationException (it's a "user
+        // error" not an "app error"), so the user sees a generic red toast
+        // ("the given data was invalid") with no server-side trace. For a
+        // commercial addon that's a support nightmare — every failed
+        // validation should leave a breadcrumb so the diagnostic-ZIP can
+        // tell us which fields rejected and what payload shape was sent.
+        $this->app->afterResolving(\Illuminate\Contracts\Debug\ExceptionHandler::class, function ($handler) {
+            if (! method_exists($handler, 'reportable')) {
+                return;
+            }
+            $handler->reportable(function (\Illuminate\Validation\ValidationException $e) {
+                try {
+                    $request = request();
+                    if (! $request) {
+                        return;
+                    }
+                    $path = (string) $request->path();
+                    if (! str_contains($path, 'linkwise')) {
+                        return;
+                    }
+                    \Log::warning('[Linkwise] Validation failed on '.$path, [
+                        'method' => $request->method(),
+                        'errors' => $e->errors(),
+                        'request_keys' => array_keys($request->all()),
+                        'insertion_count' => is_array($request->input('insertions'))
+                            ? count($request->input('insertions'))
+                            : null,
+                        'replacement_count' => is_array($request->input('replacements'))
+                            ? count($request->input('replacements'))
+                            : null,
+                    ]);
+                } catch (\Throwable) {
+                    // Never let logging itself bubble up — keep silent on
+                    // resolver errors during boot / tests.
+                }
+            });
+        });
+
         // Replace Bard's LinkMark with our version that applies domain rel attributes
         Augmentor::replaceExtension('link', function ($original) {
             return new LinkwiseLinkMark;
@@ -92,7 +131,7 @@ class ServiceProvider extends AddonServiceProvider
     protected function mergeAddonSettingsIntoConfig(): void
     {
         try {
-            $addon = Addon::all()->first(fn ($a) => $a->id() === 'inkline/statamic-linkwise');
+            $addon = Addon::all()->first(fn ($a) => $a->id() === 'arturrossbach/linkwise');
 
             if (! $addon) {
                 return;

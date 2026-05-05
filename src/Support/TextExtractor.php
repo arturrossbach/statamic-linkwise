@@ -115,6 +115,18 @@ class TextExtractor
     {
         $type = $node['type'] ?? '';
 
+        // Code blocks contain syntax (e.g. `<script setup>`, `import { ref }`)
+        // that's NOT prose. Including their text in the indexed corpus means:
+        //   - keywords get polluted by language tokens (script, setup, import)
+        //   - anchor-text candidates can include code fragments that
+        //     BardLinkInserter then can't find as prose, surfacing as
+        //     "0 of 1 succeeded" failures
+        // BardLinkInserter already refuses to recurse into codeBlock on the
+        // write side; mirror that on the read side here.
+        if (in_array($type, ['codeBlock', 'code_block'], true)) {
+            return '';
+        }
+
         // Bard SET (custom replicator block embedded inside the Bard tree —
         // pull_quote, buttons, code, image_caption, etc.). Previously this
         // path returned empty and discarded ALL set content: pull-quote

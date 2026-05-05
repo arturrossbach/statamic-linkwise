@@ -220,7 +220,7 @@ const DOCS_URL = 'https://github.com/arturrossbach/statamic-linkwise#readme';
 // Designed for minimum friction: GitHub issue + email + diagnostic ZIP, three
 // independent paths so a buyer who hits a bug can pick whichever fits and we
 // still get the report. Update GITHUB_ISSUES_NEW_URL after a possible repo
-// transfer (e.g. inkline/linkwise) — the bug.yml template name is stable.
+// transfer (e.g. arturrossbach/linkwise) — the bug.yml template name is stable.
 const SUPPORT_EMAIL = 'linkwise.support@gmail.com';
 const GITHUB_ISSUES_NEW_URL = 'https://github.com/arturrossbach/statamic-linkwise/issues/new?template=bug.yml';
 
