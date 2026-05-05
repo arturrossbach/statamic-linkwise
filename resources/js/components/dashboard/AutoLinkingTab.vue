@@ -166,8 +166,8 @@
         </Card>
 
         <!-- Rules Header -->
-        <div class="flex items-center justify-between mb-4" v-if="rules.length > 0">
-            <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-3 gap-y-2 mb-4" v-if="rules.length > 0">
+            <div class="flex flex-wrap items-center gap-3 gap-y-2">
                 <input
                     v-model="searchQuery"
                     type="text"
@@ -176,7 +176,7 @@
                 />
                 <span class="text-xs text-gray-400">{{ filteredRules.length }} rule(s)</span>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2 gap-y-2">
                 <template v-if="selectedRules.length > 0">
                     <Button @click="confirmApplySelected" :loading="applyingAll" :text="`Apply Selected (${selectedRules.length})`" icon="sync" />
                     <Button v-if="selectedHasActive" @click="bulkSetActive(false)" :text="`Ignore (${selectedActiveCount})`" variant="default" />

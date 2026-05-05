@@ -85,60 +85,66 @@
                 </Link>
             </nav>
 
-            <!-- Stale-check banner: visible on EVERY Linkwise tab when the
-                 content index is newer than the most recent broken-link check
-                 (>5min grace). Tells users their recent edits may have intro-
-                 duced new broken URLs that the latest check could not see —
-                 plus a one-click action to re-run. Auto-disappears on the next
-                 page-render after a fresh check completes. -->
-            <Alert v-if="showStaleCheck" variant="warning" class="mb-4" role="status">
-                <!-- Always-stacked layout (text always on top, actions below).
-                     Side-by-side gets visually cramped on narrower viewports
-                     — full-width text + actions row reads cleaner on every
-                     screen size. -->
-                <div class="flex flex-col gap-3 text-sm">
-                    <div>
-                        <p class="font-medium">{{ staleCheckTitle }}</p>
-                        <p class="mt-0.5 text-xs opacity-80">{{ staleCheckBody }}</p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <Button @click="runStaleCheck" :loading="checkingFromBanner" :disabled="!!activeBulk" text="Run check now" size="xs" />
-                        <Button @click="dismissStaleCheck" text="Dismiss" variant="default" size="xs" />
-                    </div>
-                </div>
-            </Alert>
-
-            <!-- Completion banner: shown after a bulk operation finishes.
-                 Persistent + dismissible — users away from the screen during
-                 the toast can still see what happened. Hides automatically
-                 when a NEW bulk is running (replaced by the live banner). -->
-            <Alert v-if="lastCompletion && !activeBulk" :variant="completionBannerVariant" class="mb-4" role="status">
-                <div class="flex items-start justify-between gap-4 text-sm">
-                    <div class="flex items-center gap-2">
-                        <Icon :name="completionBannerIcon" class="size-4" />
-                        <span>{{ completionBannerLabel }}</span>
-                    </div>
-                    <Button @click="dismissCompletion" text="Dismiss" variant="default" size="xs" />
-                </div>
-            </Alert>
-
-            <!-- Recovery banner: shown when the user reloaded the page mid-bulk.
-                 Single goal: tell them WHAT happened (what was running, how far
-                 it got). No resume action — they can re-trigger the bulk
-                 themselves if needed, this is just status clarity. -->
-            <Alert v-if="interruptedBulk" variant="warning" class="mb-4" role="status">
-                <div class="flex items-start justify-between gap-4 text-sm">
-                    <div>
-                        <div class="font-medium">Previous bulk operation was interrupted.</div>
-                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                            {{ interruptedBulkLabel }} — completed {{ interruptedBulk.current }} of {{ interruptedBulk.total }} before the page was reloaded.
-                            <span v-if="interruptedBulk.skipped > 0">{{ interruptedBulk.skipped }} skipped.</span>
-                            Re-run the same operation if you need the rest.
+            <!-- Persistent-notifications accordion: groups stale-check +
+                 completion + recovery banners under one summary so users
+                 who have seen them aren't pushed downward on every page-nav.
+                 Joomla-style "X notifications" header, individual dismiss
+                 buttons inside still work. Active-bulk banner stays outside
+                 because it's transient AND critical — never collapsable. -->
+            <details
+                v-if="notificationCount > 0"
+                :open="!notificationsCollapsed"
+                @toggle="handleNotificationsToggle"
+                class="mb-4 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40"
+            >
+                <summary class="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/60 rounded-md">
+                    {{ notificationCount }} {{ notificationCount === 1 ? 'notification' : 'notifications' }}
+                </summary>
+                <div class="px-3 pb-3 pt-1 flex flex-col gap-2">
+                    <!-- Stale-check: index newer than last broken-link check.
+                         Always-stacked layout so buttons aren't cramped. -->
+                    <Alert v-if="showStaleCheck" variant="warning" role="status">
+                        <div class="flex flex-col gap-3 text-sm">
+                            <div>
+                                <p class="font-medium">{{ staleCheckTitle }}</p>
+                                <p class="mt-0.5 text-xs opacity-80">{{ staleCheckBody }}</p>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <Button @click="runStaleCheck" :loading="checkingFromBanner" :disabled="!!activeBulk" text="Run check now" size="xs" />
+                                <Button @click="dismissStaleCheck" text="Dismiss" variant="default" size="xs" />
+                            </div>
                         </div>
-                    </div>
-                    <Button @click="dismissInterruptedBulk" text="Dismiss" variant="default" size="xs" />
+                    </Alert>
+
+                    <!-- Completion: persistent recap of the last bulk so users
+                         who missed the toast can still see the result. -->
+                    <Alert v-if="lastCompletion && !activeBulk" :variant="completionBannerVariant" role="status">
+                        <div class="flex items-start justify-between gap-4 text-sm">
+                            <div class="flex items-center gap-2">
+                                <Icon :name="completionBannerIcon" class="size-4" />
+                                <span>{{ completionBannerLabel }}</span>
+                            </div>
+                            <Button @click="dismissCompletion" text="Dismiss" variant="default" size="xs" />
+                        </div>
+                    </Alert>
+
+                    <!-- Recovery: page reloaded mid-bulk — tells the user how
+                         far it got. No resume action. -->
+                    <Alert v-if="interruptedBulk" variant="warning" role="status">
+                        <div class="flex items-start justify-between gap-4 text-sm">
+                            <div>
+                                <div class="font-medium">Previous bulk operation was interrupted.</div>
+                                <div class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                    {{ interruptedBulkLabel }} — completed {{ interruptedBulk.current }} of {{ interruptedBulk.total }} before the page was reloaded.
+                                    <span v-if="interruptedBulk.skipped > 0">{{ interruptedBulk.skipped }} skipped.</span>
+                                    Re-run the same operation if you need the rest.
+                                </div>
+                            </div>
+                            <Button @click="dismissInterruptedBulk" text="Dismiss" variant="default" size="xs" />
+                        </div>
+                    </Alert>
                 </div>
-            </Alert>
+            </details>
 
             <!-- Tab-spanning bulk-operation banner. Single source of truth for
                  ALL bulks (light + heavy) — visible across every Linkwise tab.
@@ -256,6 +262,17 @@ export default {
         // issue-form picker which lands the user directly in the form.
         githubIssueUrl() {
             return GITHUB_ISSUES_NEW_URL;
+        },
+
+        // Count of currently-visible persistent notifications. Drives the
+        // <details> summary "X notifications" + the v-if that hides the
+        // entire accordion when nothing is pending.
+        notificationCount() {
+            let n = 0;
+            if (this.showStaleCheck) n++;
+            if (this.lastCompletion && !this.activeBulk) n++;
+            if (this.interruptedBulk) n++;
+            return n;
         },
 
         /**
@@ -540,6 +557,11 @@ export default {
             // sticks until the next scan changes the index timestamp.
             checkingFromBanner: false,
             staleCheckDismissedFor: null,
+            // Persists collapsed/expanded state of the persistent-notifications
+            // accordion across reloads + tab navigations. Default false (open
+            // on first load) so users see new notifications without searching;
+            // once they collapse it, the choice sticks for the session.
+            notificationsCollapsed: false,
             // Debug-export "with logs" requires explicit confirmation because
             // log files may contain URLs from scanned pages. Modal opens via
             // dropdown, user confirms, only then does the download fire.
@@ -579,6 +601,14 @@ export default {
             this.staleCheckDismissedFor = sessionStorage.getItem('linkwise:staleCheck:dismissedFor');
         } catch {
             // private mode / quota — non-critical, banner just won't stay dismissed
+        }
+
+        // Restore collapsed/expanded state of the notifications accordion so
+        // a user who collapsed it doesn't get it re-pushed open on every nav.
+        try {
+            this.notificationsCollapsed = sessionStorage.getItem('linkwise:notifications:collapsed') === '1';
+        } catch {
+            // private mode — accordion just defaults to open every load
         }
 
         // Tick the reactive clock every 5s so bulkStuck recomputes — without
@@ -638,6 +668,25 @@ export default {
                 console.error('[Linkwise]', error);
             } finally {
                 this.checkingFromBanner = false;
+            }
+        },
+
+        /**
+         * Persist the open/collapsed state of the notifications accordion to
+         * sessionStorage so users who collapsed it don't get it pushed open
+         * on every page-nav. The <details> element fires `toggle` after the
+         * browser flips its internal `open` state — read it back into the
+         * Vue data flag and persist.
+         */
+        handleNotificationsToggle(event) {
+            this.notificationsCollapsed = !event.target.open;
+            try {
+                sessionStorage.setItem(
+                    'linkwise:notifications:collapsed',
+                    this.notificationsCollapsed ? '1' : '0',
+                );
+            } catch {
+                // private mode — non-critical, choice just won't persist
             }
         },
 
