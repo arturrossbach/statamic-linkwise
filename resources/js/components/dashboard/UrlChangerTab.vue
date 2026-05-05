@@ -95,21 +95,31 @@
 
         <!-- Results -->
         <div v-if="matches.length > 0">
-            <!-- Actions Bar -->
+            <!-- Actions Bar — two semantic groups:
+                 (1) Input + "Set for all" — populating the staging field
+                 (2) Apply / Unlink — committing the change to all rows
+                 Group 1 grows to fill space; group 2 stays compact. On
+                 narrow viewports both groups stack via outer flex-wrap. -->
             <Card class="mb-4">
-                <div class="flex flex-wrap items-center gap-3 gap-y-2">
-                    <label class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">New URL:</label>
-                    <div class="flex-1">
-                        <Input
-                            v-model="bulkReplaceUrl"
-                            placeholder="https://new-domain.com"
-                            size="sm"
-                            :input-attrs="{ 'aria-invalid': bulkUrlInvalid ? 'true' : 'false', style: bulkUrlInvalid ? invalidInputStyle : '', 'data-linkwise-invalid': bulkUrlInvalid ? 'true' : 'false' }"
-                        />
+                <div class="flex flex-wrap items-center gap-3 gap-y-3">
+                    <!-- Group 1: staging input -->
+                    <div class="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
+                        <label class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">New URL:</label>
+                        <div class="flex-1 min-w-[160px]">
+                            <Input
+                                v-model="bulkReplaceUrl"
+                                placeholder="https://new-domain.com"
+                                size="sm"
+                                :input-attrs="{ 'aria-invalid': bulkUrlInvalid ? 'true' : 'false', style: bulkUrlInvalid ? invalidInputStyle : '', 'data-linkwise-invalid': bulkUrlInvalid ? 'true' : 'false' }"
+                            />
+                        </div>
+                        <Button @click="setBulkReplace" :disabled="!bulkReplaceUrl.trim() || bulkUrlInvalid" :text="setForLabel" size="sm" />
                     </div>
-                    <Button @click="setBulkReplace" :disabled="!bulkReplaceUrl.trim() || bulkUrlInvalid" :text="setForLabel" size="sm" />
-                    <Button @click="confirmAction = 'replace'" :disabled="readyCount === 0 || globalBulkRunning" variant="primary" :text="'Apply ' + readyCount + ' change' + (readyCount !== 1 ? 's' : '')" icon="checkmark" v-tooltip="globalBulkRunning ? 'Waiting for the running bulk operation to finish' : null" />
-                    <Button @click="confirmAction = 'unlink'" :disabled="selectedCount === 0 || globalBulkRunning" :text="'Unlink ' + selectedCount + ' link' + (selectedCount !== 1 ? 's' : '')" v-tooltip="globalBulkRunning ? 'Waiting for the running bulk operation to finish' : null" />
+                    <!-- Group 2: commit actions -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        <Button @click="confirmAction = 'replace'" :disabled="readyCount === 0 || globalBulkRunning" variant="primary" :text="'Apply ' + readyCount + ' change' + (readyCount !== 1 ? 's' : '')" icon="checkmark" v-tooltip="globalBulkRunning ? 'Waiting for the running bulk operation to finish' : null" />
+                        <Button @click="confirmAction = 'unlink'" :disabled="selectedCount === 0 || globalBulkRunning" :text="'Unlink ' + selectedCount + ' link' + (selectedCount !== 1 ? 's' : '')" v-tooltip="globalBulkRunning ? 'Waiting for the running bulk operation to finish' : null" />
+                    </div>
                 </div>
                 <p v-if="bulkUrlInvalid" class="mt-2 text-xs text-red-600 dark:text-red-400">
                     Not a valid URL. Use http(s)://, mailto: or tel:.
@@ -121,7 +131,7 @@
 
             <!-- Matches Table -->
             <Panel>
-                <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm table-fixed">
+                <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm table-fixed" style="min-width: 1100px;">
                     <thead>
                         <tr>
                             <th scope="col" style="width: 32px">
