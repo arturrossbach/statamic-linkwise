@@ -7,25 +7,43 @@
                 <span v-if="brokenLastChecked"> · Last link check {{ relativeTime(brokenLastChecked) }}</span>
             </div>
 
-            <Alert
-                v-for="rec in recommendations"
-                :key="rec.key"
-                :variant="severityVariant(rec.severity)"
+            <!-- Recommendations grouped under a Joomla-style <details> summary
+                 so power-users who already know about the long-standing issues
+                 (e.g. 192 orphaned entries) can collapse the section once and
+                 keep the Overview metrics above the fold. Default open so new
+                 recommendations are visible; collapsed state persists per-
+                 session via sessionStorage. -->
+            <details
+                v-if="recommendations.length > 0"
+                :open="!recommendationsCollapsed"
+                @toggle="handleRecommendationsToggle"
+                class="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40"
             >
-                <div class="flex items-start justify-between gap-3">
-                    <div class="flex-1 min-w-0">
-                        <p class="font-medium text-sm">{{ rec.title }}</p>
-                        <p class="mt-0.5 text-xs opacity-80">{{ rec.body }}</p>
-                    </div>
-                    <Button
-                        v-if="rec.action"
-                        :text="rec.action.label"
-                        size="sm"
-                        variant="default"
-                        @click="handleRecommendationAction(rec.action)"
-                    />
+                <summary class="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/60 rounded-md">
+                    {{ recommendations.length }} {{ recommendations.length === 1 ? 'recommendation' : 'recommendations' }}
+                </summary>
+                <div class="px-3 pb-3 pt-1 flex flex-col gap-2">
+                    <Alert
+                        v-for="rec in recommendations"
+                        :key="rec.key"
+                        :variant="severityVariant(rec.severity)"
+                    >
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1 min-w-0">
+                                <p class="font-medium text-sm">{{ rec.title }}</p>
+                                <p class="mt-0.5 text-xs opacity-80">{{ rec.body }}</p>
+                            </div>
+                            <Button
+                                v-if="rec.action"
+                                :text="rec.action.label"
+                                size="sm"
+                                variant="default"
+                                @click="handleRecommendationAction(rec.action)"
+                            />
+                        </div>
+                    </Alert>
                 </div>
-            </Alert>
+            </details>
         </div>
 
         <!-- Row 1: Core Metrics -->
@@ -288,6 +306,24 @@ export default {
 
     emits: ['navigate'],
 
+    data() {
+        return {
+            // Persists collapsed/expanded state of the recommendations <details>
+            // accordion. Default false (open on first visit) so users see new
+            // recommendations without searching; once they collapse it, the
+            // choice sticks per-session via sessionStorage.
+            recommendationsCollapsed: false,
+        };
+    },
+
+    mounted() {
+        try {
+            this.recommendationsCollapsed = sessionStorage.getItem('linkwise:overview:recommendationsCollapsed') === '1';
+        } catch {
+            // private mode — accordion just defaults to open every load
+        }
+    },
+
     computed: {
         clickableCardClass() {
             return CLICKABLE_CARD_CLASS;
@@ -417,6 +453,23 @@ export default {
 
         handleRecommendationAction(action) {
             this.$emit('navigate', action.tab, action.options || {});
+        },
+
+        /**
+         * Persist open/collapsed state of the recommendations accordion.
+         * <details> fires `toggle` after the browser flips its internal
+         * `open` state — read it back into Vue data + sessionStorage.
+         */
+        handleRecommendationsToggle(event) {
+            this.recommendationsCollapsed = !event.target.open;
+            try {
+                sessionStorage.setItem(
+                    'linkwise:overview:recommendationsCollapsed',
+                    this.recommendationsCollapsed ? '1' : '0',
+                );
+            } catch {
+                // private mode — non-critical, choice just won't persist
+            }
         },
 
         /**
