@@ -5,23 +5,66 @@ body:
     - type: markdown
       attributes:
           value: |
-              Thanks for taking the time. The more we know upfront, the faster we fix.
+              Thanks for taking the time! The more we know upfront, the faster we fix.
 
-              **Pro tip:** Attach your diagnostic ZIP (CP → Linkwise → Help → Download diagnostic ZIP). It includes versions, counts, runtime info — no URLs or content. We can debug ~3× faster with it.
+              **Pro tip:** Attach your diagnostic ZIP (CP → Linkwise → Help → Download diagnostic ZIP). It includes Linkwise / Statamic / Laravel / PHP versions, counts, and runtime info — no URLs or page content. We debug ~3× faster with it.
 
     - type: textarea
-      id: what
+      id: what_happened
       attributes:
           label: What went wrong?
-          description: What you tried and what happened instead. Screenshots welcome.
-          placeholder: "I clicked Apply on an Auto-Link rule, expected the count to update, but the page just reloaded with the old number."
+          description: Tell us what you tried and what happened instead. Screenshots welcome.
+          placeholder: |
+              I clicked Apply on the Auto-Link rule for "best practices", expected the count to update, but the page just reloaded with the old number.
       validations:
           required: true
 
-    - type: input
-      id: versions
+    - type: textarea
+      id: expected
       attributes:
-          label: Versions (optional — open the diagnostic ZIP, info.txt has them)
-          placeholder: "Linkwise 1.0.0 / Statamic 6.0 / PHP 8.2"
+          label: What did you expect?
+          description: Optional — what should have happened?
+          placeholder: |
+              I expected the rule to be applied to all matching entries and the linked-count to increment.
+      validations:
+          required: false
+
+    - type: textarea
+      id: steps
+      attributes:
+          label: Steps to reproduce
+          description: Optional, but very helpful. Even rough notes are fine.
+          placeholder: |
+              1. Go to Auto-Linking tab
+              2. Click "Apply" on the rule with keyword X
+              3. Wait for completion toast
+              4. Check Links Report — count is unchanged
+      validations:
+          required: false
+
+    - type: textarea
+      id: environment
+      attributes:
+          label: Environment details
+          description: Optional — these are also in your diagnostic ZIP's `info.txt`. Skip this if you're attaching the ZIP.
+          placeholder: |
+              Linkwise version: 1.0.0
+              Statamic version: 6.0.x
+              Laravel version: 12.x or 13.x
+              PHP version: 8.2 / 8.3 / 8.4
+              OS: macOS / Ubuntu / Windows
+              Cache driver: file / redis / database
+              Hosting: Herd / Forge / Hetzner / IONOS / shared / other
+      validations:
+          required: false
+
+    - type: textarea
+      id: additional
+      attributes:
+          label: Anything else?
+          description: Optional — console errors, related logs, scope of impact, anything else useful.
+          placeholder: |
+              Browser console showed `TypeError: Cannot read properties of null (reading 'length')`.
+              The bug only seems to happen when the entry has more than 50 entries in its collection.
       validations:
           required: false

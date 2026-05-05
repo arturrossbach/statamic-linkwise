@@ -236,6 +236,28 @@
                 </div>
             </Card>
         </div>
+
+        <!-- Persistent support surface on the Overview/landing tab. The
+             Header-dropdown is fast to discover, the page-footer line is the
+             safety-net — this card is the prominent "we have your back" anchor
+             that V1 buyers see on every Overview visit. Three explicit buttons
+             instead of inline links so the visual weight matches the metric
+             cards above. -->
+        <Card class="mt-6">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex-1 min-w-0">
+                    <h3 class="font-semibold text-base text-gray-900 dark:text-gray-100">Need help with Linkwise?</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        Open an issue on GitHub, email us, or download a diagnostic ZIP — we ship fixes ~3× faster with the ZIP attached.
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-2 shrink-0">
+                    <Button @click="openGithubIssue" text="Report a bug" icon="alert-warning-exclamation-mark" />
+                    <Button @click="openSupportEmail" text="Email us" icon="mail" />
+                    <Button @click="downloadDiagnosticZip" text="Diagnostic ZIP" icon="download" />
+                </div>
+            </div>
+        </Card>
     </div>
 </template>
 
@@ -395,6 +417,36 @@ export default {
 
         handleRecommendationAction(action) {
             this.$emit('navigate', action.tab, action.options || {});
+        },
+
+        /**
+         * Help-Card actions: same three channels as the header dropdown +
+         * page-footer (GitHub issue, mailto, diagnostic ZIP). Inlined here so
+         * the Overview Tab can stand alone without depending on parent layout
+         * methods. URLs duplicated from LinkwiseLayout's constants — if those
+         * change (e.g. repo transfer, support email update) update both.
+         */
+        openGithubIssue() {
+            window.open('https://github.com/arturrossbach/statamic-linkwise/issues/new?template=bug.yml', '_blank', 'noopener,noreferrer');
+        },
+
+        openSupportEmail() {
+            window.location.href = 'mailto:linkwise.support@gmail.com?subject=' + encodeURIComponent('Linkwise support');
+        },
+
+        /**
+         * Trigger the diagnostic-ZIP download via a temporary anchor element
+         * so the browser handles the binary stream natively (mirrors
+         * LinkwiseLayout.downloadDebugExport for the no-logs / privacy-safe
+         * default path).
+         */
+        downloadDiagnosticZip() {
+            const a = document.createElement('a');
+            a.href = '/cp/linkwise/debug-export';
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         },
 
         /** Format an ISO timestamp as "3 hours ago" / "2 days ago" */
