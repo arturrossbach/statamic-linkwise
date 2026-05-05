@@ -117,13 +117,14 @@
                     </Alert>
 
                     <!-- Completion: persistent recap of the last bulk so users
-                         who missed the toast can still see the result. -->
+                         who missed the toast can still see the result.
+                         Statamic's <Alert variant="..."> already renders its
+                         own variant-matched icon (check / warning / x); don't
+                         add an extra <Icon> here or the banner shows two
+                         icons side-by-side. -->
                     <Alert v-if="lastCompletion && !activeBulk" :variant="completionBannerVariant" role="status">
                         <div class="flex items-start justify-between gap-4 text-sm">
-                            <div class="flex items-center gap-2">
-                                <Icon :name="completionBannerIcon" class="size-4" />
-                                <span>{{ completionBannerLabel }}</span>
-                            </div>
+                            <span>{{ completionBannerLabel }}</span>
                             <Button @click="dismissCompletion" text="Dismiss" variant="default" size="xs" />
                         </div>
                     </Alert>
@@ -372,19 +373,6 @@ export default {
             const succeeded = e.succeeded ?? e.links_added ?? e.total_links_added ?? 0;
             if (succeeded === 0 && skipped > 0) return 'warning';
             return 'success';
-        },
-
-        completionBannerIcon() {
-            // Statamic's icon registry is a glob over vendor/.../svg/icons/*.svg
-            // — names without a matching SVG file render as empty (silent
-            // console.warn). The 'circle-*' family doesn't exist in the
-            // registry; map to the actual file names so the banner shows.
-            return ({
-                success: 'checkmark',
-                warning: 'alert-warning-exclamation-mark',
-                error: 'x-square',
-                default: 'info',
-            })[this.completionBannerVariant];
         },
 
         /**
