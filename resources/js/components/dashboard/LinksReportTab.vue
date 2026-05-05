@@ -276,6 +276,7 @@ import SortableHeader from '../shared/SortableHeader.vue';
 import { sortableMixin } from '../shared/sortable.js';
 import { buildPaginationMeta } from '../shared/pagination.js';
 import { router as inertiaRouter } from '@statamic/cms/inertia';
+import { setHeavyState, recordCompletion } from '../../services/bulkOperationService.js';
 
 export default {
     components: { Card, Panel, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Pagination, Icon, Input, Alert, Button, HelpIcon, SuggestionModal, DetailModal, SortableHeader },
@@ -744,7 +745,37 @@ export default {
                 anchor_text: item._anchor || item.anchor_text,
             }));
 
+            // Client-side cap with explicit message + alternative.
+            // Backend cap is also 200 (InboundController::insert validation
+            // rule); enforcing here means the user gets a USEFUL error,
+            // not a generic "given data was invalid" 422 toast with no
+            // hint of what to do next.
+            const MAX_PER_BATCH = 200;
+            if (insertions.length > MAX_PER_BATCH) {
+                Statamic.$toast.error(
+                    `You selected ${insertions.length} items, but Linkwise applies max ${MAX_PER_BATCH} per batch. ` +
+                    `Please deselect some entries or apply in two passes.`,
+                    { duration: 12000 },
+                );
+                return;
+            }
+
             this.closeSuggestModal();
+
+            // Push the inbound-insert into the unified bulk-banner state
+            // so the user sees a live "Adding inbound links to <entry>"
+            // banner during the synchronous request — same UX surface as
+            // the heavy bulks (Apply Rule, URL Changer, etc.). Without
+            // this the user submitted, then nothing visible until the
+            // toast fired (jarring with 80+ items in flight).
+            const entryTitle = this.suggestModal?.entryTitle || '';
+            setHeavyState({
+                kind: 'inbound-insert',
+                label: 'Adding inbound links',
+                current: 0,
+                total: insertions.length,
+                context: { entryTitle },
+            });
 
             try {
                 const response = await fetch(insertUrl, {
@@ -761,27 +792,80 @@ export default {
                 });
                 if (response.status === 409) {
                     const err = await response.json().catch(() => ({}));
-                    Statamic.$toast.error(err.message || 'Content was modified. Please reload.');
+                    setHeavyState(null);
+                    recordCompletion({
+                        kind: 'inbound-insert',
+                        label: 'Adding inbound links',
+                        phase: 'error',
+                        current: 0,
+                        total: insertions.length,
+                        extra: { message: err.message || 'Content was modified. Please reload and try again.' },
+                    });
+                    Statamic.$toast.error(err.message || 'Content was modified. Please reload and try again.');
                     return;
                 }
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
-                    Statamic.$toast.error(err.message || `Could not add links: HTTP ${response.status}`);
+                    const fieldErrors = err.errors ? Object.values(err.errors).flat() : [];
+                    const detail = fieldErrors[0]
+                        || err.message
+                        || `HTTP ${response.status}`;
+                    setHeavyState(null);
+                    recordCompletion({
+                        kind: 'inbound-insert',
+                        label: 'Adding inbound links',
+                        phase: 'error',
+                        current: 0,
+                        total: insertions.length,
+                        extra: { message: `Could not add links: ${detail}` },
+                    });
+                    Statamic.$toast.error(
+                        `Could not add links: ${detail} If this persists, download the diagnostic ZIP via Help → and share with support.`,
+                        { duration: 12000 },
+                    );
                     return;
                 }
                 const data = await response.json();
                 const succeeded = (data.results || []).filter(r => r.success).length;
                 const failed = (data.results || []).length - succeeded;
+                setHeavyState(null);
+                recordCompletion({
+                    kind: 'inbound-insert',
+                    label: 'Adding inbound links',
+                    phase: 'done',
+                    current: succeeded,
+                    total: insertions.length,
+                    extra: { succeeded, skipped: failed, entry_title: entryTitle },
+                });
                 if (succeeded > 0 && failed === 0) {
                     Statamic.$toast.success(`${succeeded} link(s) added.`);
                 } else if (succeeded > 0 && failed > 0) {
-                    Statamic.$toast.success(`${succeeded} link(s) added, ${failed} skipped.`);
+                    Statamic.$toast.success(`${succeeded} link(s) added, ${failed} skipped (anchor text not found in entry — re-scan content if recently edited).`);
                 } else {
-                    Statamic.$toast.error(`Could not add links: 0 of ${insertions.length} succeeded.`);
+                    const reasons = (data.results || [])
+                        .map(r => r.error)
+                        .filter(Boolean);
+                    const top = reasons[0] || 'Anchor text not found in entries — try re-scanning content';
+                    Statamic.$toast.error(
+                        `Could not add any of the ${insertions.length} links: ${top}.`,
+                        { duration: 12000 },
+                    );
                 }
                 this.reloadEntries();
             } catch (e) {
-                Statamic.$toast.error(`Could not add links: ${e.message || 'network error'}`);
+                setHeavyState(null);
+                recordCompletion({
+                    kind: 'inbound-insert',
+                    label: 'Adding inbound links',
+                    phase: 'error',
+                    current: 0,
+                    total: insertions.length,
+                    extra: { message: `Network error: ${e.message || 'unknown'}` },
+                });
+                Statamic.$toast.error(
+                    `Could not add links — ${e.message || 'network error'}. Check your connection and retry.`,
+                    { duration: 12000 },
+                );
             }
         },
 
@@ -805,7 +889,32 @@ export default {
                 anchor_text: g._anchor,
             }));
 
+            // Same client-side cap as Inbound — backend cap is 200,
+            // mirror it client-side with a useful message + alternative.
+            const MAX_PER_BATCH = 200;
+            if (insertions.length > MAX_PER_BATCH) {
+                Statamic.$toast.error(
+                    `You selected ${insertions.length} suggestions, but Linkwise applies max ${MAX_PER_BATCH} per batch. ` +
+                    `Please deselect some or apply in two passes.`,
+                    { duration: 12000 },
+                );
+                return;
+            }
+
             this.closeSuggestModal();
+
+            // Same bulk-banner integration as Inbound — show "Adding outbound
+            // links from <entry>" while the request is in flight, persist a
+            // completion banner for the result. Visual parity with Heavy
+            // bulks like Apply Rule / URL Changer.
+            const outboundEntryTitle = this.suggestModal?.entryTitle || '';
+            setHeavyState({
+                kind: 'outbound-insert',
+                label: 'Adding outbound links',
+                current: 0,
+                total: insertions.length,
+                context: { entryTitle: outboundEntryTitle },
+            });
 
             try {
                 const response = await fetch(insertUrl, {
@@ -823,26 +932,80 @@ export default {
                 });
                 if (response.status === 409) {
                     const err = await response.json().catch(() => ({}));
-                    Statamic.$toast.error(err.message || 'Content was modified. Please reload.');
+                    setHeavyState(null);
+                    recordCompletion({
+                        kind: 'outbound-insert',
+                        label: 'Adding outbound links',
+                        phase: 'error',
+                        current: 0,
+                        total: insertions.length,
+                        extra: { message: err.message || 'Content was modified. Please reload and try again.' },
+                    });
+                    Statamic.$toast.error(err.message || 'Content was modified. Please reload and try again.');
                     return;
                 }
                 if (!response.ok) {
-                    Statamic.$toast.error(`Could not add links: HTTP ${response.status}`);
+                    const err = await response.json().catch(() => ({}));
+                    const fieldErrors = err.errors ? Object.values(err.errors).flat() : [];
+                    const detail = fieldErrors[0]
+                        || err.message
+                        || `HTTP ${response.status}`;
+                    setHeavyState(null);
+                    recordCompletion({
+                        kind: 'outbound-insert',
+                        label: 'Adding outbound links',
+                        phase: 'error',
+                        current: 0,
+                        total: insertions.length,
+                        extra: { message: `Could not add links: ${detail}` },
+                    });
+                    Statamic.$toast.error(
+                        `Could not add links: ${detail} If this persists, download the diagnostic ZIP via Help → and share with support.`,
+                        { duration: 12000 },
+                    );
                     return;
                 }
                 const data = await response.json();
                 const succeeded = (data.results || []).filter(r => r.success).length;
                 const failed = (data.results || []).length - succeeded;
+                setHeavyState(null);
+                recordCompletion({
+                    kind: 'outbound-insert',
+                    label: 'Adding outbound links',
+                    phase: 'done',
+                    current: succeeded,
+                    total: insertions.length,
+                    extra: { succeeded, skipped: failed, entry_title: outboundEntryTitle },
+                });
                 if (succeeded > 0 && failed === 0) {
                     Statamic.$toast.success(`${succeeded} link(s) added.`);
                 } else if (succeeded > 0 && failed > 0) {
-                    Statamic.$toast.success(`${succeeded} link(s) added, ${failed} skipped.`);
+                    Statamic.$toast.success(`${succeeded} link(s) added, ${failed} skipped (anchor text not found in entry — re-scan content if recently edited).`);
                 } else {
-                    Statamic.$toast.error(`Could not add links: 0 of ${insertions.length} succeeded.`);
+                    const reasons = (data.results || [])
+                        .map(r => r.error)
+                        .filter(Boolean);
+                    const top = reasons[0] || 'Anchor text not found in entry — try re-scanning content';
+                    Statamic.$toast.error(
+                        `Could not add any of the ${insertions.length} links: ${top}.`,
+                        { duration: 12000 },
+                    );
                 }
                 this.reloadEntries();
             } catch (e) {
-                Statamic.$toast.error(`Could not add links: ${e.message || 'network error'}`);
+                setHeavyState(null);
+                recordCompletion({
+                    kind: 'outbound-insert',
+                    label: 'Adding outbound links',
+                    phase: 'error',
+                    current: 0,
+                    total: insertions.length,
+                    extra: { message: `Network error: ${e.message || 'unknown'}` },
+                });
+                Statamic.$toast.error(
+                    `Could not add links — ${e.message || 'network error'}. Check your connection and retry.`,
+                    { duration: 12000 },
+                );
             }
         },
 
