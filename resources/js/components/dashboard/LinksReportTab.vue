@@ -61,8 +61,8 @@
         </Alert>
 
         <!-- Filter Bar -->
-        <div class="flex items-center justify-between mb-4">
-            <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-y-2 mb-4">
+            <div class="flex flex-wrap items-center gap-3 gap-y-2">
                 <!-- Native <select> is intentional: Statamic's Select is a searchable Combobox,
                      overkill and laggy for a small static collection list -->
                 <select
@@ -83,15 +83,15 @@
                         aria-label="Search entries"
                     />
                 </div>
-                <label class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer" v-tooltip="'Show only entries with zero inbound links (not linked from any other page)'">
+                <label class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer whitespace-nowrap" v-tooltip="'Show only entries with zero inbound links (not linked from any other page)'">
                     <input type="checkbox" v-model="showOrphanedOnly" class="rounded">
                     Orphaned only
                 </label>
-                <label class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer" v-tooltip="'Show only entries that contain a link pointing to themselves'">
+                <label class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer whitespace-nowrap" v-tooltip="'Show only entries that contain a link pointing to themselves'">
                     <input type="checkbox" v-model="showSelfLinksOnly" class="rounded">
                     Self-links only
                 </label>
-                <label class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer" v-tooltip="'Show only entries where inbound or outbound suggestions match another entry\'s title directly — the strongest link opportunities'">
+                <label class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer whitespace-nowrap" v-tooltip="'Show only entries where inbound or outbound suggestions match another entry\'s title directly — the strongest link opportunities'">
                     <input type="checkbox" v-model="showTitleMatchesOnly" class="rounded">
                     Title matches only
                 </label>
@@ -157,10 +157,10 @@
                         :key="entry.id"
                         :class="{ 'bg-red-50 dark:bg-red-900/10': entry.is_orphaned }"
                     >
-                        <td>
+                        <td class="break-words">
                             <div class="flex items-center gap-1.5">
                                 <span v-if="entry.is_orphaned" class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" v-tooltip="'Orphaned — no inbound links'"></span>
-                                <a :href="entry.edit_url" target="_blank" class="cursor-pointer hover:text-blue-600 dark:hover:text-blue-400">
+                                <a :href="entry.edit_url" target="_blank" class="cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 break-words">
                                     {{ entry.title }}
                                 </a>
                             </div>

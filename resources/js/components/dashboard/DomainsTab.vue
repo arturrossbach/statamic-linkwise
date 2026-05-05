@@ -37,8 +37,8 @@
         </Alert>
 
         <!-- Filter Bar -->
-        <div class="flex items-center justify-between mb-4">
-            <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-y-2 mb-4">
+            <div class="flex flex-wrap items-center gap-3 gap-y-2">
                 <input
                     v-model="searchQuery"
                     type="text"
@@ -59,7 +59,7 @@
                     <option value="ugc" title="rel=ugc nofollow — user-generated content">UGC</option>
                 </select>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center gap-3 gap-y-2">
                 <span class="text-xs text-gray-400">
                     <strong class="text-gray-600 dark:text-gray-300">{{ totalLinks }}</strong> link{{ totalLinks === 1 ? '' : 's' }} across
                     <strong class="text-gray-600 dark:text-gray-300">{{ sortedDomains.length }}</strong>

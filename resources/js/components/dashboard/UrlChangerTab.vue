@@ -97,7 +97,7 @@
         <div v-if="matches.length > 0">
             <!-- Actions Bar -->
             <Card class="mb-4">
-                <div class="flex items-center gap-3">
+                <div class="flex flex-wrap items-center gap-3 gap-y-2">
                     <label class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">New URL:</label>
                     <div class="flex-1">
                         <Input

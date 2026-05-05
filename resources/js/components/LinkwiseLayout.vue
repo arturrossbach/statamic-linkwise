@@ -86,12 +86,16 @@
                  plus a one-click action to re-run. Auto-disappears on the next
                  page-render after a fresh check completes. -->
             <Alert v-if="showStaleCheck" variant="warning" class="mb-4" role="status">
-                <div class="flex items-start justify-between gap-4 text-sm">
-                    <div class="flex-1 min-w-0">
+                <!-- Always-stacked layout (text always on top, actions below).
+                     Side-by-side gets visually cramped on narrower viewports
+                     — full-width text + actions row reads cleaner on every
+                     screen size. -->
+                <div class="flex flex-col gap-3 text-sm">
+                    <div>
                         <p class="font-medium">{{ staleCheckTitle }}</p>
                         <p class="mt-0.5 text-xs opacity-80">{{ staleCheckBody }}</p>
                     </div>
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                         <Button @click="runStaleCheck" :loading="checkingFromBanner" :disabled="!!activeBulk" text="Run check now" size="sm" />
                         <Button @click="dismissStaleCheck" text="Dismiss" variant="default" size="xs" />
                     </div>

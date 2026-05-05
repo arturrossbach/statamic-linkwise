@@ -16,8 +16,8 @@
         </Card>
 
         <!-- Filter -->
-        <div class="flex items-center justify-between mb-4">
-            <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-y-2 mb-4">
+            <div class="flex flex-wrap items-center gap-3 gap-y-2">
                 <div class="w-64">
                     <Input
                         v-model="searchQuery"
