@@ -1,0 +1,25 @@
+{
+  "cookies": [
+    {
+      "name": "XSRF-TOKEN",
+      "value": "eyJpdiI6IkJ2bmZpTjF5eTRQajVyV0QzeDF6YlE9PSIsInZhbHVlIjoiaXFXaHlPVkQyVXdSTUF0aXpCZ3IxSnk1WHozM0RqL3VpZ3lmTm1adndId2tsdU9ITEVDaWlZRzB1K2EwUUtReHFiSnpiVXg0YlVsaDBrclRBdDdrQk42bEZHVExhbjlXK0VaYWdONkF1VVREUDc5aGNDYlU1NVYzRmFPK0hRTE8iLCJtYWMiOiI5MjgyNGRiMzVlNzk0YWRjODIwNTM4Nzk5ZjY3N2VkMTdkMDZkMzEzYWRmZWMzYTFmYjZlMTU1ZTBkYTdiZGMyIiwidGFnIjoiIn0%3D",
+      "domain": "prose-peak-test.test",
+      "path": "/",
+      "expires": 1775237841.012014,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "statamic-session",
+      "value": "eyJpdiI6IkI2Sk90RjIvQWFvNEY5T0tjV2xMaEE9PSIsInZhbHVlIjoiQWFqZVpEVkhvR0daWUgzbFc4SHdPVE5xbEpxYUlPTjk1bSs4Qk14MkN0enlaaU44RVNYbmFOU2I0d1BLRkdlOWcrcmw5OFh0ZC90UG1XNXZNOFhHTjVORitkaGhYQ3RIT0xLMFVTeUZoRlFFMnEwekFldm5pbnFPQm9SVk9JTE4iLCJtYWMiOiI5MGViZmNkNmVlMzk2MDAzNzRmOGE0ZDQ5ZjdhZjcyM2E4NDBiYTE5N2ZlMGFhNTEwOWY3ZDlkMWE2MTNkODY2IiwidGFnIjoiIn0%3D",
+      "domain": "prose-peak-test.test",
+      "path": "/",
+      "expires": 1775237841.012092,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}

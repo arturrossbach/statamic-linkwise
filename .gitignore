@@ -1,0 +1,11 @@
+/node_modules
+/vendor
+composer.lock
+package-lock.json
+.phpunit.result.cache
+/resources/dist
+/docs/.vitepress/dist
+/docs/.vitepress/cache
+.claude/settings.local.json
+*.iml
+/test-results

@@ -1,0 +1,353 @@
+<?php
+
+namespace Inkline\Linkwise\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Inkline\Linkwise\AutoLink\AutoLinkApplier;
+use Inkline\Linkwise\AutoLink\AutoLinkManager;
+use Inkline\Linkwise\Indexer\EntryIndexer;
+use Inkline\Linkwise\Support\JobLock;
+use Inkline\Linkwise\Support\SafeEntrySaver;
+
+/**
+ * Detached artisan command that applies a single auto-link rule to all matching entries.
+ * Invoked by AutoLinkController::apply (async path) which writes the payload to cache
+ * and dispatches this command via `exec(... &)`.
+ *
+ * Progress is reported via Cache so the frontend can poll, survive tab switches
+ * and reloads, and offer cancellation.
+ */
+class ApplyRuleCommand extends Command
+{
+    protected $signature = 'linkwise:apply-rule';
+
+    protected $description = 'Apply a queued auto-link rule (invoked by the Auto-Linking UI)';
+
+    public function __construct(
+        protected AutoLinkManager $manager,
+        protected EntryIndexer $indexer,
+    ) {
+        parent::__construct();
+    }
+
+    public function handle(): int
+    {
+        // Detached background commands shouldn't be killed by PHP's
+        // max_execution_time. Bulk-runs across hundreds of entries can take
+        // minutes; the default 30s would trigger a hard kill mid-job, leaving
+        // entries half-modified and the JobLock stuck on 'running'.
+        @set_time_limit(0);
+
+        // If the process dies (segfault, OOM, server restart, kill -9), our
+        // normal status-cache writes never reach 'done'. Frontend would see
+        // a stale 'running' for the full TTL. Register a shutdown-time guard
+        // that flips the phase to 'error' if we never reached a terminal one.
+        JobLock::registerCrashGuard('linkwise:applyrule:status', 'linkwise:applyrule:payload');
+
+        $payload = Cache::get('linkwise:applyrule:payload');
+        if (! is_array($payload)) {
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'error',
+                'message' => 'No payload found in cache.',
+            ], 120);
+
+            return self::FAILURE;
+        }
+
+        // Multi-rule mode: payload has `rule_ids` array → iterate sequentially,
+        // single JobLock, single banner, nested progress (rule X of Y).
+        // Used by "Apply Selected" in the Auto-Linking tab.
+        if (isset($payload['rule_ids']) && is_array($payload['rule_ids'])) {
+            return $this->handleMultiple($payload);
+        }
+
+        // Legacy single-rule mode: payload has `rule_id` → process one rule.
+        // Used by per-row Apply button in the Auto-Linking tab.
+        if (! isset($payload['rule_id'])) {
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'error',
+                'message' => 'Payload missing rule_id or rule_ids.',
+            ], 120);
+
+            return self::FAILURE;
+        }
+
+        $rule = $this->manager->getRule($payload['rule_id']);
+        if (! $rule) {
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'error',
+                'message' => 'Rule not found.',
+            ], 120);
+
+            return self::FAILURE;
+        }
+
+        // Verify hashes BEFORE the long apply — same protection as the sync path.
+        $entryHashes = $payload['entry_hashes'] ?? [];
+        $conflictedEntries = SafeEntrySaver::verifyHashes(is_array($entryHashes) ? $entryHashes : []);
+
+        $userExcluded = $payload['excluded_entry_ids'] ?? [];
+        $userExcluded = is_array($userExcluded) ? array_values(array_filter($userExcluded, 'is_string')) : [];
+
+        // Pre-flight: estimate total via preview so the UI has a meaningful "current/total" number.
+        $applier = new AutoLinkApplier($this->indexer, $this->manager);
+        $applier->setExcludedEntries(array_values(array_unique(
+            array_merge(array_keys($conflictedEntries), $userExcluded)
+        )));
+
+        $preview = $applier->applyRule($rule, true);
+        $totalEstimate = count($preview['affected_entries'] ?? []);
+
+        Cache::put('linkwise:applyrule:status', [
+            'phase' => 'running',
+            'rule_id' => $rule->id,
+            'rule_keyword' => $rule->keyword,
+            'current' => 0,
+            'total' => $totalEstimate,
+            'links_added' => 0,
+            'heartbeat' => time(),
+        ], 600);
+
+        // Throttle progress writes to ~3/sec to avoid hammering the cache while
+        // the applier walks every record.
+        $lastProgressWrite = 0;
+        $progressCallback = function (int $processed, int $totalRecords, int $linksAdded) use ($rule, $totalEstimate, &$lastProgressWrite) {
+            $now = microtime(true);
+            if (($now - $lastProgressWrite) < 0.33 && $processed < $totalRecords) {
+                return; // skip this tick — the next one will catch up
+            }
+            $lastProgressWrite = $now;
+
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'running',
+                'rule_id' => $rule->id,
+                'rule_keyword' => $rule->keyword,
+                'current' => $linksAdded,
+                'total' => $totalEstimate,
+                'records_processed' => $processed,
+                'records_total' => $totalRecords,
+                'links_added' => $linksAdded,
+                'heartbeat' => time(),
+            ], 600);
+        };
+
+        try {
+            $result = $applier->applyRule($rule, false, $progressCallback);
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] ApplyRuleCommand failed: '.$e->getMessage());
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'error',
+                'message' => mb_substr($e->getMessage(), 0, 240),
+            ], 300);
+
+            return self::FAILURE;
+        }
+
+        if (Cache::get('linkwise:applyrule:cancel')) {
+            Cache::forget('linkwise:applyrule:cancel');
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'cancelled',
+                'rule_id' => $rule->id,
+                'links_added' => $result['links_added'] ?? 0,
+            ], 300);
+            $this->finalizeIndex();
+
+            return self::SUCCESS;
+        }
+
+        // Reindex so outboundLinks reflect the inserted links — same as sync controller path.
+        if (($result['links_added'] ?? 0) > 0) {
+            $this->finalizeIndex();
+        }
+
+        // Stamp the rule with last-applied metadata so the table can render
+        // "Last applied: 2 minutes ago" instead of "Never".
+        try {
+            $this->manager->updateRule($rule->id, [
+                'last_applied_at' => now()->toIso8601String(),
+                'last_applied_links_added' => $result['links_added'] ?? 0,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] ApplyRuleCommand failed to stamp last-applied: '.$e->getMessage());
+        }
+
+        Cache::put('linkwise:applyrule:status', [
+            'phase' => 'done',
+            'rule_id' => $rule->id,
+            'rule_keyword' => $rule->keyword,
+            'current' => $result['links_added'] ?? 0,
+            'total' => $totalEstimate,
+            'links_added' => $result['links_added'] ?? 0,
+            'entries_skipped' => $result['entries_skipped'] ?? 0,
+            'conflicts' => array_values($conflictedEntries),
+        ], 300);
+        Cache::forget('linkwise:applyrule:payload');
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Multi-rule mode: apply a list of rules sequentially within a single
+     * heavy job. One JobLock, one banner with nested progress, one cancel
+     * point, one terminal toast — analog to UrlChangerApplyCommand's batch
+     * pattern. The frontend triggers this once and watches bulkState.
+     */
+    protected function handleMultiple(array $payload): int
+    {
+        $ruleIds = array_values(array_filter($payload['rule_ids'], 'is_string'));
+        $entryHashes = is_array($payload['entry_hashes'] ?? null) ? $payload['entry_hashes'] : [];
+        $userExcluded = $payload['excluded_entry_ids'] ?? [];
+        $userExcluded = is_array($userExcluded) ? array_values(array_filter($userExcluded, 'is_string')) : [];
+
+        $totalRules = count($ruleIds);
+        $totalLinksAdded = 0;
+        $ruleResults = []; // [rule_id => links_added]
+
+        if ($totalRules === 0) {
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'done',
+                'total_rules' => 0,
+                'total_links_added' => 0,
+                'rule_keyword' => '',
+            ], 300);
+            Cache::forget('linkwise:applyrule:payload');
+
+            return self::SUCCESS;
+        }
+
+        // Pre-flight hash check across ALL rule scopes — fail-soft (rules just
+        // skip the conflicted entries, doesn't abort the whole batch).
+        $conflictedEntries = SafeEntrySaver::verifyHashes($entryHashes);
+        $excludedAll = array_values(array_unique(
+            array_merge(array_keys($conflictedEntries), $userExcluded)
+        ));
+
+        foreach ($ruleIds as $idx => $ruleId) {
+            // Cancel mid-batch: stops cleanly, reports partial result.
+            if (Cache::get('linkwise:applyrule:cancel')) {
+                Cache::forget('linkwise:applyrule:cancel');
+                Cache::put('linkwise:applyrule:status', [
+                    'phase' => 'cancelled',
+                    'current_rule_index' => $idx,
+                    'total_rules' => $totalRules,
+                    'total_links_added' => $totalLinksAdded,
+                    'rule_results' => $ruleResults,
+                ], 300);
+                $this->finalizeIndex();
+                Cache::forget('linkwise:applyrule:payload');
+
+                return self::SUCCESS;
+            }
+
+            $rule = $this->manager->getRule($ruleId);
+            if (! $rule || ! $rule->active) {
+                continue;
+            }
+
+            $applier = new AutoLinkApplier($this->indexer, $this->manager);
+            $applier->setExcludedEntries($excludedAll);
+
+            try {
+                $preview = $applier->applyRule($rule, true);
+                $totalEstimate = count($preview['affected_entries'] ?? []);
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] ApplyRuleCommand multi preview failed for '.$rule->keyword.': '.$e->getMessage());
+                continue;
+            }
+
+            // Initial status for this rule — banner shows "rule X of Y".
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'running',
+                'rule_id' => $rule->id,
+                'rule_keyword' => $rule->keyword,
+                'current_rule_index' => $idx + 1,
+                'total_rules' => $totalRules,
+                'current' => 0,
+                'total' => $totalEstimate,
+                'links_added' => 0,
+                'total_links_added' => $totalLinksAdded,
+                'heartbeat' => time(),
+            ], 600);
+
+            $lastProgressWrite = 0;
+            $progressCallback = function (int $processed, int $totalRecords, int $linksAdded) use ($rule, $idx, $totalRules, $totalEstimate, $totalLinksAdded, &$lastProgressWrite) {
+                $now = microtime(true);
+                if (($now - $lastProgressWrite) < 0.33 && $processed < $totalRecords) {
+                    return;
+                }
+                $lastProgressWrite = $now;
+                Cache::put('linkwise:applyrule:status', [
+                    'phase' => 'running',
+                    'rule_id' => $rule->id,
+                    'rule_keyword' => $rule->keyword,
+                    'current_rule_index' => $idx + 1,
+                    'total_rules' => $totalRules,
+                    'current' => $linksAdded,
+                    'total' => $totalEstimate,
+                    'records_processed' => $processed,
+                    'records_total' => $totalRecords,
+                    'links_added' => $linksAdded,
+                    'total_links_added' => $totalLinksAdded + $linksAdded,
+                    'heartbeat' => time(),
+                ], 600);
+            };
+
+            try {
+                $result = $applier->applyRule($rule, false, $progressCallback);
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] ApplyRuleCommand multi apply failed for '.$rule->keyword.': '.$e->getMessage());
+                continue;
+            }
+
+            $linksAdded = $result['links_added'] ?? 0;
+            $totalLinksAdded += $linksAdded;
+            $ruleResults[$rule->id] = $linksAdded;
+
+            // Stamp last-applied per rule (same semantics as single-rule path).
+            try {
+                $this->manager->updateRule($rule->id, [
+                    'last_applied_at' => now()->toIso8601String(),
+                    'last_applied_links_added' => $linksAdded,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] ApplyRuleCommand multi stamp failed: '.$e->getMessage());
+            }
+        }
+
+        $this->finalizeIndex();
+
+        Cache::put('linkwise:applyrule:status', [
+            'phase' => 'done',
+            'total_rules' => $totalRules,
+            'total_links_added' => $totalLinksAdded,
+            'rule_results' => $ruleResults,
+            'conflicts' => array_values($conflictedEntries),
+            // Banner shows "Applied X rules" via the multi-rule label.
+            'rule_keyword' => '',
+        ], 300);
+        Cache::forget('linkwise:applyrule:payload');
+
+        return self::SUCCESS;
+    }
+
+    protected function finalizeIndex(): void
+    {
+        try {
+            $previousCount = count($this->indexer->load());
+            $this->indexer->clearCache();
+            $records = $this->indexer->buildIndex();
+            if (count($records) === 0 && $previousCount > 0) {
+                Log::warning(
+                    '[Linkwise] ApplyRuleCommand: refusing to save empty index (previous had '.$previousCount.' records)',
+                );
+
+                return;
+            }
+            $this->indexer->save($records);
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] ApplyRuleCommand finalizeIndex failed: '.$e->getMessage());
+        }
+    }
+}

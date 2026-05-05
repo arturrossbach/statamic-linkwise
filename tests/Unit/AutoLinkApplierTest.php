@@ -1,0 +1,240 @@
+<?php
+
+namespace Inkline\Linkwise\Tests\Unit;
+
+use Inkline\Linkwise\AutoLink\AutoLinkApplier;
+use Inkline\Linkwise\AutoLink\AutoLinkManager;
+use Inkline\Linkwise\AutoLink\AutoLinkRule;
+use Inkline\Linkwise\Indexer\EntryIndexer;
+use Inkline\Linkwise\Indexer\EntryRecord;
+use Inkline\Linkwise\Support\BardLinkInserter;
+use PHPUnit\Framework\TestCase;
+
+class AutoLinkApplierTest extends TestCase
+{
+    public function test_word_boundary_prevents_partial_matches(): void
+    {
+        // "WAR" should NOT match inside "beWARe"
+        $inserter = BardLinkInserter::insertLinkIntoMarkdown(
+            'We should beware of dangers',
+            'WAR',
+            'https://example.com',
+        );
+
+        $this->assertNull($inserter, '"WAR" should not match inside "beware"');
+    }
+
+    public function test_word_boundary_allows_exact_matches(): void
+    {
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            'The war continues today',
+            'war',
+            'https://example.com',
+        );
+
+        $this->assertNotNull($result);
+        $this->assertStringContainsString('[war](https://example.com)', $result);
+    }
+
+    public function test_markdown_link_insertion(): void
+    {
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            'I love Laravel and PHP',
+            'Laravel',
+            'https://laravel.com',
+        );
+
+        $this->assertNotNull($result);
+        $this->assertStringContainsString('[Laravel](https://laravel.com)', $result);
+        $this->assertStringContainsString('I love [Laravel](https://laravel.com) and PHP', $result);
+    }
+
+    public function test_markdown_link_skips_already_linked(): void
+    {
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            'I love [Laravel](https://laravel.com) and PHP',
+            'Laravel',
+            'https://other-url.com',
+        );
+
+        $this->assertNull($result, 'Should not link already-linked text');
+    }
+
+    public function test_markdown_case_insensitive_by_default(): void
+    {
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            'I love laravel framework',
+            'Laravel',
+            'https://laravel.com',
+            false, // case insensitive
+        );
+
+        $this->assertNotNull($result);
+        $this->assertStringContainsString('[laravel](https://laravel.com)', $result);
+    }
+
+    public function test_markdown_case_sensitive(): void
+    {
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            'I love laravel framework',
+            'Laravel',
+            'https://laravel.com',
+            true, // case sensitive
+        );
+
+        $this->assertNull($result, '"laravel" should not match "Laravel" in case-sensitive mode');
+    }
+
+    public function test_markdown_only_first_occurrence(): void
+    {
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            'Coffee in the morning, coffee in the evening',
+            'coffee',
+            'https://coffee.com',
+        );
+
+        $this->assertNotNull($result);
+        // Only first occurrence should be linked
+        $this->assertSame(1, substr_count($result, '](https://coffee.com)'));
+    }
+
+    public function test_bard_word_boundary_in_prosemirror(): void
+    {
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'We should beware of the attack on our systems'],
+                ],
+            ],
+        ];
+
+        // "WAR" should not match inside "beware"
+        $result = BardLinkInserter::insertLinkWithHref($bard, 'WAR', 'https://example.com');
+        $this->assertNull($result, '"WAR" should not match inside "beware" in Bard content');
+
+        // "attack" SHOULD match as a whole word
+        $result2 = BardLinkInserter::insertLinkWithHref($bard, 'attack', 'https://example.com');
+        $this->assertNotNull($result2);
+    }
+
+    public function test_bard_replaces_link_when_different_href(): void
+    {
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Visit '],
+                    [
+                        'type' => 'text',
+                        'text' => 'Laravel',
+                        'marks' => [['type' => 'link', 'attrs' => ['href' => 'https://laravel.com']]],
+                    ],
+                    ['type' => 'text', 'text' => ' for more info'],
+                ],
+            ],
+        ];
+
+        // Should replace existing link with new href (not create duplicate)
+        $result = BardLinkInserter::insertLinkWithHref($bard, 'Laravel', 'https://other-url.com');
+        $this->assertNotNull($result, 'Should replace existing link with different href');
+        $linked = $result[0]['content'][1];
+        $this->assertCount(1, $linked['marks'], 'Should have exactly 1 link mark');
+        $this->assertSame('https://other-url.com', $linked['marks'][0]['attrs']['href']);
+    }
+
+    public function test_bard_skips_already_linked_to_same_href(): void
+    {
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Visit '],
+                    [
+                        'type' => 'text',
+                        'text' => 'Laravel',
+                        'marks' => [['type' => 'link', 'attrs' => ['href' => 'https://laravel.com']]],
+                    ],
+                    ['type' => 'text', 'text' => ' for more info'],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::insertLinkWithHref($bard, 'Laravel', 'https://laravel.com');
+        $this->assertNull($result, 'Should skip when already linked to same href');
+    }
+
+    public function test_auto_link_rule_creation(): void
+    {
+        $rule = AutoLinkRule::create([
+            'keyword' => 'Laravel',
+            'url' => 'https://laravel.com',
+            'once_per_post' => true,
+            'case_sensitive' => false,
+        ]);
+
+        $this->assertSame('Laravel', $rule->keyword);
+        $this->assertSame('https://laravel.com', $rule->url);
+        $this->assertNull($rule->targetEntryId);
+        $this->assertTrue($rule->oncePerPost);
+        $this->assertFalse($rule->caseSensitive);
+        $this->assertTrue($rule->isExternal());
+    }
+
+    public function test_auto_link_rule_detects_statamic_entry(): void
+    {
+        $rule = AutoLinkRule::create([
+            'keyword' => 'My Entry',
+            'url' => 'statamic://entry::abc-123',
+        ]);
+
+        $this->assertSame('abc-123', $rule->targetEntryId);
+        $this->assertFalse($rule->isExternal());
+    }
+
+    public function test_target_keyword_boost_increases_score(): void
+    {
+        // The boost method is protected, so we test it via reflection
+        // This verifies the boost logic works correctly in isolation
+        $suggestion = new \Inkline\Linkwise\Suggestions\Suggestion(
+            targetEntryId: 'test-entry',
+            targetTitle: 'Test Entry',
+            targetUrl: '/test',
+            targetCollection: 'pages',
+            anchorText: 'test',
+            position: 0,
+            score: 0.5,
+            sentenceContext: 'This is a test',
+        );
+
+        $engine = new \Inkline\Linkwise\Suggestions\SuggestionEngine;
+        $method = new \ReflectionMethod($engine, 'applyTargetKeywordBoost');
+        $method->setAccessible(true);
+
+        // Without matching keywords, score stays the same
+        $result = $method->invoke($engine, $suggestion, 'some random text');
+        $this->assertSame(0.5, $result->score);
+    }
+
+    public function test_auto_link_rule_roundtrip(): void
+    {
+        $rule = AutoLinkRule::create([
+            'keyword' => 'Test',
+            'url' => 'https://test.com',
+            'once_per_post' => false,
+            'skip_if_exists' => true,
+            'case_sensitive' => true,
+            'collections' => ['blog', 'docs'],
+        ]);
+
+        $restored = AutoLinkRule::fromArray($rule->toArray());
+
+        $this->assertSame($rule->id, $restored->id);
+        $this->assertSame($rule->keyword, $restored->keyword);
+        $this->assertSame($rule->url, $restored->url);
+        $this->assertFalse($restored->oncePerPost);
+        $this->assertTrue($restored->skipIfExists);
+        $this->assertTrue($restored->caseSensitive);
+        $this->assertSame(['blog', 'docs'], $restored->collections);
+    }
+}

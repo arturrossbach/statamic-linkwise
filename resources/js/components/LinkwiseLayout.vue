@@ -1,0 +1,943 @@
+<template>
+    <div>
+        <Head :title="pageTitle" />
+
+        <Header title="Linkwise">
+            <template #icon>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-5 text-gray-500" aria-hidden="true">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+            </template>
+
+            <template #actions>
+                <slot name="actions">
+                    <div class="flex items-center gap-2">
+                        <Button @click="rebuildIndex" :loading="rebuilding" :disabled="!!activeBulk" text="Scan Content" icon="sync" v-tooltip="'Re-analyze all entries: extract text, keywords, and map internal links'" />
+                        <Dropdown align="end">
+                            <!-- Override the default dots-icon trigger with a
+                                 labeled "Help" button so users searching for
+                                 support actually find the menu. -->
+                            <template #trigger>
+                                <Button text="Help" icon="info" v-tooltip="'Documentation, diagnostic export, version'" />
+                            </template>
+                            <DropdownMenu>
+                                <DropdownItem text="Documentation" icon="external-link" @click="openDocs" />
+                                <DropdownSeparator />
+                                <DropdownItem text="Download diagnostic ZIP" icon="download" @click="downloadDebugExport(false)" />
+                                <DropdownItem text="Download diagnostic ZIP — with logs" icon="warning-diamond" @click="confirmDebugExportWithLogs" />
+                                <DropdownSeparator />
+                                <DropdownItem :text="`Linkwise ${linkwiseVersion}`" disabled />
+                            </DropdownMenu>
+                        </Dropdown>
+                    </div>
+                </slot>
+            </template>
+        </Header>
+
+        <!-- Empty State: auto-scan on first visit -->
+        <div v-if="isEmpty" class="py-12 text-center">
+            <Card class="max-w-md mx-auto">
+                <div class="py-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="size-12 mx-auto mb-4 text-gray-300 dark:text-gray-600">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <h3 v-if="!rebuilding" class="text-lg font-medium text-gray-700 dark:text-gray-300">Welcome to Linkwise</h3>
+                    <h3 v-else class="text-lg font-medium text-gray-700 dark:text-gray-300">Scanning your content...</h3>
+                    <p v-if="!rebuilding" class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-4">
+                        Scanning your content to discover link opportunities.
+                    </p>
+                    <p v-else class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-4">
+                        Analyzing entries, extracting keywords, and mapping links. This may take a moment.
+                    </p>
+                    <p v-if="rebuilding && activeBulk && activeBulk.total > 0" class="text-xs font-mono text-gray-500 dark:text-gray-400 mb-4">
+                        {{ activeBulk.current }} / {{ activeBulk.total }}
+                    </p>
+                    <Button v-if="!rebuilding" @click="rebuildIndex" variant="primary" text="Scan Now" />
+                </div>
+            </Card>
+        </div>
+
+        <!-- Tab Navigation + Content -->
+        <div v-else>
+            <nav class="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-4" aria-label="Linkwise tabs">
+                <Link
+                    v-for="tab in tabs"
+                    :key="tab.name"
+                    :href="tab.url"
+                    class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors"
+                    :class="tab.name === activeTab
+                        ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'"
+                    :preserve-scroll="false"
+                >
+                    {{ tab.label }}
+                </Link>
+            </nav>
+
+            <!-- Stale-check banner: visible on EVERY Linkwise tab when the
+                 content index is newer than the most recent broken-link check
+                 (>5min grace). Tells users their recent edits may have intro-
+                 duced new broken URLs that the latest check could not see —
+                 plus a one-click action to re-run. Auto-disappears on the next
+                 page-render after a fresh check completes. -->
+            <Alert v-if="showStaleCheck" variant="warning" class="mb-4" role="status">
+                <div class="flex items-start justify-between gap-4 text-sm">
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium">{{ staleCheckTitle }}</p>
+                        <p class="mt-0.5 text-xs opacity-80">{{ staleCheckBody }}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <Button @click="runStaleCheck" :loading="checkingFromBanner" :disabled="!!activeBulk" text="Run check now" size="sm" />
+                        <Button @click="dismissStaleCheck" text="Dismiss" variant="default" size="xs" />
+                    </div>
+                </div>
+            </Alert>
+
+            <!-- Completion banner: shown after a bulk operation finishes.
+                 Persistent + dismissible — users away from the screen during
+                 the toast can still see what happened. Hides automatically
+                 when a NEW bulk is running (replaced by the live banner). -->
+            <Alert v-if="lastCompletion && !activeBulk" :variant="completionBannerVariant" class="mb-4" role="status">
+                <div class="flex items-start justify-between gap-4 text-sm">
+                    <div class="flex items-center gap-2">
+                        <Icon :name="completionBannerIcon" class="size-4" />
+                        <span>{{ completionBannerLabel }}</span>
+                    </div>
+                    <Button @click="dismissCompletion" text="Dismiss" variant="default" size="xs" />
+                </div>
+            </Alert>
+
+            <!-- Recovery banner: shown when the user reloaded the page mid-bulk.
+                 Single goal: tell them WHAT happened (what was running, how far
+                 it got). No resume action — they can re-trigger the bulk
+                 themselves if needed, this is just status clarity. -->
+            <Alert v-if="interruptedBulk" variant="warning" class="mb-4" role="status">
+                <div class="flex items-start justify-between gap-4 text-sm">
+                    <div>
+                        <div class="font-medium">Previous bulk operation was interrupted.</div>
+                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            {{ interruptedBulkLabel }} — completed {{ interruptedBulk.current }} of {{ interruptedBulk.total }} before the page was reloaded.
+                            <span v-if="interruptedBulk.skipped > 0">{{ interruptedBulk.skipped }} skipped.</span>
+                            Re-run the same operation if you need the rest.
+                        </div>
+                    </div>
+                    <Button @click="dismissInterruptedBulk" text="Dismiss" variant="default" size="xs" />
+                </div>
+            </Alert>
+
+            <!-- Tab-spanning bulk-operation banner. Single source of truth for
+                 ALL bulks (light + heavy) — visible across every Linkwise tab.
+                 Switches to a "stuck" warning variant when the heartbeat is
+                 stale (process likely crashed without the shutdown-guard
+                 firing — e.g. server restart). User gets a Force-clear button. -->
+            <Alert v-if="activeBulk" :variant="bulkStuck ? 'warning' : 'default'" class="mb-4 sticky top-0 z-30 shadow-md" role="status" aria-live="polite">
+                <div class="flex items-center justify-between gap-2 text-sm">
+                    <div class="flex items-center gap-2">
+                        <span v-if="bulkStuck" class="font-medium">Operation may be stuck —</span>
+                        <span>{{ bulkBannerLabel }}</span>
+                        <span v-if="activeBulk.total > 0" class="font-mono text-xs text-gray-500 dark:text-gray-400">
+                            {{ activeBulk.current }} / {{ activeBulk.total }}
+                        </span>
+                        <span v-else-if="activeBulk.message" class="text-xs text-gray-500 dark:text-gray-400">
+                            {{ activeBulk.message }}
+                        </span>
+                        <span v-if="bulkStuck" class="text-xs text-gray-500 dark:text-gray-400">
+                            (no progress for {{ bulkStaleSeconds }}s)
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <Button v-if="bulkStuck" @click="forceClearBulk" :loading="forceClearing" text="Force-clear" variant="default" size="xs" />
+                        <Button v-if="activeBulk.canCancel && !bulkStuck" @click="cancelBulk" :loading="cancelling" text="Cancel" variant="default" size="xs" />
+                    </div>
+                </div>
+            </Alert>
+
+            <slot />
+        </div>
+
+        <!-- Debug-export "with logs" confirmation. Default download path is
+             GDPR-safe (counts + stats only) and runs without confirmation;
+             this modal only fires for the explicit log-bundled variant. -->
+        <ConfirmationModal
+            :open="confirmDebugWithLogs"
+            @update:open="confirmDebugWithLogs = $event"
+            @confirm="executeDebugExportWithLogs"
+            @cancel="confirmDebugWithLogs = false"
+            title="Include log files in the export?"
+            body-text="Logs may contain URLs from pages Linkwise has scanned. URLs can identify users (e.g. /users/john-doe) or contain sensitive query strings. Review the ZIP locally before sharing it with anyone."
+            button-text="Include logs and download"
+        />
+    </div>
+</template>
+
+<script>
+import { Head, Link } from '@statamic/cms/inertia';
+import { Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal } from '@statamic/cms/ui';
+import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterruptedBulk, recordCompletion, getLastCompletion, clearLastCompletion } from '../services/bulkOperationService.js';
+
+// Hardcoded for V1 — wire from composer.json via route props once we tag a
+// release. Visible at the bottom of the dropdown to help support reproduce
+// version-specific issues.
+const LINKWISE_VERSION = '1.0.0-dev';
+const DEBUG_EXPORT_URL = '/cp/linkwise/debug-export';
+const DOCS_URL = 'https://github.com/arturrossbach-cloud/statamic-linkwise#readme';
+
+export default {
+    components: { Head, Link, Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal },
+
+    props: {
+        activeTab: { type: String, required: true },
+        pageTitle: { type: String, default: 'Linkwise' },
+        isEmpty: { type: Boolean, default: false },
+        rebuildUrl: { type: String, required: true },
+        rebuildStatusUrl: { type: String, default: '' },
+        rebuildCancelUrl: { type: String, default: '' },
+    },
+
+    computed: {
+        // Surface the bundled version string in the header dropdown — quickest
+        // way for support to ask "what version are you running?".
+        linkwiseVersion() {
+            return LINKWISE_VERSION;
+        },
+
+        /**
+         * Stale-check signal from server (set by DashboardController::staleCheckProps).
+         * is_stale === true means the index has been rebuilt since the last
+         * broken-link check (>5min). Read from $page.props so every Linkwise
+         * page picks it up without each *Page.vue having to declare a prop.
+         */
+        staleCheck() {
+            return this.$page?.props?.staleCheck || null;
+        },
+
+        showStaleCheck() {
+            // Never stack on top of an active bulk — keeps visual hierarchy.
+            if (this.activeBulk) return false;
+            if (! this.staleCheck?.is_stale) return false;
+            // Dismiss persists per index-state (keyed by index_built_at).
+            // The user's dismissal sticks across reloads + tab navigations
+            // until the next scan changes the index timestamp — at which
+            // point the stored dismissal no longer matches and the banner
+            // resurfaces, because the staleness condition is genuinely new.
+            const dismissedFor = this.staleCheckDismissedFor;
+            const currentIndexAt = this.staleCheck?.index_built_at || '';
+            if (dismissedFor && dismissedFor === currentIndexAt) return false;
+            return true;
+        },
+
+        staleCheckTitle() {
+            if (!this.staleCheck?.broken_last_checked) {
+                return 'Broken-link check has never run';
+            }
+            return 'Recent edits may have introduced new broken links';
+        },
+
+        staleCheckBody() {
+            const c = this.staleCheck;
+            if (!c) return '';
+            if (!c.broken_last_checked) {
+                return 'Run the initial check to surface dead URLs across your content.';
+            }
+            return 'The content index has been updated since the last broken-link check. Re-run the check to catch any new dead URLs.';
+        },
+
+        // Single source of truth for "is anything running anywhere in Linkwise".
+        // Reads from the bulkOperationService reactive store — covers light ops
+        // (inbound-insert, detail-unlink, ...) AND heavy ops (scan, check,
+        // bulkunlink, applyrule) which are pushed in by pollBulkStatusOnce().
+        activeBulk() {
+            return bulkState.active;
+        },
+
+        // Backwards-compat for the empty-state Card and the Scan Content button.
+        // Was a local `rebuilding` data flag; now derived from the unified state.
+        rebuilding() {
+            return this.activeBulk?.kind === 'scan';
+        },
+
+        /**
+         * "Operation may be stuck" detector. Heartbeat is server-side time()
+         * stamped on every progress write. If we've seen no fresh heartbeat
+         * for >120s the process likely died without the shutdown-guard firing
+         * (e.g. server hard-restart). User can click Force-clear to recover.
+         */
+        bulkStuck() {
+            const a = this.activeBulk;
+            if (!a || !a.heartbeat) return false;
+            // tickClock is updated every 5s — drives reactivity for time-based comparison
+            const ageSec = (this.tickClock / 1000) - a.heartbeat;
+            return ageSec > 120;
+        },
+
+        bulkStaleSeconds() {
+            const a = this.activeBulk;
+            if (!a || !a.heartbeat) return 0;
+            return Math.round((this.tickClock / 1000) - a.heartbeat);
+        },
+
+        /**
+         * Variant for the completion banner — green for success, yellow for
+         * cancelled / partial, red for error. Mirrors fireTerminalToast logic
+         * but produces a persistent visual instead of a fading toast.
+         */
+        completionBannerVariant() {
+            const c = this.lastCompletion;
+            if (!c) return 'default';
+            if (c.phase === 'error') return 'error';
+            if (c.phase === 'cancelled') return 'warning';
+            // Done — was anything actually done?
+            const e = c.extra || {};
+            const skipped = e.skipped || 0;
+            const succeeded = e.succeeded ?? e.links_added ?? e.total_links_added ?? 0;
+            if (succeeded === 0 && skipped > 0) return 'warning';
+            return 'success';
+        },
+
+        completionBannerIcon() {
+            return ({
+                success: 'circle-check',
+                warning: 'circle-alert',
+                error: 'circle-x',
+                default: 'circle-info',
+            })[this.completionBannerVariant];
+        },
+
+        /**
+         * Human-readable summary of the completed bulk. Mirrors fireTerminalToast
+         * messages but rendered into the persistent banner instead of toasted.
+         */
+        completionBannerLabel() {
+            const c = this.lastCompletion;
+            if (!c) return '';
+            const e = c.extra || {};
+            const phase = c.phase;
+            const kind = c.kind;
+
+            if (phase === 'cancelled') {
+                return `${c.label || 'Operation'} cancelled.`;
+            }
+            if (phase === 'error') {
+                return e.message || `${c.label || 'Operation'} failed.`;
+            }
+            // phase === 'done'
+            if (kind === 'scan') {
+                return `Scanned ${e.entries_count || 0} entries in ${e.duration || 0}s.`;
+            }
+            if (kind === 'check') {
+                return 'Broken-link check complete.';
+            }
+            if (kind === 'applyrule') {
+                if (e.total_rules && e.total_rules > 1) {
+                    const total = e.total_links_added || 0;
+                    return total > 0
+                        ? `${total} link(s) added across ${e.total_rules} rule(s).`
+                        : `No new links to add for ${e.total_rules} rule(s).`;
+                }
+                const n = e.links_added || 0;
+                const kw = e.rule_keyword ? ` for "${e.rule_keyword}"` : '';
+                return n > 0 ? `${n} link(s) added${kw}.` : `No new links to add${kw}.`;
+            }
+            if (kind === 'bulkunlink') {
+                const n = e.succeeded || 0;
+                const skipped = e.skipped || 0;
+                if (n > 0 && skipped === 0) return `${n} link(s) removed.`;
+                if (n > 0) return `${n} link(s) removed, ${skipped} skipped.`;
+                return `Could not remove any links — ${skipped} skipped.`;
+            }
+            if (kind === 'urlchanger') {
+                const n = e.succeeded || 0;
+                const skipped = e.skipped || 0;
+                const verb = e.action === 'unlink' ? 'unlinked' : 'replaced';
+                if (n > 0 && skipped === 0) return `${n} URL(s) ${verb}.`;
+                if (n > 0) return `${n} URL(s) ${verb}, ${skipped} skipped.`;
+                return `Could not ${e.action || 'change'} any URLs — ${skipped} skipped.`;
+            }
+            if (kind === 'detailunlink') {
+                const n = e.succeeded || 0;
+                const skipped = e.skipped || 0;
+                const direction = e.source_mode === 'outbound' ? 'outbound' : 'inbound';
+                const t = e.entry_title ? ` for "${e.entry_title}"` : '';
+                if (n > 0 && skipped === 0) return `${n} ${direction} link(s) removed${t}.`;
+                if (n > 0) return `${n} ${direction} link(s) removed${t}, ${skipped} skipped.`;
+                return `Could not remove any ${direction} links${t} — ${skipped} skipped.`;
+            }
+            return `${c.label || 'Operation'} complete.`;
+        },
+
+        bulkBannerLabel() {
+            const a = this.activeBulk;
+            if (!a) return '';
+            const ctx = a.context || {};
+            const title = ctx.entryTitle ? `"${ctx.entryTitle}"` : '';
+
+            switch (a.kind) {
+                case 'inbound-insert':
+                    return title
+                        ? `Adding inbound links to ${title}`
+                        : 'Adding inbound links';
+                case 'outbound-insert':
+                    return title
+                        ? `Adding outbound links from ${title}`
+                        : 'Adding outbound links';
+                case 'detail-unlink':
+                    if (ctx.mode === 'inbound') return title ? `Removing inbound links to ${title}` : 'Removing inbound links';
+                    if (ctx.mode === 'outbound') return title ? `Removing outbound links from ${title}` : 'Removing outbound links';
+                    return 'Removing links';
+                case 'scan':
+                    return 'Scanning content';
+                case 'check':
+                    return 'Checking links';
+                case 'bulkunlink':
+                    return 'Removing broken links';
+                case 'applyrule': {
+                    // Two modes: single-rule (ruleKeyword) and multi-rule
+                    // (ruleIndex of totalRules). Multi-rule shows the current
+                    // rule's keyword PLUS the (X of Y) outer progress.
+                    if (ctx.totalRules && ctx.totalRules > 1) {
+                        const inner = ctx.ruleKeyword ? `"${ctx.ruleKeyword}"` : '...';
+                        return `Applying rule ${inner} (${ctx.ruleIndex || 1} of ${ctx.totalRules})`;
+                    }
+                    return ctx.ruleKeyword
+                        ? `Applying rule "${ctx.ruleKeyword}"`
+                        : 'Applying auto-link rule';
+                }
+                case 'urlchanger': {
+                    // Heavy URL Changer job — action+search+startedBy come via
+                    // context (set by the poller from the status payload's
+                    // `extra`). Owner-Tracking: if started_by present, append
+                    // "(by NAME)" so editors see whose run is blocking them.
+                    const action = ctx.action || 'apply';
+                    const verb = action === 'unlink' ? 'Unlinking' : 'Replacing';
+                    const base = ctx.search
+                        ? `${verb} URLs matching "${ctx.search}"`
+                        : `${verb} URLs`;
+                    return ctx.startedBy ? `${base} (by ${ctx.startedBy})` : base;
+                }
+                case 'detailunlink': {
+                    // Per-entry detail-modal bulk-unlink. Banner reflects the
+                    // semantic context (which entry, inbound vs outbound).
+                    const tStr = ctx.entryTitle ? `"${ctx.entryTitle}"` : '';
+                    const verb = ctx.sourceMode === 'outbound'
+                        ? `Removing outbound links from ${tStr}`
+                        : `Removing inbound links to ${tStr}`;
+                    return ctx.startedBy ? `${verb.trim()} (by ${ctx.startedBy})` : verb.trim();
+                }
+                default:
+                    return 'Working';
+            }
+        },
+
+        // Recovery-banner label: same kind→sentence mapping as the live
+        // banner, but reads from the persisted snapshot (interruptedBulk),
+        // not state.active. Kept inline so the two stay in sync visually.
+        interruptedBulkLabel() {
+            const a = this.interruptedBulk;
+            if (!a) return '';
+            const ctx = a.context || {};
+            switch (a.kind) {
+                case 'inbound-insert': return 'Adding inbound links';
+                case 'outbound-insert': return 'Adding outbound links';
+                case 'detail-unlink': return 'Removing links';
+                case 'scan': return 'Scanning content';
+                case 'check': return 'Checking links';
+                case 'bulkunlink': return 'Removing broken links';
+                case 'applyrule': return ctx.ruleKeyword ? `Applying rule "${ctx.ruleKeyword}"` : 'Applying auto-link rule';
+                case 'urlchanger-apply': return ctx.search ? `Replacing URLs matching "${ctx.search}"` : 'Replacing URLs';
+                case 'urlchanger-unlink': return ctx.search ? `Unlinking URLs matching "${ctx.search}"` : 'Unlinking URLs';
+                case 'urlchanger': {
+                    const action = ctx.action || 'apply';
+                    const verb = action === 'unlink' ? 'Unlinking' : 'Replacing';
+                    return ctx.search ? `${verb} URLs matching "${ctx.search}"` : `${verb} URLs`;
+                }
+                default: return a.label || 'Bulk operation';
+            }
+        },
+    },
+
+    data() {
+        return {
+            // Snapshot of an interrupted-bulk record from sessionStorage —
+            // populated on mount if the user reloaded mid-bulk. Drives the
+            // recovery banner; cleared via dismissInterruptedBulk().
+            interruptedBulk: null,
+            // Snapshot of the LAST COMPLETED bulk — drives a persistent
+            // dismissible banner so the user gets the outcome even if they
+            // missed the toast (away from screen / coffee break).
+            lastCompletion: null,
+            bulkPollTimer: null,
+            cancelling: false,
+            forceClearing: false,
+            // Reactive 5s clock — drives time-based computeds like bulkStuck
+            // (without it Vue wouldn't recompute "is heartbeat stale?" since
+            // heartbeat is set once and Date.now() isn't reactive).
+            tickClock: Date.now(),
+            tickClockTimer: null,
+            // Stale-check banner state. dismissedFor stores the index_built_at
+            // value the user dismissed for — persists across reloads via
+            // sessionStorage (initialised in mounted) so dismissing actually
+            // sticks until the next scan changes the index timestamp.
+            checkingFromBanner: false,
+            staleCheckDismissedFor: null,
+            // Debug-export "with logs" requires explicit confirmation because
+            // log files may contain URLs from scanned pages. Modal opens via
+            // dropdown, user confirms, only then does the download fire.
+            confirmDebugWithLogs: false,
+            // Per-kind flag set when the poller has observed a non-terminal phase
+            // in THIS instance. Prevents firing stale completion toasts/actions
+            // when a 'done' state is still in the server cache from a previous
+            // session (cache TTL 300s would otherwise cause reload loops on scan).
+            seenRunning: { scan: false, check: false, bulkunlink: false, applyrule: false, urlchanger: false, detailunlink: false },
+            tabs: [
+                { name: 'overview', label: 'Overview', url: this.route('linkwise.dashboard') },
+                { name: 'links', label: 'Links Report', url: this.route('linkwise.links') },
+                { name: 'broken', label: 'Broken Links', url: this.route('linkwise.broken') },
+                { name: 'domains', label: 'Domains', url: this.route('linkwise.domains') },
+                { name: 'autolink', label: 'Auto-Linking', url: this.route('linkwise.autolink') },
+                { name: 'keywords', label: 'Target Keywords', url: this.route('linkwise.keywords') },
+                { name: 'urlchanger', label: 'URL Changer', url: this.route('linkwise.urlchanger') },
+            ],
+        };
+    },
+
+    async mounted() {
+        // Pick up any interrupted-bulk record left over from a mid-operation
+        // page reload. Drives the recovery banner — info-only, user dismisses
+        // when reviewed.
+        this.interruptedBulk = getInterruptedBulk();
+        // Pick up the last-completed-bulk result so the persistent banner
+        // survives tab switches and reloads — toast might be gone after 12s
+        // but the user might still want to know "did my apply finish OK".
+        this.lastCompletion = getLastCompletion();
+
+        // Restore the persisted "dismissed for which index_built_at" marker
+        // so reloads + tab switches don't resurrect the stale-check banner
+        // the user already acknowledged. The next scan invalidates this
+        // because index_built_at changes and the comparison stops matching.
+        try {
+            this.staleCheckDismissedFor = sessionStorage.getItem('linkwise:staleCheck:dismissedFor');
+        } catch {
+            // private mode / quota — non-critical, banner just won't stay dismissed
+        }
+
+        // Tick the reactive clock every 5s so bulkStuck recomputes — without
+        // this the heartbeat-staleness check would never re-evaluate.
+        this.tickClockTimer = setInterval(() => { this.tickClock = Date.now(); }, 5000);
+
+        // Unified bulk-status poller: replaces the old per-job polling
+        // (rebuild + apply-async). Runs on every Linkwise tab so progress +
+        // completion toasts work no matter where the user is.
+        await this.pollBulkStatusOnce();
+        this.startBulkStatusPolling();
+
+        // Auto-scan on first visit if nothing else is already running.
+        if (this.isEmpty && !bulkState.active) {
+            this.rebuildIndex();
+        }
+    },
+
+    beforeUnmount() {
+        this.stopBulkStatusPolling();
+        if (this.tickClockTimer) clearInterval(this.tickClockTimer);
+    },
+
+    methods: {
+        /**
+         * Banner CTA: kick off a broken-link check. Reuses the existing
+         * /linkwise/check-links endpoint so the unified bulk-status poller
+         * picks up the running phase and renders the live progress banner —
+         * the stale-check banner stays out of the way once the check starts.
+         */
+        async runStaleCheck() {
+            const url = this.staleCheck?.check_url;
+            if (!url) return;
+            this.checkingFromBanner = true;
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': Statamic.$config.get('csrfToken'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                });
+                if (response.status === 409) {
+                    const data = await response.json().catch(() => ({}));
+                    Statamic.$toast.info(data.message || 'Another bulk operation is running.');
+                    return;
+                }
+                if (!response.ok) {
+                    Statamic.$toast.error('Failed to start link check.');
+                    return;
+                }
+                // Trigger an immediate poll so the live banner shows up
+                // without 1.5s lag.
+                this.pollBulkStatusOnce();
+            } catch (error) {
+                Statamic.$toast.error('Failed to start link check.');
+                console.error('[Linkwise]', error);
+            } finally {
+                this.checkingFromBanner = false;
+            }
+        },
+
+        dismissStaleCheck() {
+            // Persist the dismissal scoped to the current index timestamp.
+            // Reloads + tab switches honour it; the next scan changes
+            // index_built_at and the comparison in showStaleCheck stops
+            // matching, so a genuinely-new staleness condition resurfaces.
+            const indexAt = this.staleCheck?.index_built_at || '';
+            this.staleCheckDismissedFor = indexAt;
+            try {
+                sessionStorage.setItem('linkwise:staleCheck:dismissedFor', indexAt);
+            } catch {
+                // private mode — banner just won't stay dismissed across reload
+            }
+        },
+
+        /**
+         * Open the README for this addon in a new tab. Lives in the header
+         * dropdown so it's reachable from every Linkwise page.
+         */
+        openDocs() {
+            window.open(DOCS_URL, '_blank', 'noopener,noreferrer');
+        },
+
+        /**
+         * Trigger the debug-export download. The default path (no logs) is
+         * GDPR-safe by design: counts and stats only, no URLs from the user's
+         * site. Calling with includeLogs=true appends ?include_logs=1 — only
+         * fired AFTER the confirmation modal has been accepted.
+         *
+         * Uses a temp <a download> element instead of fetch() so the browser
+         * handles the binary stream natively (no need to convert to Blob).
+         */
+        downloadDebugExport(includeLogs = false) {
+            const url = includeLogs
+                ? `${DEBUG_EXPORT_URL}?include_logs=1`
+                : DEBUG_EXPORT_URL;
+            const a = document.createElement('a');
+            a.href = url;
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        },
+
+        /**
+         * Dropdown click for "Download with logs" — opens the confirmation
+         * modal. The actual download only fires when the user confirms.
+         */
+        confirmDebugExportWithLogs() {
+            this.confirmDebugWithLogs = true;
+        },
+
+        executeDebugExportWithLogs() {
+            this.confirmDebugWithLogs = false;
+            this.downloadDebugExport(true);
+        },
+
+        dismissInterruptedBulk() {
+            clearInterruptedBulk();
+            this.interruptedBulk = null;
+        },
+
+        dismissCompletion() {
+            clearLastCompletion();
+            this.lastCompletion = null;
+        },
+
+        route(name) {
+            // Statamic CP routes are prefixed with /cp/
+            const routes = {
+                'linkwise.dashboard': '/cp/linkwise',
+                'linkwise.links': '/cp/linkwise/links',
+                'linkwise.broken': '/cp/linkwise/broken',
+                'linkwise.domains': '/cp/linkwise/domains',
+                'linkwise.autolink': '/cp/linkwise/autolink',
+                'linkwise.keywords': '/cp/linkwise/keywords',
+                'linkwise.urlchanger': '/cp/linkwise/url-changer',
+            };
+            return routes[name] || '/cp/linkwise';
+        },
+
+        /**
+         * Start a content scan. Status updates flow through the unified
+         * bulk-status poller — no per-job polling here anymore.
+         */
+        async rebuildIndex() {
+            try {
+                const response = await fetch(this.rebuildUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': Statamic.$config.get('csrfToken'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                });
+
+                if (response.status === 409) {
+                    const data = await response.json().catch(() => ({}));
+                    Statamic.$toast.info(data.message || 'Another bulk operation is running. Wait for it to finish.');
+                    return;
+                }
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    Statamic.$toast.error(`Could not scan content: ${data?.error || data?.message || `HTTP ${response.status}`}`);
+                    return;
+                }
+
+                // Trigger an immediate poll so the banner shows up without 1s lag.
+                this.pollBulkStatusOnce();
+            } catch (error) {
+                Statamic.$toast.error(`Could not scan content: ${error.message || 'network error'}`);
+            }
+        },
+
+        startBulkStatusPolling() {
+            this.stopBulkStatusPolling();
+            this.bulkPollTimer = setInterval(() => this.pollBulkStatusOnce(), 1500);
+        },
+
+        stopBulkStatusPolling() {
+            if (this.bulkPollTimer) {
+                clearInterval(this.bulkPollTimer);
+                this.bulkPollTimer = null;
+            }
+        },
+
+        /**
+         * Poll the unified /linkwise/bulk-status endpoint. Pushes the active
+         * heavy job into bulkState so the banner reflects it; on terminal
+         * phases, fires the kind-specific completion toast (with sessionStorage
+         * dedup) and clears the heavy state.
+         */
+        async pollBulkStatusOnce() {
+            const url = this.cp_url('linkwise/bulk-status');
+            try {
+                const response = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!response.ok) return;
+                const status = await response.json();
+                const phase = status.phase || 'idle';
+
+                if (phase === 'idle') {
+                    setHeavyState(null);
+                    return;
+                }
+
+                if (!status.terminal) {
+                    // Active running phase: surface progress in the banner.
+                    if (status.kind && this.seenRunning[status.kind] !== undefined) {
+                        this.seenRunning[status.kind] = true;
+                    }
+                    // Build kind-specific context so the banner can render
+                    // detailed labels like 'Applying rule "keyword"'.
+                    const extra = status.extra || {};
+                    const context = {};
+                    if (status.kind === 'applyrule') {
+                        if (extra.rule_keyword) context.ruleKeyword = extra.rule_keyword;
+                        // Multi-rule run — banner shows nested progress.
+                        if (extra.total_rules) {
+                            context.totalRules = extra.total_rules;
+                            context.ruleIndex = extra.current_rule_index || 0;
+                        }
+                    }
+                    if (status.kind === 'urlchanger') {
+                        context.action = extra.action || 'apply';
+                        context.search = extra.search || '';
+                        // Hide owner label when it's the current user — "(by me)"
+                        // is just noise. Show only when a colleague started it.
+                        const currentUserId = (typeof Statamic !== 'undefined' && Statamic.user) ? Statamic.user.id : null;
+                        const ownedByOther = extra.started_by_id && currentUserId && extra.started_by_id !== currentUserId;
+                        context.startedBy = ownedByOther ? extra.started_by : null;
+                    }
+                    if (status.kind === 'detailunlink') {
+                        context.sourceMode = extra.source_mode || 'inbound';
+                        context.entryTitle = extra.entry_title || '';
+                        const currentUserId = (typeof Statamic !== 'undefined' && Statamic.user) ? Statamic.user.id : null;
+                        const ownedByOther = extra.started_by_id && currentUserId && extra.started_by_id !== currentUserId;
+                        context.startedBy = ownedByOther ? extra.started_by : null;
+                    }
+                    setHeavyState({
+                        kind: status.kind,
+                        label: status.label,
+                        current: status.current || 0,
+                        total: status.total || 0,
+                        message: status.message || null,
+                        cancelUrl: status.cancel_url || null,
+                        canCancel: !!status.cancel_url,
+                        // Server-side timestamp from each running-status write —
+                        // used by bulkStuck to detect dead processes.
+                        heartbeat: extra.heartbeat || null,
+                        context,
+                    });
+                    return;
+                }
+
+                // Terminal phase. Clear heavy state, dedup completion toast.
+                setHeavyState(null);
+
+                // Build a CONTENT-based signature so different runs of the
+                // same kind produce different signatures. Without the kind-
+                // specific extras, multi-rule runs ALL get signature
+                // `applyrule:done:0:0:` (because current/total live in
+                // status.extra for multi-mode) → dedup would block every
+                // run after the first.
+                const tExtra = status.extra || {};
+                let kindSig = '';
+                if (status.kind === 'applyrule') {
+                    kindSig = `:r${tExtra.total_rules || 0}:la${tExtra.total_links_added || tExtra.links_added || 0}`;
+                } else if (status.kind === 'urlchanger') {
+                    kindSig = `:a${tExtra.action || ''}:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
+                } else if (status.kind === 'detailunlink') {
+                    kindSig = `:m${tExtra.source_mode || ''}:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
+                } else if (status.kind === 'bulkunlink') {
+                    kindSig = `:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
+                }
+                const signature = `${status.kind}:${phase}:${status.current}:${status.total}:${status.message || ''}${kindSig}`;
+                const SEEN_KEY = 'linkwise:bulkToastShown';
+                if (sessionStorage.getItem(SEEN_KEY) === signature) return;
+                sessionStorage.setItem(SEEN_KEY, signature);
+
+                this.fireTerminalToast(status);
+
+                // Persist a snapshot of the completion so a dismissible banner
+                // shows the result even if the user was off-screen for the
+                // toast. Re-rendered on every mount via getLastCompletion().
+                const completionSnap = {
+                    kind: status.kind,
+                    label: status.label,
+                    phase,
+                    current: status.current,
+                    total: status.total,
+                    extra: status.extra || {},
+                };
+                recordCompletion(completionSnap);
+                this.lastCompletion = { ...completionSnap, recordedAt: Date.now() };
+
+                // Scan needs a full reload to refresh entries data — but only
+                // if WE observed the scan running in this layout instance.
+                // Otherwise stale 'done' from a previous session (cache TTL
+                // 300s) would cause an infinite reload loop.
+                if (status.kind === 'scan' && phase === 'done' && this.seenRunning.scan) {
+                    this.seenRunning.scan = false;
+                    window.location.reload();
+                }
+                // After a broken-link check, reload so staleCheck.is_stale
+                // re-computes server-side. Without this, the "Recent edits..."
+                // banner sticks around because Inertia keeps the prop value
+                // from before the check ran. Same once-per-instance guard
+                // pattern as scan to avoid infinite reload loops.
+                if (status.kind === 'check' && phase === 'done' && this.seenRunning.check) {
+                    this.seenRunning.check = false;
+                    window.location.reload();
+                }
+            } catch {
+                // transient errors — try again next tick
+            }
+        },
+
+        fireTerminalToast(status) {
+            const phase = status.phase;
+            const kind = status.kind;
+            const extra = status.extra || {};
+
+            if (phase === 'done') {
+                if (kind === 'scan') {
+                    Statamic.$toast.success(`Scanned ${extra.entries_count || 0} entries in ${extra.duration || 0}s.`);
+                } else if (kind === 'applyrule') {
+                    // Multi-rule: total_links_added + total_rules in payload
+                    if (extra.total_rules && extra.total_rules > 1) {
+                        const total = extra.total_links_added || 0;
+                        if (total > 0) Statamic.$toast.success(`${total} link(s) added across ${extra.total_rules} rule(s).`);
+                        else Statamic.$toast.info(`No new links to add for ${extra.total_rules} rule(s).`);
+                    } else {
+                        const n = extra.links_added || 0;
+                        const kw = extra.rule_keyword ? ` for "${extra.rule_keyword}"` : '';
+                        if (n > 0) Statamic.$toast.success(`${n} link(s) added${kw}.`);
+                        else Statamic.$toast.info(`No new links to add${kw}.`);
+                    }
+                } else if (kind === 'bulkunlink') {
+                    const n = extra.succeeded || 0;
+                    const skipped = extra.skipped || 0;
+                    if (n > 0 && skipped === 0) Statamic.$toast.success(`${n} link(s) removed.`);
+                    else if (n > 0) Statamic.$toast.success(`${n} link(s) removed, ${skipped} skipped.`);
+                    else Statamic.$toast.error(`Could not remove any links — ${skipped} skipped.`);
+                } else if (kind === 'detailunlink') {
+                    const n = extra.succeeded || 0;
+                    const skipped = extra.skipped || 0;
+                    const verb = extra.source_mode === 'outbound' ? 'outbound' : 'inbound';
+                    const t = extra.entry_title ? ` for "${extra.entry_title}"` : '';
+                    if (n > 0 && skipped === 0) Statamic.$toast.success(`${n} ${verb} link(s) removed${t}.`);
+                    else if (n > 0) Statamic.$toast.success(`${n} ${verb} link(s) removed${t}, ${skipped} skipped.`);
+                    else Statamic.$toast.error(`Could not remove any ${verb} links${t} — ${skipped} skipped.`);
+                } else if (kind === 'check') {
+                    Statamic.$toast.success('Broken-link check complete.');
+                } else if (kind === 'urlchanger') {
+                    const action = extra.action || 'apply';
+                    const verb = action === 'unlink' ? 'unlinked' : 'replaced';
+                    const succeeded = extra.succeeded || 0;
+                    const skipped = extra.skipped || 0;
+                    if (succeeded > 0 && skipped === 0) {
+                        Statamic.$toast.success(`${succeeded} URL(s) ${verb}.`);
+                    } else if (succeeded > 0) {
+                        Statamic.$toast.success(`${succeeded} URL(s) ${verb}, ${skipped} skipped.`);
+                    } else {
+                        // 0 succeeded — surface the top error reason so the
+                        // user sees WHY (e.g. stale index, conflicts).
+                        const errors = extra.errors || {};
+                        const reasons = Object.entries(errors).sort((a, b) => b[1] - a[1]);
+                        const topReason = reasons[0]?.[0] || 'unknown error';
+                        Statamic.$toast.error(`Could not ${action} URLs: ${topReason}`, { duration: 12000 });
+                    }
+                } else {
+                    Statamic.$toast.success(`${status.label || 'Task'} complete.`);
+                }
+            } else if (phase === 'cancelled') {
+                Statamic.$toast.info(`${status.label || 'Task'} cancelled.`);
+            } else if (phase === 'error') {
+                Statamic.$toast.error(extra.message || `${status.label || 'Task'} failed.`);
+            }
+        },
+
+        async cancelBulk() {
+            this.cancelling = true;
+            await cancelActive();
+            // Light cancel resolves immediately when the loop exits; heavy
+            // cancel needs a polling cycle to propagate. Reset the loading
+            // state after a short delay so the button doesn't lock up.
+            setTimeout(() => { this.cancelling = false; }, 1500);
+        },
+
+        /**
+         * Force-clear a stuck heavy-job. Called from the "Force-clear" button
+         * that appears in the banner when heartbeat staleness exceeds 120s.
+         * Hits POST /linkwise/bulk-clear/{kind} which calls JobLock::forceClear,
+         * wiping status / payload / cancel cache keys. Then forces a fresh
+         * poll so the banner updates immediately.
+         */
+        async forceClearBulk() {
+            const kind = this.activeBulk?.kind;
+            if (!kind) return;
+            this.forceClearing = true;
+            try {
+                await fetch(this.cp_url(`linkwise/bulk-clear/${kind}`), {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': Statamic.$config.get('csrfToken'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                });
+                // Clear immediately on the frontend too — poller would catch
+                // up within 1.5s but the user wants to see action now.
+                setHeavyState(null);
+            } catch {
+                Statamic.$toast.error('Could not force-clear stuck operation.');
+            } finally {
+                this.forceClearing = false;
+                this.pollBulkStatusOnce();
+            }
+        },
+    },
+};
+</script>

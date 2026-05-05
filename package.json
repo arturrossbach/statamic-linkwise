@@ -1,0 +1,19 @@
+{
+    "private": true,
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "docs:dev": "vitepress dev docs",
+        "docs:build": "vitepress build docs",
+        "docs:preview": "vitepress preview docs"
+    },
+    "dependencies": {
+        "@statamic/cms": "file:./vendor/statamic/cms/resources/dist-package"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.59.1",
+        "laravel-vite-plugin": "^1.2.0",
+        "vite": "^6.0.0",
+        "vitepress": "^1.6.4"
+    }
+}

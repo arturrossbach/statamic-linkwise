@@ -1,0 +1,228 @@
+<?php
+
+namespace Inkline\Linkwise\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Inkline\Linkwise\Exceptions\EntryConflictException;
+use Inkline\Linkwise\Indexer\EntryIndexer;
+use Inkline\Linkwise\Links\BrokenLinkChecker;
+use Inkline\Linkwise\Links\BrokenLinkRecord;
+use Inkline\Linkwise\Links\BrokenLinkReport;
+use Inkline\Linkwise\Support\JobLock;
+use Inkline\Linkwise\Support\UrlHelper;
+use Inkline\Linkwise\UrlChanger\UrlReplacer;
+use Statamic\Facades\Entry;
+
+/**
+ * Detached artisan command that applies a batch of URL replacements (apply or
+ * unlink) on behalf of the URL Changer UI.
+ *
+ * Why heavy (server-side) instead of light (frontend loop):
+ *  - URL Changer Apply can hit 500+ replacements on a real domain migration.
+ *    A frontend loop dies on browser tab close, browser tab refresh, or user
+ *    navigation away — losing all progress halfway.
+ *  - Heavy survives all of those: the artisan process keeps running, the
+ *    LinkwiseLayout poller picks up state on every Linkwise tab.
+ *
+ * The frontend triggers this via `linkwise.url-changer.apply-async` which
+ * writes the payload to cache and shells out detached. Status flows back
+ * through cache keys the layout poller already knows how to read.
+ */
+class UrlChangerApplyCommand extends Command
+{
+    protected $signature = 'linkwise:url-changer:apply';
+
+    protected $description = 'Apply a queued URL Changer batch (replace or unlink) — invoked by the URL Changer UI';
+
+    public function __construct(
+        protected UrlReplacer $replacer,
+        protected EntryIndexer $indexer,
+        protected BrokenLinkReport $brokenReport,
+        protected BrokenLinkChecker $brokenChecker,
+    ) {
+        parent::__construct();
+    }
+
+    public function handle(): int
+    {
+        // Detached background commands shouldn't be killed by max_execution_time.
+        @set_time_limit(0);
+        // Crash-guard: if process dies before reaching a terminal phase,
+        // mark status as 'error' so frontend recovers cleanly.
+        JobLock::registerCrashGuard('linkwise:urlchanger:status', 'linkwise:urlchanger:payload');
+
+        $payload = Cache::get('linkwise:urlchanger:payload');
+        if (! is_array($payload)) {
+            Cache::put('linkwise:urlchanger:status', [
+                'phase' => 'error',
+                'message' => 'No payload found in cache.',
+            ], 120);
+
+            return self::FAILURE;
+        }
+
+        $replacements = $payload['replacements'] ?? [];
+        $search = $payload['search'] ?? '';
+        $mode = $payload['mode'] ?? 'smart';
+        $action = $payload['action'] ?? 'apply'; // 'apply' or 'unlink' — drives banner label
+        $entryHashes = $payload['entry_hashes'] ?? [];
+        $startedBy = $payload['started_by'] ?? null;
+        $startedById = $payload['started_by_id'] ?? null;
+        $total = count($replacements);
+        $succeeded = 0;
+        $skipped = 0;
+        $errors = [];
+
+        $this->replacer->setMode($mode);
+
+        // Group by entry — one save per entry for atomic per-entry semantics
+        // (matches the behaviour the frontend had pre-migration).
+        $byEntry = [];
+        foreach ($replacements as $r) {
+            $byEntry[$r['entry_id']][] = $r;
+        }
+        $entryGroups = array_values($byEntry);
+        $totalEntries = count($entryGroups);
+
+        Cache::put('linkwise:urlchanger:status', [
+            'phase' => 'running',
+            'current' => 0,
+            'total' => $total, // counter in user-units (replacements), not entries
+            'action' => $action,
+            'search' => $search,
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+            'heartbeat' => time(),
+        ], 600);
+
+        $processedReplacements = 0;
+
+        foreach ($entryGroups as $idx => $entryReps) {
+            if (Cache::get('linkwise:urlchanger:cancel')) {
+                Cache::forget('linkwise:urlchanger:cancel');
+                Cache::put('linkwise:urlchanger:status', [
+                    'phase' => 'cancelled',
+                    'total' => $total,
+                    'current' => $processedReplacements,
+                    'succeeded' => $succeeded,
+                    'skipped' => $skipped,
+                    'errors' => $errors,
+                    'action' => $action,
+                    'search' => $search,
+                    'started_by' => $startedBy,
+                ], 300);
+                $this->finalizeIndex();
+
+                return self::SUCCESS;
+            }
+
+            $entryId = $entryReps[0]['entry_id'];
+            $entryHashesForCall = isset($entryHashes[$entryId])
+                ? [$entryId => $entryHashes[$entryId]]
+                : [];
+
+            try {
+                // applySelected handles per-entry hash check, atomic write.
+                // We run it WITHOUT a per-call rebuild — we batch the rebuild
+                // at the end via finalizeIndex().
+                $result = $this->replacer->applySelected($search, $entryReps);
+
+                $entryReplacementCount = count($entryReps);
+                $actualReplacements = $result['total_replacements'] ?? 0;
+
+                if ($actualReplacements === 0) {
+                    // Backend OK but no actual replacement happened — links
+                    // were already gone (index drift between preview and apply).
+                    $msg = 'Links were already gone — Run Scan Content to refresh the index';
+                    $errors[$msg] = ($errors[$msg] ?? 0) + $entryReplacementCount;
+                    $skipped += $entryReplacementCount;
+                } else {
+                    $succeeded += $actualReplacements;
+                    // Any unaccounted-for replacements (theoretical edge: requested 5,
+                    // landed 3) count as skipped.
+                    $missed = $entryReplacementCount - $actualReplacements;
+                    if ($missed > 0) {
+                        $msg = 'Some links were already gone';
+                        $errors[$msg] = ($errors[$msg] ?? 0) + $missed;
+                        $skipped += $missed;
+                    }
+
+                    // Update broken-link report — remove old URLs that were
+                    // replaced or unlinked.
+                    foreach ($entryReps as $r) {
+                        $this->brokenReport->removeLink($r['entry_id'], $r['matched_url']);
+                    }
+                }
+            } catch (EntryConflictException $e) {
+                $msg = 'Entry was modified by another editor';
+                $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
+                $skipped += count($entryReps);
+            } catch (\Throwable $e) {
+                $msg = mb_substr($e->getMessage(), 0, 120);
+                $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
+                $skipped += count($entryReps);
+                Log::warning('[Linkwise] UrlChangerApplyCommand entry-error: '.$e->getMessage());
+            }
+
+            $processedReplacements += count($entryReps);
+            Cache::put('linkwise:urlchanger:status', [
+                'phase' => 'running',
+                'current' => $processedReplacements,
+                'total' => $total,
+                'succeeded' => $succeeded,
+                'skipped' => $skipped,
+                'action' => $action,
+                'search' => $search,
+                'started_by' => $startedBy,
+                'heartbeat' => time(),
+            ], 600);
+        }
+
+        $this->finalizeIndex();
+
+        Cache::put('linkwise:urlchanger:status', [
+            'phase' => 'done',
+            'total' => $total,
+            'current' => $total,
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+            'errors' => $errors,
+            'action' => $action,
+            'search' => $search,
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+        ], 300);
+        Cache::forget('linkwise:urlchanger:payload');
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * One-time index rebuild after the whole batch completes.
+     * Mirrors BulkUnlinkCommand::finalizeIndex — refuses to overwrite a
+     * non-empty index with an empty one (detached process context can fail
+     * to read Statamic content; better stale than wiped).
+     */
+    protected function finalizeIndex(): void
+    {
+        try {
+            $previousCount = count($this->indexer->load());
+            $this->indexer->clearCache();
+            $records = $this->indexer->buildIndex();
+
+            if (count($records) === 0 && $previousCount > 0) {
+                Log::warning(
+                    '[Linkwise] UrlChangerApplyCommand: refusing to save empty index (previous had '.$previousCount.' records)',
+                );
+
+                return;
+            }
+
+            $this->indexer->save($records);
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] UrlChangerApplyCommand finalizeIndex failed: '.$e->getMessage());
+        }
+    }
+}

@@ -1,0 +1,875 @@
+<?php
+
+namespace Inkline\Linkwise\UrlChanger;
+
+use Inkline\Linkwise\Exceptions\EntryConflictException;
+use Inkline\Linkwise\Support\ContextExtractor;
+use Inkline\Linkwise\Support\ProseMirrorTypes;
+use Inkline\Linkwise\Support\SafeEntrySaver;
+use Inkline\Linkwise\Support\UrlHelper;
+use Statamic\Facades\Entry;
+
+class UrlReplacer
+{
+    protected string $mode = 'smart';
+
+    public function setMode(string $mode): self
+    {
+        $this->mode = $mode;
+
+        return $this;
+    }
+
+    /**
+     * Preview which entries contain links matching the search term.
+     *
+     * @return array{search: string, replace: string, total_replacements: int, entries: array}
+     */
+    public function preview(string $search, string $replace): array
+    {
+        return $this->process($search, $replace, apply: false);
+    }
+
+    /**
+     * Apply selected replacements with precise targeting.
+     * Each replacement: [
+     *   'entry_id' => string,
+     *   'field' => string,        // field handle
+     *   'field_type' => string,   // 'bard', 'replicator', 'markdown'
+     *   'matched_url' => string,  // exact href to find
+     *   'occurrence_index' => int, // which occurrence in this field
+     *   'new_url' => string,
+     * ]
+     *
+     * @return array{total_replacements: int, entries_modified: int}
+     */
+    public function applySelected(string $search, array $replacements): array
+    {
+        // Group by entry_id to save each entry only once
+        $byEntry = [];
+        foreach ($replacements as $r) {
+            $byEntry[$r['entry_id']][] = $r;
+        }
+
+        $totalReplacements = 0;
+        $entriesModified = 0;
+
+        foreach ($byEntry as $entryId => $entryReplacements) {
+            [$entry, $hash] = SafeEntrySaver::load($entryId);
+            if (! $entry) {
+                continue;
+            }
+
+            try {
+                $entry->blueprint()->fields()->all();
+            } catch (\Throwable) {
+                continue;
+            }
+
+            $modified = false;
+
+            // Sort by occurrence_index descending so replacing doesn't shift later indices
+            usort($entryReplacements, fn ($a, $b) => ($b['occurrence_index'] ?? 0) <=> ($a['occurrence_index'] ?? 0));
+
+            foreach ($entryReplacements as $replacement) {
+                $oldUrl = $replacement['matched_url'];
+                $newUrl = $replacement['new_url'];
+                $index = (int) ($replacement['occurrence_index'] ?? 0);
+                // Per-replacement search allows batching items with different URLs
+                $effectiveSearch = $replacement['search'] ?? $search;
+
+                // If field/field_type provided, target that specific field.
+                // Otherwise, auto-detect by scanning all blueprint fields.
+                $fieldsToCheck = [];
+                if (! empty($replacement['field']) && ! empty($replacement['field_type'])) {
+                    $fieldsToCheck[] = ['handle' => $replacement['field'], 'type' => $replacement['field_type']];
+                } else {
+                    try {
+                        foreach ($entry->blueprint()->fields()->all() as $handle => $field) {
+                            $fieldsToCheck[] = ['handle' => $handle, 'type' => $field->type()];
+                        }
+                    } catch (\Throwable) {
+                        continue;
+                    }
+                }
+
+                foreach ($fieldsToCheck as $fieldInfo) {
+                    $handle = $fieldInfo['handle'];
+                    $fieldType = $fieldInfo['type'];
+                    $value = $entry->get($handle);
+
+                    if ($fieldType === 'bard' && is_array($value)) {
+                        [$value, $replaced] = $this->replaceNthInBard($value, $effectiveSearch, $oldUrl, $newUrl, $index);
+                        if ($replaced) {
+                            $entry->set($handle, $value);
+                            $modified = true;
+                            $totalReplacements++;
+
+                            break;
+                        }
+                    } elseif ($fieldType === 'replicator' && is_array($value)) {
+                        [$value, $replaced] = $this->replaceNthInReplicator($value, $effectiveSearch, $oldUrl, $newUrl, $index);
+                        if ($replaced) {
+                            $entry->set($handle, $value);
+                            $modified = true;
+                            $totalReplacements++;
+
+                            break;
+                        }
+                    } elseif ($fieldType === 'markdown' && is_string($value)) {
+                        [$value, $replaced] = $this->replaceNthInMarkdown($value, $oldUrl, $newUrl, $index);
+                        if ($replaced) {
+                            $entry->set($handle, $value);
+                            $modified = true;
+                            $totalReplacements++;
+
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if ($modified) {
+                SafeEntrySaver::save($entry, $hash);
+                $entriesModified++;
+            }
+        }
+
+        return [
+            'total_replacements' => $totalReplacements,
+            'entries_modified' => $entriesModified,
+        ];
+    }
+
+    /**
+     * Replace the Nth matching link in Bard content.
+     * Uses the same domain-based matching as findInBard so indices align.
+     *
+     * @param  string  $search  The original search term (domain or URL) used in preview
+     * @param  string  $oldUrl  The exact href of the link to replace
+     * @return array{0: array, 1: bool}
+     */
+    public function replaceNthInBard(array $bardContent, string $search, string $oldUrl, string $newUrl, int $targetIndex): array
+    {
+        // Phase 1: indexed replace — try the exact occurrence_index from preview.
+        $counter = ['i' => 0, 'replaced' => false, 'actually_replaced' => false];
+
+        foreach ($bardContent as $i => $node) {
+            $bardContent[$i] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+            if ($counter['replaced']) {
+                if ($counter['actually_replaced']) {
+                    return [$bardContent, true];
+                }
+                break; // hit target index but href didn't match — fall through to phase 2
+            }
+        }
+
+        // Phase 2: opportunistic fallback — phase 1 didn't actually do anything.
+        // Common reasons: index drift between preview and apply, multi-field
+        // entry counter mismatch, structural shifts. The user's intent is
+        // unambiguous when oldUrl is unique: just remove/replace ANY link with
+        // that href. If the user had multiple links with the same oldUrl and
+        // wanted a specific one, bad luck — running Apply again grabs the next.
+        if (! $counter['actually_replaced']) {
+            $fallbackReplaced = false;
+            foreach ($bardContent as $i => $node) {
+                $bardContent[$i] = $this->fallbackReplaceFirstByUrl($node, $oldUrl, $newUrl, $fallbackReplaced);
+                if ($fallbackReplaced) {
+                    return [$bardContent, true];
+                }
+            }
+        }
+
+        return [$bardContent, false];
+    }
+
+    /**
+     * Phase-2 fallback: find the first link with href === $oldUrl, replace it.
+     * Ignores search-mode and occurrence_index entirely. Pure "remove this URL".
+     */
+    protected function fallbackReplaceFirstByUrl(array $node, string $oldUrl, string $newUrl, bool &$replaced): array
+    {
+        if ($replaced) {
+            return $node;
+        }
+
+        if (isset($node['marks'])) {
+            foreach ($node['marks'] as $j => $mark) {
+                if (($mark['type'] ?? '') === 'link' && ($mark['attrs']['href'] ?? '') === $oldUrl) {
+                    if ($newUrl === UrlHelper::UNLINK) {
+                        array_splice($node['marks'], $j, 1);
+                        if (empty($node['marks'])) {
+                            unset($node['marks']);
+                        }
+                    } else {
+                        $node['marks'][$j]['attrs']['href'] = $newUrl;
+                    }
+                    $replaced = true;
+
+                    return $node;
+                }
+            }
+        }
+
+        if (isset($node['content'])) {
+            foreach ($node['content'] as $i => $child) {
+                $node['content'][$i] = $this->fallbackReplaceFirstByUrl($child, $oldUrl, $newUrl, $replaced);
+                if ($replaced) {
+                    return $node;
+                }
+            }
+        }
+
+        return $node;
+    }
+
+    protected function replaceNthInNode(array $node, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter): array
+    {
+        if ($counter['replaced']) {
+            return $node;
+        }
+
+        if (isset($node['marks'])) {
+            foreach ($node['marks'] as $j => $mark) {
+                if (($mark['type'] ?? '') === 'link') {
+                    $href = $mark['attrs']['href'] ?? '';
+                    // Count ALL links matching the search domain (same as findInNode)
+                    if ($this->hrefMatches($href, $search)) {
+                        if ($counter['i'] === $targetIndex) {
+                            if ($href === $oldUrl) {
+                                if ($newUrl === UrlHelper::UNLINK) {
+                                    // Remove the link mark, keep the text
+                                    array_splice($node['marks'], $j, 1);
+                                    if (empty($node['marks'])) {
+                                        unset($node['marks']);
+                                    }
+                                } else {
+                                    $node['marks'][$j]['attrs']['href'] = $newUrl;
+                                }
+                                $counter['actually_replaced'] = true;
+                            }
+                            $counter['replaced'] = true;
+
+                            return $node;
+                        }
+                        $counter['i']++;
+                    }
+                }
+            }
+        }
+
+        if (isset($node['content'])) {
+            foreach ($node['content'] as $i => $child) {
+                $node['content'][$i] = $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+                if ($counter['replaced']) {
+                    return $node;
+                }
+            }
+        }
+
+        return $node;
+    }
+
+    /**
+     * Replace the Nth link matching oldUrl in Replicator content.
+     * Uses a shared counter across all nested Bard fields (same traversal order as findInReplicator).
+     *
+     * @return array{0: array, 1: bool}
+     */
+    public function replaceNthInReplicator(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex): array
+    {
+        // Phase 1: indexed replace
+        $counter = ['i' => 0, 'replaced' => false, 'actually_replaced' => false];
+        $sets = $this->replaceNthInReplicatorRecursive($sets, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+
+        if ($counter['actually_replaced']) {
+            return [$sets, true];
+        }
+
+        // Phase 2: fallback to first occurrence of oldUrl anywhere in the
+        // replicator. Same rationale as replaceNthInBard's fallback.
+        $fallbackReplaced = false;
+        $sets = $this->fallbackReplicatorReplaceFirstByUrl($sets, $oldUrl, $newUrl, $fallbackReplaced);
+
+        return [$sets, $fallbackReplaced];
+    }
+
+    protected function fallbackReplicatorReplaceFirstByUrl(array $sets, string $oldUrl, string $newUrl, bool &$replaced): array
+    {
+        foreach ($sets as $i => $set) {
+            if ($replaced || ! is_array($set)) {
+                continue;
+            }
+            foreach ($set as $key => $value) {
+                if ($replaced) {
+                    break;
+                }
+                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
+                    continue;
+                }
+                if (ProseMirrorTypes::looksLikeBardContent($value)) {
+                    foreach ($value as $ni => $node) {
+                        $value[$ni] = $this->fallbackReplaceFirstByUrl($node, $oldUrl, $newUrl, $replaced);
+                        if ($replaced) {
+                            $sets[$i][$key] = $value;
+                            break 2;
+                        }
+                    }
+                } elseif (isset($value[0]['type'], $value[0]['id'])) {
+                    $sets[$i][$key] = $this->fallbackReplicatorReplaceFirstByUrl($value, $oldUrl, $newUrl, $replaced);
+                    if ($replaced) {
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        return $sets;
+    }
+
+    protected function replaceNthInReplicatorRecursive(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter): array
+    {
+        foreach ($sets as $i => $set) {
+            if (! is_array($set) || $counter['replaced']) {
+                continue;
+            }
+
+            foreach ($set as $key => $value) {
+                if ($counter['replaced']) {
+                    break;
+                }
+                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
+                    continue;
+                }
+
+                if (ProseMirrorTypes::looksLikeBardContent($value)) {
+                    foreach ($value as $ni => $node) {
+                        $value[$ni] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+                        if ($counter['replaced']) {
+                            $sets[$i][$key] = $value;
+
+                            return $sets;
+                        }
+                    }
+                } elseif (isset($value[0]['type'], $value[0]['id'])) {
+                    $sets[$i][$key] = $this->replaceNthInReplicatorRecursive($value, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+                    if ($counter['replaced']) {
+                        return $sets;
+                    }
+                }
+            }
+        }
+
+        return $sets;
+    }
+
+    /**
+     * Replace the Nth Markdown link matching oldUrl.
+     *
+     * @return array{0: string, 1: bool}
+     */
+    public function replaceNthInMarkdown(string $markdown, string $oldUrl, string $newUrl, int $targetIndex): array
+    {
+        // Phase 1: indexed replace.
+        $counter = 0;
+        $actuallyReplaced = false;
+        $escaped = preg_quote($oldUrl, '#');
+
+        $result = preg_replace_callback(
+            '#\[([^\[\]]*)\]\('.$escaped.'\)#',
+            function ($match) use ($newUrl, $targetIndex, &$counter, &$actuallyReplaced) {
+                if ($counter === $targetIndex) {
+                    $counter++;
+                    $actuallyReplaced = true;
+
+                    if ($newUrl === UrlHelper::UNLINK) {
+                        return $match[1];
+                    }
+
+                    return '['.$match[1].']('.$newUrl.')';
+                }
+                $counter++;
+
+                return $match[0];
+            },
+            $markdown,
+        );
+
+        if ($actuallyReplaced) {
+            return [$result, true];
+        }
+
+        // Phase 2: fallback — index drift, just replace the first occurrence.
+        // Same rationale as the Bard fallback: oldUrl is unambiguous.
+        $fallbackReplaced = false;
+        $result = preg_replace_callback(
+            '#\[([^\[\]]*)\]\('.$escaped.'\)#',
+            function ($match) use ($newUrl, &$fallbackReplaced) {
+                if ($fallbackReplaced) {
+                    return $match[0];
+                }
+                $fallbackReplaced = true;
+                if ($newUrl === UrlHelper::UNLINK) {
+                    return $match[1];
+                }
+
+                return '['.$match[1].']('.$newUrl.')';
+            },
+            $markdown,
+            1, // limit — only the first
+        );
+
+        return [$result, $fallbackReplaced];
+    }
+
+    /**
+     * Extract the domain from a URL for matching purposes.
+     */
+    public static function extractDomain(string $url): ?string
+    {
+        return UrlHelper::extractDomain($url);
+    }
+
+    /**
+     * Check if a href matches the search term.
+     *
+     * Strategy:
+     * 1. Domain match: "google.com" finds all links to google.com
+     * 2. Domain + path match: "google.com/page" matches that path prefix
+     * 3. Substring fallback: "thesun" or "/foo-bar" matches any href containing that text
+     */
+    public function hrefMatches(string $href, string $search): bool
+    {
+        // Empty search means "list all links" — independent of mode. Without
+        // this short-circuit, exact-mode + empty search would compare every
+        // href against '' and match nothing, producing a confusing empty list
+        // when the user just wanted to see everything.
+        if ($search === '') {
+            // Same exclusions as smart mode — internal-only protocols don't
+            // belong in a "all links" view.
+            return ! str_starts_with($href, 'mailto:')
+                && ! str_starts_with($href, 'tel:')
+                && ! str_starts_with($href, '#')
+                && ! str_starts_with($href, 'statamic://');
+        }
+
+        // Exact mode: simple string comparison
+        if ($this->mode === 'exact') {
+            return $href === $search;
+        }
+
+        // Smart mode (default): domain-based + substring fallback
+        if (str_starts_with($href, 'mailto:') || str_starts_with($href, 'tel:') || str_starts_with($href, '#')) {
+            return false;
+        }
+
+        if (str_starts_with($href, 'statamic://') || str_starts_with($search, 'statamic://')) {
+            return str_starts_with($search, 'statamic://') && $href === $search;
+        }
+
+        $searchDomain = self::extractDomain($search);
+        $hrefDomain = self::extractDomain($href);
+
+        // If we can extract domains from both, do domain-based matching
+        if ($searchDomain && $hrefDomain && $searchDomain === $hrefDomain) {
+            $searchPath = $this->extractPath($search);
+            if (empty($searchPath) || $searchPath === '/') {
+                return true;
+            }
+
+            return str_starts_with($this->extractPath($href), $searchPath);
+        }
+
+        // Fallback: substring match
+        if (str_contains($search, '.') && $hrefDomain) {
+            $searchLower = mb_strtolower(preg_replace('#^(https?://|www\.)#i', '', $search));
+            $fullHost = 'www.'.$hrefDomain;
+
+            $pos = mb_stripos($fullHost, $searchLower);
+            if ($pos !== false && ($pos === 0 || $fullHost[$pos - 1] === '.')) {
+                return true;
+            }
+
+            return mb_stripos($this->extractPath($href), $search) !== false;
+        }
+
+        return mb_stripos($href, $search) !== false;
+    }
+
+    /**
+     * Build the replacement URL for a matched href.
+     * If replace is just a domain, swap the domain but keep the path.
+     * If replace is a full URL, replace everything.
+     */
+    public function buildReplacementUrl(string $originalHref, string $search, string $replace): string
+    {
+        $replacePath = $this->extractPath($replace);
+        $replaceHasPath = ! empty($replacePath) && $replacePath !== '/';
+
+        // If replace has a specific path, use it as-is
+        if ($replaceHasPath) {
+            // Ensure protocol
+            if (! preg_match('#^[a-z][a-z0-9+\-.]*://#i', $replace)) {
+                return 'https://'.$replace;
+            }
+
+            return $replace;
+        }
+
+        // Replace is just a domain — swap domain, keep original path/query/fragment
+        $replaceDomain = self::extractDomain($replace);
+        if (! $replaceDomain) {
+            return $replace;
+        }
+
+        // Parse the original URL
+        $parseable = $originalHref;
+        $hadNoScheme = false;
+        if (! preg_match('#^[a-z][a-z0-9+\-.]*://#i', $originalHref)) {
+            $parseable = 'https://'.$originalHref;
+            $hadNoScheme = true;
+        }
+
+        $parsed = parse_url($parseable);
+        if (! $parsed || ! isset($parsed['host'])) {
+            return $replace;
+        }
+
+        // Rebuild with new domain
+        $scheme = $parsed['scheme'] ?? 'https';
+        $port = isset($parsed['port']) ? ':'.$parsed['port'] : '';
+        $path = $parsed['path'] ?? '';
+        $query = isset($parsed['query']) ? '?'.$parsed['query'] : '';
+        $fragment = isset($parsed['fragment']) ? '#'.$parsed['fragment'] : '';
+
+        // Use www. prefix if replace input had it
+        $replaceHost = $replaceDomain;
+        if (preg_match('/^www\./i', $replace) || preg_match('/^https?:\/\/www\./i', $replace)) {
+            $replaceHost = 'www.'.$replaceDomain;
+        }
+
+        return $scheme.'://'.$replaceHost.$port.$path.$query.$fragment;
+    }
+
+    protected function extractPath(string $url): string
+    {
+        $parseable = $url;
+        if (! preg_match('#^[a-z][a-z0-9+\-.]*://#i', $url)) {
+            $parseable = 'https://'.$url;
+        }
+
+        return parse_url($parseable, PHP_URL_PATH) ?? '';
+    }
+
+    // ─── Core Process ──────────────────────────────────────────────────────────
+
+    protected function process(string $search, string $replace, bool $apply): array
+    {
+        $entries = Entry::all();
+        $result = [
+            'search' => $search,
+            'replace' => $replace,
+            'total_replacements' => 0,
+            'entries' => [],
+        ];
+
+        foreach ($entries as $entry) {
+            $entryResult = $this->processEntry($entry, $search, $replace, $apply);
+
+            if (! empty($entryResult['occurrences'])) {
+                $result['entries'][] = $entryResult;
+                $result['total_replacements'] += count($entryResult['occurrences']);
+            }
+        }
+
+        return $result;
+    }
+
+    protected function processEntry($entry, string $search, string $replace, bool $apply): array
+    {
+        $entryResult = [
+            'id' => $entry->id(),
+            'title' => $entry->get('title') ?? $entry->slug(),
+            'collection' => $entry->collectionHandle(),
+            'occurrences' => [],
+        ];
+
+        try {
+            $fields = $entry->blueprint()->fields()->all();
+        } catch (\Throwable) {
+            return $entryResult;
+        }
+
+        // Collect full text for context extraction
+        $fullText = '';
+        foreach ($fields as $handle => $field) {
+            $val = $entry->get($handle);
+            if ($field->type() === 'bard' && is_array($val)) {
+                $fullText .= ' '.\Inkline\Linkwise\Support\TextExtractor::fromBard($val);
+            } elseif ($field->type() === 'markdown' && is_string($val)) {
+                $fullText .= ' '.preg_replace('/\[([^\[\]]+)\]\([^)]+\)/', '$1', $val);
+            } elseif ($field->type() === 'replicator' && is_array($val)) {
+                // Extract text from nested Bard fields in Replicator
+                foreach ($val as $set) {
+                    if (! is_array($set)) continue;
+                    foreach ($set as $key => $v) {
+                        if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) continue;
+                        if (is_array($v) && ! empty($v) && ProseMirrorTypes::looksLikeBardContent($v)) {
+                            $fullText .= ' '.\Inkline\Linkwise\Support\TextExtractor::fromBard($v);
+                        }
+                    }
+                }
+            }
+        }
+
+        $modified = false;
+
+        foreach ($fields as $handle => $field) {
+            $value = $entry->get($handle);
+
+            if ($field->type() === 'bard' && is_array($value) && ! empty($value)) {
+                $occurrences = $this->findInBard($value, $search);
+                $entryResult['occurrences'] = array_merge($entryResult['occurrences'], array_map(
+                    fn ($o) => array_merge($o, ['field' => $handle, 'field_type' => 'bard']),
+                    $occurrences,
+                ));
+
+                if ($apply && ! empty($occurrences)) {
+                    $value = $this->replaceInBard($value, $search, $replace);
+                    $entry->set($handle, $value);
+                    $modified = true;
+                }
+            } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
+                $occurrences = $this->findInReplicator($value, $search);
+                $entryResult['occurrences'] = array_merge($entryResult['occurrences'], array_map(
+                    fn ($o) => array_merge($o, ['field' => $handle, 'field_type' => 'replicator']),
+                    $occurrences,
+                ));
+
+                if ($apply && ! empty($occurrences)) {
+                    $value = $this->replaceInReplicator($value, $search, $replace);
+                    $entry->set($handle, $value);
+                    $modified = true;
+                }
+            } elseif ($field->type() === 'markdown' && is_string($value) && ! empty($value)) {
+                $occurrences = $this->findInMarkdown($value, $search);
+                $entryResult['occurrences'] = array_merge($entryResult['occurrences'], array_map(
+                    fn ($o) => array_merge($o, ['field' => $handle, 'field_type' => 'markdown']),
+                    $occurrences,
+                ));
+
+                if ($apply && ! empty($occurrences)) {
+                    $value = $this->replaceInMarkdown($value, $search, $replace);
+                    $entry->set($handle, $value);
+                    $modified = true;
+                }
+            }
+        }
+
+        if ($modified) {
+            $entry->save();
+        }
+
+        // Add context for occurrences that don't have it yet (Bard/Replicator)
+        $anchorOccurrences = [];
+        foreach ($entryResult['occurrences'] as &$occ) {
+            if (! empty($occ['anchor_text']) && ! empty($fullText)) {
+                $anchorKey = mb_strtolower($occ['anchor_text']);
+                $anchorOccurrences[$anchorKey] = ($anchorOccurrences[$anchorKey] ?? -1) + 1;
+                $occ['context'] = ContextExtractor::extract($fullText, $occ['anchor_text'], 120, $anchorOccurrences[$anchorKey]);
+            }
+        }
+
+        return $entryResult;
+    }
+
+    // ─── Bard ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Find all link marks matching the search in Bard content.
+     * Each occurrence gets a sequential index for targeted replacement.
+     *
+     * @return array<array{anchor_text: string, matched_url: string, occurrence_index: int}>
+     */
+    public function findInBard(array $bardContent, string $search): array
+    {
+        $occurrences = [];
+        $counter = ['i' => 0];
+
+        foreach ($bardContent as $node) {
+            $this->findInNode($node, $search, $occurrences, $counter);
+        }
+
+        return $occurrences;
+    }
+
+    protected function findInNode(array $node, string $search, array &$occurrences, array &$counter): void
+    {
+        if (isset($node['marks'])) {
+            foreach ($node['marks'] as $mark) {
+                if (($mark['type'] ?? '') === 'link') {
+                    $href = $mark['attrs']['href'] ?? '';
+                    if ($this->hrefMatches($href, $search)) {
+                        $occurrences[] = [
+                            'anchor_text' => $node['text'] ?? '',
+                            'matched_url' => $href,
+                            'occurrence_index' => $counter['i'],
+                        ];
+                        $counter['i']++;
+                    }
+                }
+            }
+        }
+
+        if (isset($node['content'])) {
+            foreach ($node['content'] as $child) {
+                $this->findInNode($child, $search, $occurrences, $counter);
+            }
+        }
+    }
+
+    /**
+     * Replace matching URLs in Bard content.
+     */
+    public function replaceInBard(array $bardContent, string $search, string $replace): array
+    {
+        foreach ($bardContent as $i => $node) {
+            $bardContent[$i] = $this->replaceInNode($node, $search, $replace);
+        }
+
+        return $bardContent;
+    }
+
+    protected function replaceInNode(array $node, string $search, string $replace): array
+    {
+        if (isset($node['marks'])) {
+            foreach ($node['marks'] as $j => $mark) {
+                if (($mark['type'] ?? '') === 'link') {
+                    $href = $mark['attrs']['href'] ?? '';
+                    if ($this->hrefMatches($href, $search)) {
+                        $node['marks'][$j]['attrs']['href'] = $this->buildReplacementUrl($href, $search, $replace);
+                    }
+                }
+            }
+        }
+
+        if (isset($node['content'])) {
+            foreach ($node['content'] as $i => $child) {
+                $node['content'][$i] = $this->replaceInNode($child, $search, $replace);
+            }
+        }
+
+        return $node;
+    }
+
+    // ─── Replicator ────────────────────────────────────────────────────────────
+
+    public function findInReplicator(array $sets, string $search): array
+    {
+        $occurrences = [];
+        $counter = ['i' => 0];
+
+        $this->findInReplicatorRecursive($sets, $search, $occurrences, $counter);
+
+        return $occurrences;
+    }
+
+    protected function findInReplicatorRecursive(array $sets, string $search, array &$occurrences, array &$counter): void
+    {
+        foreach ($sets as $set) {
+            if (! is_array($set)) {
+                continue;
+            }
+
+            foreach ($set as $key => $value) {
+                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
+                    continue;
+                }
+
+                if (ProseMirrorTypes::looksLikeBardContent($value)) {
+                    // Use the shared counter across all nested Bard fields
+                    foreach ($value as $node) {
+                        $this->findInNode($node, $search, $occurrences, $counter);
+                    }
+                } elseif (isset($value[0]['type'], $value[0]['id'])) {
+                    $this->findInReplicatorRecursive($value, $search, $occurrences, $counter);
+                }
+            }
+        }
+    }
+
+    public function replaceInReplicator(array $sets, string $search, string $replace): array
+    {
+        foreach ($sets as $i => $set) {
+            if (! is_array($set)) {
+                continue;
+            }
+
+            foreach ($set as $key => $value) {
+                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
+                    continue;
+                }
+
+                if (ProseMirrorTypes::looksLikeBardContent($value)) {
+                    $sets[$i][$key] = $this->replaceInBard($value, $search, $replace);
+                } elseif (isset($value[0]['type'], $value[0]['id'])) {
+                    $sets[$i][$key] = $this->replaceInReplicator($value, $search, $replace);
+                }
+            }
+        }
+
+        return $sets;
+    }
+
+    // ─── Markdown ──────────────────────────────────────────────────────────────
+
+    /**
+     * Find all links matching the search in Markdown content.
+     *
+     * @return array<array{anchor_text: string, matched_url: string}>
+     */
+    public function findInMarkdown(string $markdown, string $search): array
+    {
+        $occurrences = [];
+        $index = 0;
+
+        // Match all Markdown links: [text](url). occurrence_index counts ONLY
+        // hrefMatches-positives so it aligns with replaceNthInMarkdown which
+        // counts the same way (oldUrl-restricted pattern only fires on matches).
+        if (preg_match_all('#\[([^\[\]]*)\]\(([^)]+)\)#', $markdown, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $href = $match[2];
+                if ($this->hrefMatches($href, $search)) {
+                    $occurrences[] = [
+                        'anchor_text' => $match[1],
+                        'matched_url' => $href,
+                        'occurrence_index' => $index,
+                        'context' => ContextExtractor::extract($markdown, $match[1]),
+                    ];
+                    $index++;
+                }
+            }
+        }
+
+        return $occurrences;
+    }
+
+    /**
+     * Replace matching URLs in Markdown content.
+     */
+    public function replaceInMarkdown(string $markdown, string $search, string $replace): string
+    {
+        return preg_replace_callback(
+            '#(\[[^\]]*\])\(([^)]+)\)#',
+            function ($match) use ($search, $replace) {
+                $href = $match[2];
+                if ($this->hrefMatches($href, $search)) {
+                    return $match[1].'('.$this->buildReplacementUrl($href, $search, $replace).')';
+                }
+
+                return $match[0];
+            },
+            $markdown,
+        );
+    }
+}

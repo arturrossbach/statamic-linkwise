@@ -1,0 +1,77 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source ~/.nvm/nvm.sh:*)",
+      "Bash(source ~/.nvm/nvm.sh && nvm use 22 && npm:*)",
+      "Bash(source ~/.nvm/nvm.sh && nvm use 22 && npx:*)",
+      "Bash(source ~/.nvm/nvm.sh && nvm use 22 && PLAYWRIGHT_BASE_URL=*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run:*)",
+      "Bash(npx playwright test:*)",
+      "Bash(npx playwright:*)",
+      "Bash(./vendor/bin/phpunit:*)",
+      "Bash(php vendor/bin/phpunit:*)",
+      "Bash(php artisan tinker:*)",
+      "Bash(php artisan list:*)",
+      "Bash(php artisan:*)",
+      "Bash(PLAYWRIGHT_BASE_URL=*)",
+      "Bash(cd /Users/rossbach/Herd/prose-peak-test && php artisan:*)",
+      "Bash(cd /Users/rossbach/Herd/prose-peak-test:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/pre-vue-edit.sh",
+            "timeout": 5,
+            "statusMessage": "Checking Statamic UI…"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/pre-commit-tests.sh",
+            "timeout": 5,
+            "if": "Bash(git commit *)"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/post-fix-reminder.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/post-frontend-build.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/session-end-memory.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
