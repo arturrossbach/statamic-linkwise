@@ -27,8 +27,7 @@
                                 <DropdownItem text="Report a bug" icon="alert-warning-exclamation-mark" @click="openGithubIssue" />
                                 <DropdownItem text="Email support" icon="mail" @click="openSupportEmail" />
                                 <DropdownSeparator />
-                                <DropdownItem text="Download diagnostic ZIP" icon="download" @click="downloadDebugExport(false)" />
-                                <DropdownItem text="Download diagnostic ZIP — with logs" icon="warning-diamond" @click="confirmDebugExportWithLogs" />
+                                <DropdownItem text="Download diagnostic ZIP" icon="download" @click="confirmDebugExportWithLogs" />
                                 <DropdownSeparator />
                                 <DropdownItem :text="`Linkwise ${linkwiseVersion}`" disabled />
                             </DropdownMenu>
@@ -185,7 +184,7 @@
                 <span class="opacity-50 mx-1">·</span>
                 <a :href="supportMailto" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Email us</a>
                 <span class="opacity-50 mx-1">·</span>
-                <a href="#" @click.prevent="downloadDebugExport(false)" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Download diagnostic ZIP</a>
+                <a href="#" @click.prevent="confirmDebugExportWithLogs" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Download diagnostic ZIP</a>
             </div>
         </div>
 

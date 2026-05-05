@@ -76,19 +76,24 @@ class ServiceProvider extends AddonServiceProvider
         // commercial addon that's a support nightmare — every failed
         // validation should leave a breadcrumb so the diagnostic-ZIP can
         // tell us which fields rejected and what payload shape was sent.
+        // Use renderable() not reportable(): Laravel's default report()
+        // shortcircuits ValidationException via the dontReport array,
+        // so reportable callbacks never fire for it. renderable() fires
+        // for ALL exceptions during HTTP rendering — we use it as a
+        // logging hook and return null to let the default 422 response
+        // continue unmodified.
         $this->app->afterResolving(\Illuminate\Contracts\Debug\ExceptionHandler::class, function ($handler) {
-            if (! method_exists($handler, 'reportable')) {
+            if (! method_exists($handler, 'renderable')) {
                 return;
             }
-            $handler->reportable(function (\Illuminate\Validation\ValidationException $e) {
+            $handler->renderable(function (\Illuminate\Validation\ValidationException $e, $request) {
                 try {
-                    $request = request();
                     if (! $request) {
-                        return;
+                        return null;
                     }
                     $path = (string) $request->path();
                     if (! str_contains($path, 'linkwise')) {
-                        return;
+                        return null;
                     }
                     \Log::warning('[Linkwise] Validation failed on '.$path, [
                         'method' => $request->method(),
@@ -102,9 +107,13 @@ class ServiceProvider extends AddonServiceProvider
                             : null,
                     ]);
                 } catch (\Throwable) {
-                    // Never let logging itself bubble up — keep silent on
-                    // resolver errors during boot / tests.
+                    // Never let logging itself break the response — keep
+                    // silent on resolver errors during boot / tests.
                 }
+
+                // Return null so Laravel's default ValidationException
+                // renderer still produces the 422 with field errors.
+                return null;
             });
         });
 

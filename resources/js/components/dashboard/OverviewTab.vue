@@ -488,14 +488,23 @@ export default {
         },
 
         /**
-         * Trigger the diagnostic-ZIP download via a temporary anchor element
-         * so the browser handles the binary stream natively (mirrors
-         * LinkwiseLayout.downloadDebugExport for the no-logs / privacy-safe
-         * default path).
+         * Trigger the diagnostic-ZIP download. Always asks for confirmation
+         * because the ZIP includes log files which may contain URLs from
+         * scanned pages — the user should know what's about to leave their
+         * server. Same modal-text pattern as the LinkwiseLayout dropdown,
+         * implemented as a native confirm() here to avoid lifting the
+         * Statamic ConfirmationModal across the parent boundary.
          */
         downloadDiagnosticZip() {
+            const ok = window.confirm(
+                'The diagnostic ZIP includes log files which may contain URLs from pages Linkwise has scanned. ' +
+                'URLs can identify users (e.g. /users/john-doe) or contain sensitive query strings. ' +
+                'Review the ZIP locally before sharing it with anyone.\n\n' +
+                'Continue and download?',
+            );
+            if (! ok) return;
             const a = document.createElement('a');
-            a.href = '/cp/linkwise/debug-export';
+            a.href = '/cp/linkwise/debug-export?include_logs=1';
             a.rel = 'noopener';
             document.body.appendChild(a);
             a.click();
