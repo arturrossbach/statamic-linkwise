@@ -801,6 +801,28 @@ class DashboardController extends CpController
     }
 
     /**
+     * Cancel an in-flight inbound bulk-add. The LinkInsertCommand checks this
+     * flag at the per-item boundary and exits cleanly with a 'cancelled'
+     * status snapshot. Same lightweight-flag pattern as DetailUnlink + UrlChanger.
+     */
+    public function inboundInsertCancel(Request $request): JsonResponse
+    {
+        \Illuminate\Support\Facades\Cache::put('linkwise:inboundinsert:cancel', true, 60);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Cancel an in-flight outbound bulk-add — same flag pattern as inbound.
+     */
+    public function outboundInsertCancel(Request $request): JsonResponse
+    {
+        \Illuminate\Support\Facades\Cache::put('linkwise:outboundinsert:cancel', true, 60);
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
      * Force-clear a stuck heavy-job. Used by the "Operation seems stuck" UI
      * banner when a process crashed in a way the crash-guard missed (e.g.
      * server restart before shutdown_function fired) — without this, the
@@ -830,6 +852,8 @@ class DashboardController extends CpController
             'applyrule' => cp_route('linkwise.autolink.apply-async.cancel'),
             'urlchanger' => cp_route('linkwise.url-changer.apply-cancel'),
             'detailunlink' => cp_route('linkwise.detail-unlink.cancel'),
+            'inboundinsert' => cp_route('linkwise.inbound.insert.cancel'),
+            'outboundinsert' => cp_route('linkwise.outbound.insert.cancel'),
         ];
 
         $status = $snapshot['status'];

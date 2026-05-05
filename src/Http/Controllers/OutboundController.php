@@ -68,14 +68,13 @@ class OutboundController extends CpController
     }
 
     /**
-     * Insert outbound links into the entry.
-     * Each insertion places a link at the anchor text position in the entry's content.
+     * Trigger an Outbound bulk-add as a heavy job — same dispatch pattern
+     * as Inbound + DetailUnlink + URL-Changer Apply. Returns immediately;
+     * the unified bulk-status poller picks up real progress.
      */
     public function insert(Request $request): JsonResponse
     {
-        // Refuse if a registered bulk job is running — they all rebuild the index
-        // at the end and would race with these per-entry inserts.
-        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob()) {
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('outboundinsert')) {
             return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
@@ -85,11 +84,14 @@ class OutboundController extends CpController
             'insertions' => ['required', 'array', 'min:1', 'max:200'],
             'insertions.*.target_entry_id' => ['required', 'string'],
             'insertions.*.anchor_text' => ['required', 'string'],
+            'entry_title' => ['sometimes', 'nullable', 'string'],
         ]);
 
         $entryId = $validated['entry_id'];
 
-        // Optimistic locking check
+        // Optimistic locking check on the source entry (for outbound the
+        // single source is shared across all insertions, so one hash check
+        // covers the whole batch — fail-fast 409 before dispatch).
         $expectedHash = $request->input('content_hash', '');
         if ($expectedHash) {
             $entry = Entry::find($entryId);
@@ -101,45 +103,48 @@ class OutboundController extends CpController
             }
         }
 
-        $results = [];
+        // Outbound case: one source entry, many target inserts. The shared
+        // LinkInsertCommand expects each item to carry its own
+        // source_entry_id (so its loop body works for both modes); inject
+        // the fixed source here before queuing the payload.
+        $insertions = array_map(fn ($i) => [
+            'source_entry_id' => $entryId,
+            'target_entry_id' => $i['target_entry_id'],
+            'anchor_text' => $i['anchor_text'],
+        ], $validated['insertions']);
 
-        foreach ($validated['insertions'] as $insertion) {
-            try {
-                $success = BardLinkInserter::insertLinkIntoEntry(
-                    $entryId,
-                    $insertion['anchor_text'],
-                    $insertion['target_entry_id'],
-                );
+        $user = auth()->user();
+        $startedBy = $user?->name() ?? $user?->email() ?? null;
+        $startedById = $user?->id() ?? null;
 
-                $results[] = [
-                    'target_entry_id' => $insertion['target_entry_id'],
-                    'success' => $success,
-                    'error' => $success ? null : 'Anchor text not found in entry. Try rebuilding the index.',
-                ];
-            } catch (EntryConflictException $e) {
-                $results[] = [
-                    'target_entry_id' => $insertion['target_entry_id'],
-                    'success' => false,
-                    'error' => $e->getMessage(),
-                ];
-            } catch (\Throwable $e) {
-                \Log::warning('[Linkwise] Failed to insert outbound link: '.$e->getMessage());
+        // Wipe stale terminal-status from a previous run.
+        \Illuminate\Support\Facades\Cache::forget('linkwise:outboundinsert:status');
+        \Illuminate\Support\Facades\Cache::forget('linkwise:outboundinsert:cancel');
 
-                $results[] = [
-                    'target_entry_id' => $insertion['target_entry_id'],
-                    'success' => false,
-                    'error' => 'Failed to insert link.',
-                ];
-            }
-        }
+        \Illuminate\Support\Facades\Cache::put('linkwise:outboundinsert:payload', [
+            'source_mode' => 'outbound',
+            'insertions' => $insertions,
+            'entry_hashes' => $expectedHash ? [$entryId => $expectedHash] : [],
+            'entry_title' => $validated['entry_title'] ?? '',
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+        ], 600);
+        \Illuminate\Support\Facades\Cache::put('linkwise:outboundinsert:status', [
+            'phase' => 'starting',
+            'total' => count($insertions),
+            'current' => 0,
+            'source_mode' => 'outbound',
+            'entry_title' => $validated['entry_title'] ?? '',
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+        ], 600);
 
-        // Rebuild index so outboundLinks reflect new links
-        if (collect($results)->contains('success', true)) {
-            $this->indexer->clearCache();
-            $records = $this->indexer->buildIndex();
-            $this->indexer->save($records);
-        }
+        $artisan = escapeshellarg(base_path('artisan'));
+        $php = escapeshellarg(PHP_BINARY);
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('link-insert.log', 'Link Insert'));
 
-        return response()->json(['results' => $results]);
+        exec("$php $artisan linkwise:link-insert >> $log 2>&1 &");
+
+        return response()->json(['success' => true, 'message' => 'Outbound insert started']);
     }
 }

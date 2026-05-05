@@ -762,20 +762,12 @@ export default {
 
             this.closeSuggestModal();
 
-            // Push the inbound-insert into the unified bulk-banner state
-            // so the user sees a live "Adding inbound links to <entry>"
-            // banner during the synchronous request — same UX surface as
-            // the heavy bulks (Apply Rule, URL Changer, etc.). Without
-            // this the user submitted, then nothing visible until the
-            // toast fired (jarring with 80+ items in flight).
+            // Heavy-bulk dispatch — backend spawns the LinkInsertCommand via
+            // exec(), returns 200 immediately. The unified bulk-status poller
+            // in LinkwiseLayout picks up real progress + handles the terminal
+            // toast + reload via the shared 'inboundinsert' kind. No more
+            // frontend pseudo-bulk simulation.
             const entryTitle = this.suggestModal?.entryTitle || '';
-            setHeavyState({
-                kind: 'inbound-insert',
-                label: 'Adding inbound links',
-                current: 0,
-                total: insertions.length,
-                context: { entryTitle },
-            });
 
             try {
                 const response = await fetch(insertUrl, {
@@ -788,82 +780,33 @@ export default {
                     body: JSON.stringify({
                         entry_hashes: entryHashes,
                         insertions,
+                        entry_title: entryTitle,
                     }),
                 });
                 if (response.status === 409) {
                     const err = await response.json().catch(() => ({}));
-                    setHeavyState(null);
-                    recordCompletion({
-                        kind: 'inbound-insert',
-                        label: 'Adding inbound links',
-                        phase: 'error',
-                        current: 0,
-                        total: insertions.length,
-                        extra: { message: err.message || 'Content was modified. Please reload and try again.' },
-                    });
-                    Statamic.$toast.error(err.message || 'Content was modified. Please reload and try again.');
+                    Statamic.$toast.error(err.message || 'Another bulk operation is running. Wait for it to finish.', { duration: 12000 });
                     return;
                 }
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
+                    // Surface specific 422 field errors instead of "given
+                    // data was invalid". The renderable() exception logger
+                    // captures the full payload server-side for support.
                     const fieldErrors = err.errors ? Object.values(err.errors).flat() : [];
-                    const detail = fieldErrors[0]
-                        || err.message
-                        || `HTTP ${response.status}`;
-                    setHeavyState(null);
-                    recordCompletion({
-                        kind: 'inbound-insert',
-                        label: 'Adding inbound links',
-                        phase: 'error',
-                        current: 0,
-                        total: insertions.length,
-                        extra: { message: `Could not add links: ${detail}` },
-                    });
+                    const detail = fieldErrors[0] || err.message || `HTTP ${response.status}`;
                     Statamic.$toast.error(
-                        `Could not add links: ${detail} If this persists, download the diagnostic ZIP via Help → and share with support.`,
+                        `Could not start link insert: ${detail} If this persists, download the diagnostic ZIP via Help → and share with support.`,
                         { duration: 12000 },
                     );
                     return;
                 }
-                const data = await response.json();
-                const succeeded = (data.results || []).filter(r => r.success).length;
-                const failed = (data.results || []).length - succeeded;
-                setHeavyState(null);
-                recordCompletion({
-                    kind: 'inbound-insert',
-                    label: 'Adding inbound links',
-                    phase: 'done',
-                    current: succeeded,
-                    total: insertions.length,
-                    extra: { succeeded, skipped: failed, entry_title: entryTitle },
-                });
-                if (succeeded > 0 && failed === 0) {
-                    Statamic.$toast.success(`${succeeded} link(s) added.`);
-                } else if (succeeded > 0 && failed > 0) {
-                    Statamic.$toast.success(`${succeeded} link(s) added, ${failed} skipped (anchor text not found in entry — re-scan content if recently edited).`);
-                } else {
-                    const reasons = (data.results || [])
-                        .map(r => r.error)
-                        .filter(Boolean);
-                    const top = reasons[0] || 'Anchor text not found in entries — try re-scanning content';
-                    Statamic.$toast.error(
-                        `Could not add any of the ${insertions.length} links: ${top}.`,
-                        { duration: 12000 },
-                    );
-                }
-                this.reloadEntries();
+                // Backend started the command. Trigger an immediate poll
+                // so the live banner shows up without 1.5s lag.
+                this.$emit('refresh-bulk-status');
             } catch (e) {
-                setHeavyState(null);
-                recordCompletion({
-                    kind: 'inbound-insert',
-                    label: 'Adding inbound links',
-                    phase: 'error',
-                    current: 0,
-                    total: insertions.length,
-                    extra: { message: `Network error: ${e.message || 'unknown'}` },
-                });
                 Statamic.$toast.error(
-                    `Could not add links — ${e.message || 'network error'}. Check your connection and retry.`,
+                    `Could not start link insert — ${e.message || 'network error'}. Check your connection and retry.`,
                     { duration: 12000 },
                 );
             }
@@ -903,18 +846,11 @@ export default {
 
             this.closeSuggestModal();
 
-            // Same bulk-banner integration as Inbound — show "Adding outbound
-            // links from <entry>" while the request is in flight, persist a
-            // completion banner for the result. Visual parity with Heavy
-            // bulks like Apply Rule / URL Changer.
+            // Heavy-bulk dispatch — backend spawns LinkInsertCommand via exec(),
+            // returns 200 immediately. The unified bulk-status poller picks up
+            // real progress under the 'outboundinsert' kind. Same UX surface
+            // as DetailUnlink / Apply Rule / URL-Changer.
             const outboundEntryTitle = this.suggestModal?.entryTitle || '';
-            setHeavyState({
-                kind: 'outbound-insert',
-                label: 'Adding outbound links',
-                current: 0,
-                total: insertions.length,
-                context: { entryTitle: outboundEntryTitle },
-            });
 
             try {
                 const response = await fetch(insertUrl, {
@@ -928,82 +864,32 @@ export default {
                         entry_id: entryId,
                         content_hash: contentHash,
                         insertions,
+                        entry_title: outboundEntryTitle,
                     }),
                 });
                 if (response.status === 409) {
                     const err = await response.json().catch(() => ({}));
-                    setHeavyState(null);
-                    recordCompletion({
-                        kind: 'outbound-insert',
-                        label: 'Adding outbound links',
-                        phase: 'error',
-                        current: 0,
-                        total: insertions.length,
-                        extra: { message: err.message || 'Content was modified. Please reload and try again.' },
-                    });
-                    Statamic.$toast.error(err.message || 'Content was modified. Please reload and try again.');
+                    Statamic.$toast.error(err.message || 'Another bulk operation is running. Wait for it to finish.', { duration: 12000 });
                     return;
                 }
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
                     const fieldErrors = err.errors ? Object.values(err.errors).flat() : [];
-                    const detail = fieldErrors[0]
-                        || err.message
-                        || `HTTP ${response.status}`;
-                    setHeavyState(null);
-                    recordCompletion({
-                        kind: 'outbound-insert',
-                        label: 'Adding outbound links',
-                        phase: 'error',
-                        current: 0,
-                        total: insertions.length,
-                        extra: { message: `Could not add links: ${detail}` },
-                    });
+                    const detail = fieldErrors[0] || err.message || `HTTP ${response.status}`;
                     Statamic.$toast.error(
-                        `Could not add links: ${detail} If this persists, download the diagnostic ZIP via Help → and share with support.`,
+                        `Could not start link insert: ${detail} If this persists, download the diagnostic ZIP via Help → and share with support.`,
                         { duration: 12000 },
                     );
                     return;
                 }
-                const data = await response.json();
-                const succeeded = (data.results || []).filter(r => r.success).length;
-                const failed = (data.results || []).length - succeeded;
-                setHeavyState(null);
-                recordCompletion({
-                    kind: 'outbound-insert',
-                    label: 'Adding outbound links',
-                    phase: 'done',
-                    current: succeeded,
-                    total: insertions.length,
-                    extra: { succeeded, skipped: failed, entry_title: outboundEntryTitle },
-                });
-                if (succeeded > 0 && failed === 0) {
-                    Statamic.$toast.success(`${succeeded} link(s) added.`);
-                } else if (succeeded > 0 && failed > 0) {
-                    Statamic.$toast.success(`${succeeded} link(s) added, ${failed} skipped (anchor text not found in entry — re-scan content if recently edited).`);
-                } else {
-                    const reasons = (data.results || [])
-                        .map(r => r.error)
-                        .filter(Boolean);
-                    const top = reasons[0] || 'Anchor text not found in entry — try re-scanning content';
-                    Statamic.$toast.error(
-                        `Could not add any of the ${insertions.length} links: ${top}.`,
-                        { duration: 12000 },
-                    );
-                }
-                this.reloadEntries();
+                // Backend started the command; the unified poller will
+                // surface progress + fire the terminal toast + reload the
+                // page. Trigger an immediate poll so the banner shows
+                // without 1.5s lag.
+                this.$emit('refresh-bulk-status');
             } catch (e) {
-                setHeavyState(null);
-                recordCompletion({
-                    kind: 'outbound-insert',
-                    label: 'Adding outbound links',
-                    phase: 'error',
-                    current: 0,
-                    total: insertions.length,
-                    extra: { message: `Network error: ${e.message || 'unknown'}` },
-                });
                 Statamic.$toast.error(
-                    `Could not add links — ${e.message || 'network error'}. Check your connection and retry.`,
+                    `Could not start link insert — ${e.message || 'network error'}. Check your connection and retry.`,
                     { duration: 12000 },
                 );
             }

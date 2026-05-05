@@ -105,6 +105,10 @@ Route::middleware('can:manage linkwise')->group(function () {
 
     Route::post('linkwise/inbound/insert', [InboundController::class, 'insert'])
         ->name('linkwise.inbound.insert');
+    Route::post('linkwise/inbound/insert/cancel', [DashboardController::class, 'inboundInsertCancel'])
+        ->name('linkwise.inbound.insert.cancel');
+    Route::post('linkwise/outbound/insert/cancel', [DashboardController::class, 'outboundInsertCancel'])
+        ->name('linkwise.outbound.insert.cancel');
 
     // Auto-Linking
     Route::post('linkwise/autolink/rules', [AutoLinkController::class, 'store'])

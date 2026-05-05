@@ -61,11 +61,15 @@ class InboundController extends CpController
         ]);
     }
 
+    /**
+     * Trigger an Inbound bulk-add as a heavy job — same dispatch pattern as
+     * DetailUnlink / URL-Changer Apply / Apply Rule. Returns immediately
+     * after exec()ing the artisan command in the background; the frontend
+     * picks up real progress via the unified bulk-status poller.
+     */
     public function insert(Request $request): JsonResponse
     {
-        // Refuse if a registered bulk job is running — they all rebuild the index
-        // at the end and would race with these per-entry inserts.
-        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob()) {
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('inboundinsert')) {
             return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
@@ -75,9 +79,11 @@ class InboundController extends CpController
             'insertions.*.source_entry_id' => ['required', 'string'],
             'insertions.*.target_entry_id' => ['required', 'string'],
             'insertions.*.anchor_text' => ['required', 'string'],
+            'entry_title' => ['sometimes', 'nullable', 'string'],
         ]);
 
-        // Verify entry hashes before any modifications
+        // Pre-flight hash check — fail-fast 409 before dispatch instead of
+        // letting the loop hit conflicts mid-run.
         $conflicts = SafeEntrySaver::verifyHashes($request->input('entry_hashes', []));
         if (! empty($conflicts)) {
             $title = reset($conflicts);
@@ -88,48 +94,39 @@ class InboundController extends CpController
             ], 409);
         }
 
-        $results = [];
+        $user = auth()->user();
+        $startedBy = $user?->name() ?? $user?->email() ?? null;
+        $startedById = $user?->id() ?? null;
 
-        foreach ($validated['insertions'] as $insertion) {
-            try {
-                $success = BardLinkInserter::insertLinkIntoEntry(
-                    $insertion['source_entry_id'],
-                    $insertion['anchor_text'],
-                    $insertion['target_entry_id'],
-                );
+        // Wipe stale terminal-status from a previous run so the poller
+        // doesn't confuse it with the new dispatch.
+        \Illuminate\Support\Facades\Cache::forget('linkwise:inboundinsert:status');
+        \Illuminate\Support\Facades\Cache::forget('linkwise:inboundinsert:cancel');
 
-                $results[] = [
-                    'source_entry_id' => $insertion['source_entry_id'],
-                    'success' => $success,
-                    'error' => $success ? null : 'Anchor text not found in entry. Try rebuilding the index.',
-                ];
-            } catch (EntryConflictException $e) {
-                $results[] = [
-                    'source_entry_id' => $insertion['source_entry_id'],
-                    'success' => false,
-                    'error' => $e->getMessage(),
-                ];
-            } catch (\Throwable $e) {
-                Log::warning('[Linkwise] Failed to insert inbound link: '.$e->getMessage());
+        \Illuminate\Support\Facades\Cache::put('linkwise:inboundinsert:payload', [
+            'source_mode' => 'inbound',
+            'insertions' => $validated['insertions'],
+            'entry_hashes' => $validated['entry_hashes'] ?? [],
+            'entry_title' => $validated['entry_title'] ?? '',
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+        ], 600);
+        \Illuminate\Support\Facades\Cache::put('linkwise:inboundinsert:status', [
+            'phase' => 'starting',
+            'total' => count($validated['insertions']),
+            'current' => 0,
+            'source_mode' => 'inbound',
+            'entry_title' => $validated['entry_title'] ?? '',
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+        ], 600);
 
-                $results[] = [
-                    'source_entry_id' => $insertion['source_entry_id'],
-                    'success' => false,
-                    'error' => 'Failed to insert link.',
-                ];
-            }
-        }
+        $artisan = escapeshellarg(base_path('artisan'));
+        $php = escapeshellarg(PHP_BINARY);
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('link-insert.log', 'Link Insert'));
 
-        // Rebuild index so outboundLinks reflect new links (skip on intermediate sequential requests)
-        $anySuccess = collect($results)->contains('success', true);
-        $skipRebuild = $request->boolean('skip_rebuild', false);
+        exec("$php $artisan linkwise:link-insert >> $log 2>&1 &");
 
-        if ($anySuccess && ! $skipRebuild) {
-            $this->indexer->clearCache();
-            $records = $this->indexer->buildIndex();
-            $this->indexer->save($records);
-        }
-
-        return response()->json(['results' => $results]);
+        return response()->json(['success' => true, 'message' => 'Inbound insert started']);
     }
 }

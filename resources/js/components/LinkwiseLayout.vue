@@ -439,6 +439,20 @@ export default {
                 if (n > 0) return `${n} ${direction} link(s) removed${t}, ${skipped} skipped.`;
                 return `Could not remove any ${direction} links${t} — ${skipped} skipped.`;
             }
+            if (kind === 'inboundinsert' || kind === 'outboundinsert') {
+                const direction = kind === 'inboundinsert' ? 'inbound' : 'outbound';
+                const n = e.succeeded || 0;
+                const skipped = e.skipped || 0;
+                const t = e.entry_title ? ` for "${e.entry_title}"` : '';
+                if (n > 0 && skipped === 0) return `${n} ${direction} link(s) added${t}.`;
+                if (n > 0) return `${n} ${direction} link(s) added${t}, ${skipped} skipped (anchor not found — re-scan content if recently edited).`;
+                // 0 succeeded — surface the top error reason from the
+                // command's per-item errors map, same pattern as URL-Changer.
+                const errs = e.errors || {};
+                const reasons = Object.entries(errs).sort((a, b) => b[1] - a[1]);
+                const topReason = reasons[0]?.[0] || 'anchor text not found';
+                return `Could not add any ${direction} links${t} — ${topReason}. Re-scan content and retry.`;
+            }
             return `${c.label || 'Operation'} complete.`;
         },
 
@@ -449,11 +463,11 @@ export default {
             const title = ctx.entryTitle ? `"${ctx.entryTitle}"` : '';
 
             switch (a.kind) {
-                case 'inbound-insert':
+                case 'inboundinsert':
                     return title
                         ? `Adding inbound links to ${title}`
                         : 'Adding inbound links';
-                case 'outbound-insert':
+                case 'outboundinsert':
                     return title
                         ? `Adding outbound links from ${title}`
                         : 'Adding outbound links';
@@ -513,8 +527,8 @@ export default {
             if (!a) return '';
             const ctx = a.context || {};
             switch (a.kind) {
-                case 'inbound-insert': return 'Adding inbound links';
-                case 'outbound-insert': return 'Adding outbound links';
+                case 'inboundinsert': return 'Adding inbound links';
+                case 'outboundinsert': return 'Adding outbound links';
                 case 'detail-unlink': return 'Removing links';
                 case 'scan': return 'Scanning content';
                 case 'check': return 'Checking links';
@@ -569,7 +583,7 @@ export default {
             // in THIS instance. Prevents firing stale completion toasts/actions
             // when a 'done' state is still in the server cache from a previous
             // session (cache TTL 300s would otherwise cause reload loops on scan).
-            seenRunning: { scan: false, check: false, bulkunlink: false, applyrule: false, urlchanger: false, detailunlink: false },
+            seenRunning: { scan: false, check: false, bulkunlink: false, applyrule: false, urlchanger: false, detailunlink: false, inboundinsert: false, outboundinsert: false },
             tabs: [
                 { name: 'overview', label: 'Overview', url: this.route('linkwise.dashboard') },
                 { name: 'links', label: 'Links Report', url: this.route('linkwise.links') },
@@ -956,6 +970,17 @@ export default {
                     this.seenRunning.check = false;
                     window.location.reload();
                 }
+                // After inbound/outbound bulk-add: reload so the entries
+                // table reflects new outbound/inbound counts and the index
+                // changes from finalizeIndex() are visible. Same once-per-
+                // instance guard so a stale 'done' from a previous session
+                // (cache TTL 300s) doesn't loop.
+                if ((status.kind === 'inboundinsert' || status.kind === 'outboundinsert')
+                    && phase === 'done'
+                    && this.seenRunning[status.kind]) {
+                    this.seenRunning[status.kind] = false;
+                    window.location.reload();
+                }
             } catch {
                 // transient errors — try again next tick
             }
@@ -995,6 +1020,21 @@ export default {
                     if (n > 0 && skipped === 0) Statamic.$toast.success(`${n} ${verb} link(s) removed${t}.`);
                     else if (n > 0) Statamic.$toast.success(`${n} ${verb} link(s) removed${t}, ${skipped} skipped.`);
                     else Statamic.$toast.error(`Could not remove any ${verb} links${t} — ${skipped} skipped.`);
+                } else if (kind === 'inboundinsert' || kind === 'outboundinsert') {
+                    const direction = kind === 'inboundinsert' ? 'inbound' : 'outbound';
+                    const n = extra.succeeded || 0;
+                    const skipped = extra.skipped || 0;
+                    const t = extra.entry_title ? ` for "${extra.entry_title}"` : '';
+                    if (n > 0 && skipped === 0) {
+                        Statamic.$toast.success(`${n} ${direction} link(s) added${t}.`);
+                    } else if (n > 0) {
+                        Statamic.$toast.success(`${n} ${direction} link(s) added${t}, ${skipped} skipped (anchor not found — re-scan if recently edited).`);
+                    } else {
+                        const errs = extra.errors || {};
+                        const reasons = Object.entries(errs).sort((a, b) => b[1] - a[1]);
+                        const topReason = reasons[0]?.[0] || 'anchor text not found';
+                        Statamic.$toast.error(`Could not add any ${direction} links${t} — ${topReason}. Re-scan content and retry.`, { duration: 12000 });
+                    }
                 } else if (kind === 'check') {
                     Statamic.$toast.success('Broken-link check complete.');
                 } else if (kind === 'urlchanger') {

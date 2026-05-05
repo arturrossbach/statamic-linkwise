@@ -7,6 +7,7 @@ use Arturrossbach\Linkwise\Commands\BulkUnlinkCommand;
 use Arturrossbach\Linkwise\Commands\CheckLinksCommand;
 use Arturrossbach\Linkwise\Commands\DetailUnlinkCommand;
 use Arturrossbach\Linkwise\Commands\IndexCommand;
+use Arturrossbach\Linkwise\Commands\LinkInsertCommand;
 use Arturrossbach\Linkwise\Commands\SeedTestDataCommand;
 use Arturrossbach\Linkwise\Commands\UrlChangerApplyCommand;
 use Arturrossbach\Linkwise\Links\LinkwiseLinkMark;
@@ -30,6 +31,7 @@ class ServiceProvider extends AddonServiceProvider
         ApplyRuleCommand::class,
         UrlChangerApplyCommand::class,
         DetailUnlinkCommand::class,
+        LinkInsertCommand::class,
         SeedTestDataCommand::class,
     ];
 

@@ -39,6 +39,12 @@ import { errorToast, warnToast } from '../utils/toast.js';
  */
 export const bulkState = reactive({
     active: null,
+    // Persistent completion-banner snapshot. Also mirrored to sessionStorage
+    // so the recap survives reloads, but the reactive copy here is what
+    // drives LinkwiseLayout's banner — so a child component (e.g.
+    // LinksReportTab's inbound-bulk-add) can call recordCompletion() and
+    // the layout updates immediately without a remount.
+    lastCompletion: null,
 });
 
 /**
@@ -113,17 +119,31 @@ const LAST_COMPLETION_KEY = 'linkwise:bulk:lastCompletion';
  * fireTerminalToast path.
  */
 export function recordCompletion(snapshot) {
+    const record = {
+        ...snapshot,
+        recordedAt: Date.now(),
+    };
+    // Reactive copy first — drives the layout banner immediately, even if a
+    // child component (LinksReportTab) made the call.
+    bulkState.lastCompletion = record;
     try {
-        sessionStorage.setItem(LAST_COMPLETION_KEY, JSON.stringify({
-            ...snapshot,
-            recordedAt: Date.now(),
-        }));
+        sessionStorage.setItem(LAST_COMPLETION_KEY, JSON.stringify(record));
     } catch {
-        // Quota / private mode — banner is a UX bonus, not load-bearing.
+        // Quota / private mode — reactive copy still works for the
+        // current page; recap won't survive reload but the banner DOES
+        // show. Banner is a UX bonus, not load-bearing.
     }
 }
 
 export function getLastCompletion() {
+    // Prefer the reactive in-memory copy (set by recordCompletion). Fall
+    // back to sessionStorage on first access (e.g. after a page reload
+    // when the reactive state is fresh but sessionStorage holds the
+    // last bulk's record). Hydrating bulkState.lastCompletion on this
+    // first read means subsequent reactive consumers see the same value.
+    if (bulkState.lastCompletion) {
+        return bulkState.lastCompletion;
+    }
     try {
         const raw = sessionStorage.getItem(LAST_COMPLETION_KEY);
         if (!raw) return null;
@@ -134,6 +154,7 @@ export function getLastCompletion() {
             sessionStorage.removeItem(LAST_COMPLETION_KEY);
             return null;
         }
+        bulkState.lastCompletion = data;
         return data;
     } catch {
         return null;
@@ -141,6 +162,7 @@ export function getLastCompletion() {
 }
 
 export function clearLastCompletion() {
+    bulkState.lastCompletion = null;
     try {
         sessionStorage.removeItem(LAST_COMPLETION_KEY);
     } catch {

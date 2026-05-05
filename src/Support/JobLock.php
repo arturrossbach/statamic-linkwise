@@ -32,6 +32,8 @@ class JobLock
         'applyrule' => ['key' => 'linkwise:applyrule:status', 'label' => 'auto-link apply'],
         'urlchanger' => ['key' => 'linkwise:urlchanger:status', 'label' => 'URL changer'],
         'detailunlink' => ['key' => 'linkwise:detailunlink:status', 'label' => 'remove links'],
+        'inboundinsert' => ['key' => 'linkwise:inboundinsert:status', 'label' => 'add inbound links'],
+        'outboundinsert' => ['key' => 'linkwise:outboundinsert:status', 'label' => 'add outbound links'],
     ];
 
     /**
