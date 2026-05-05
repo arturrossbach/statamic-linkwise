@@ -71,7 +71,7 @@ class InboundController extends CpController
 
         $validated = $request->validate([
             'entry_hashes' => ['sometimes', 'array'],
-            'insertions' => ['required', 'array', 'min:1', 'max:50'],
+            'insertions' => ['required', 'array', 'min:1', 'max:200'],
             'insertions.*.source_entry_id' => ['required', 'string'],
             'insertions.*.target_entry_id' => ['required', 'string'],
             'insertions.*.anchor_text' => ['required', 'string'],

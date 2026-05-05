@@ -732,8 +732,14 @@ export default {
             // Build the insertions payload. Each suggestion targets a
             // DIFFERENT source entry (the entry that should now contain a
             // link to the modal-target entry).
+            // Inbound-suggestion items come from InboundController::suggestions
+            // → InboundSuggestion::toArray() which returns `source_entry_id`
+            // (snake_case), NOT `id`. Earlier mapping `item.id` produced
+            // undefined → JSON.stringify dropped the field → backend returned
+            // 422 "source_entry_id is required" with NO useful UI message.
+            // (Caught only after we added the renderable() validation logger.)
             const insertions = items.map(item => ({
-                source_entry_id: item.id,
+                source_entry_id: item.source_entry_id,
                 target_entry_id: targetEntryId,
                 anchor_text: item._anchor || item.anchor_text,
             }));
