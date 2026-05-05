@@ -121,7 +121,7 @@
 
             <!-- Matches Table -->
             <Panel>
-                <table data-size="sm" class="data-table w-full text-sm table-fixed">
+                <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm table-fixed">
                     <thead>
                         <tr>
                             <th scope="col" style="width: 32px">
@@ -164,7 +164,7 @@
                             </td>
                         </tr>
                     </tbody>
-                </table>
+                </table></div>
             </Panel>
         </div>
 

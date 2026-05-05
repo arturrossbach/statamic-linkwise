@@ -37,7 +37,7 @@
                 </div>
 
                 <Panel>
-                    <table data-size="sm" class="data-table w-full text-sm">
+                    <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                         <thead>
                             <tr>
                                 <th v-if="applyUrl" scope="col" class="w-8">
@@ -119,7 +119,7 @@
                                 </template>
                             </tr>
                         </tbody>
-                    </table>
+                    </table></div>
                 </Panel>
             </template>
         </div>

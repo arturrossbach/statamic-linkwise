@@ -143,7 +143,7 @@
 
                 <!-- Inbound: Flat list -->
                 <Panel v-if="modal.mode === 'inbound'">
-                    <table data-size="sm" class="data-table w-full text-sm">
+                    <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                         <thead>
                             <tr>
                                 <th scope="col" class="w-8">
@@ -214,12 +214,12 @@
                                 </td>
                             </tr>
                         </tbody>
-                    </table>
+                    </table></div>
                 </Panel>
 
                 <!-- Outbound: Grouped -->
                 <Panel v-else>
-                    <table data-size="sm" class="data-table w-full text-sm">
+                    <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                         <thead>
                             <tr>
                                 <th scope="col" class="w-8">
@@ -314,7 +314,7 @@
                                 </tr>
                             </template>
                         </tbody>
-                    </table>
+                    </table></div>
                 </Panel>
             </template>
         </div>

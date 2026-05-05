@@ -78,7 +78,7 @@
 
         <!-- Table -->
         <Panel v-else>
-            <table data-size="sm" class="data-table w-full text-sm">
+            <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                 <thead>
                     <tr>
                         <SortableHeader label="Domain" :active="sortField === 'domain'" :direction="sortDirection" @sort="toggleSort('domain')">
@@ -142,7 +142,7 @@
                         </td>
                     </tr>
                 </tbody>
-            </table>
+            </table></div>
         </Panel>
 
         <!-- Detail Modal -->
@@ -165,7 +165,7 @@
                 </div>
 
                 <Panel>
-                    <table data-size="sm" class="data-table w-full text-sm">
+                    <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                         <thead>
                             <tr>
                                 <SortableHeader v-if="detailModal.type === 'links'" label="Anchor" :active="modalSortField === 'anchor_text'" :direction="modalSortDirection" @sort="toggleModalSort('anchor_text')" />
@@ -208,7 +208,7 @@
                                 </td>
                             </tr>
                         </tbody>
-                    </table>
+                    </table></div>
                 </Panel>
             </div>
         </Stack>

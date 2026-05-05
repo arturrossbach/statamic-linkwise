@@ -128,7 +128,7 @@
 
             <!-- Table -->
             <Panel>
-                <table data-size="sm" class="data-table w-full text-sm">
+                <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                 <thead>
                     <tr>
                         <SortableHeader label="Entry Title" :active="sortField === 'title'" :direction="sortDirection" @sort="toggleSort('title')" />
@@ -229,7 +229,7 @@
                         </td>
                     </tr>
                 </tbody>
-            </table>
+            </table></div>
             </Panel>
 
             <!-- Bottom Pagination -->

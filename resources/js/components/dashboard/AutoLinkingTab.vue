@@ -219,7 +219,7 @@
 
         <!-- Rules Table -->
         <Panel v-else>
-            <table data-size="sm" class="data-table w-full text-sm">
+            <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                 <thead>
                     <tr>
                         <th scope="col" class="w-8">
@@ -349,7 +349,7 @@
                         </td>
                     </tr>
                 </tbody>
-            </table>
+            </table></div>
         </Panel>
 
         <!-- Preview Modal -->
@@ -388,7 +388,7 @@
                     </div>
 
                     <Panel>
-                        <table data-size="sm" class="data-table w-full text-sm">
+                        <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                             <thead>
                                 <tr>
                                     <SortableHeader label="" :sortable="false" />
@@ -430,7 +430,7 @@
                                     </td>
                                 </tr>
                             </tbody>
-                        </table>
+                        </table></div>
                     </Panel>
                 </div>
             </div>
