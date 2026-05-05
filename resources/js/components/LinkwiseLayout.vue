@@ -64,12 +64,18 @@
 
         <!-- Tab Navigation + Content -->
         <div v-else>
-            <nav class="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-4" aria-label="Linkwise tabs">
+            <!-- Tab nav: horizontally scrollable on narrow viewports so the
+                 7 tabs never wrap into a multi-row stack (which fights the
+                 border-bottom indicator) and never trigger page-level
+                 horizontal scroll. Each tab label is whitespace-nowrap so
+                 multi-word labels (Auto-Linking, Target Keywords, URL Changer)
+                 stay on a single line. -->
+            <nav class="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-4 overflow-x-auto" aria-label="Linkwise tabs">
                 <Link
                     v-for="tab in tabs"
                     :key="tab.name"
                     :href="tab.url"
-                    class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors"
+                    class="px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap"
                     :class="tab.name === activeTab
                         ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                         : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'"
@@ -96,7 +102,7 @@
                         <p class="mt-0.5 text-xs opacity-80">{{ staleCheckBody }}</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <Button @click="runStaleCheck" :loading="checkingFromBanner" :disabled="!!activeBulk" text="Run check now" size="sm" />
+                        <Button @click="runStaleCheck" :loading="checkingFromBanner" :disabled="!!activeBulk" text="Run check now" size="xs" />
                         <Button @click="dismissStaleCheck" text="Dismiss" variant="default" size="xs" />
                     </div>
                 </div>
