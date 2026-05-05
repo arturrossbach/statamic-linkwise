@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Suggestions;
+namespace Arturrossbach\Linkwise\Suggestions;
 
 class InboundSuggestion
 {

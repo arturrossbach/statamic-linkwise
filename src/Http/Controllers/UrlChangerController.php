@@ -1,15 +1,15 @@
 <?php
 
-namespace Inkline\Linkwise\Http\Controllers;
+namespace Arturrossbach\Linkwise\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Inkline\Linkwise\Exceptions\EntryConflictException;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Links\BrokenLinkChecker;
-use Inkline\Linkwise\Links\BrokenLinkReport;
-use Inkline\Linkwise\Support\SafeEntrySaver;
-use Inkline\Linkwise\UrlChanger\UrlReplacer;
+use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Links\BrokenLinkChecker;
+use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
 use Statamic\Http\Controllers\CP\CpController;
 
 class UrlChangerController extends CpController
@@ -121,13 +121,13 @@ class UrlChangerController extends CpController
         foreach ($request->replacements as $r) {
             $this->brokenReport->removeLink($r['entry_id'], $r['matched_url']);
 
-            if ($actualReplacementHappened && $r['new_url'] !== \Inkline\Linkwise\Support\UrlHelper::UNLINK) {
+            if ($actualReplacementHappened && $r['new_url'] !== \Arturrossbach\Linkwise\Support\UrlHelper::UNLINK) {
                 $checkResult = $this->brokenChecker->checkUrl($r['new_url']);
                 if ($checkResult !== null) {
                     $report = $this->brokenReport->load();
                     $entryForTitle = \Statamic\Facades\Entry::find($r['entry_id']);
                     $now = now()->toIso8601String();
-                    $newRecord = new \Inkline\Linkwise\Links\BrokenLinkRecord(
+                    $newRecord = new \Arturrossbach\Linkwise\Links\BrokenLinkRecord(
                         postId: $r['entry_id'],
                         postTitle: $entryForTitle?->get('title') ?? $r['entry_id'],
                         url: $r['new_url'],
@@ -186,8 +186,8 @@ class UrlChangerController extends CpController
      */
     public function applyAsync(Request $request): JsonResponse
     {
-        if ($active = \Inkline\Linkwise\Support\JobLock::activeJob('urlchanger')) {
-            return response()->json(\Inkline\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('urlchanger')) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
         $validated = $request->validate([
@@ -254,7 +254,7 @@ class UrlChangerController extends CpController
 
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PHP_BINARY);
-        $log = escapeshellarg(\Inkline\Linkwise\Support\LogRotator::prepare('url-changer-apply.log', 'URL Changer Apply'));
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('url-changer-apply.log', 'URL Changer Apply'));
 
         exec("$php $artisan linkwise:url-changer:apply >> $log 2>&1 &");
 

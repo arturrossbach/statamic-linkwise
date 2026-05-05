@@ -1,8 +1,8 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\UrlChanger\UrlReplacer;
+use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -298,7 +298,7 @@ class UrlReplacerIntegrationTest extends TestCase
             ],
         ];
 
-        [$result, $replaced] = $this->replacer->replaceNthInBard($bard, 'old.com', 'https://old.com', \Inkline\Linkwise\Support\UrlHelper::UNLINK, 0);
+        [$result, $replaced] = $this->replacer->replaceNthInBard($bard, 'old.com', 'https://old.com', \Arturrossbach\Linkwise\Support\UrlHelper::UNLINK, 0);
 
         $this->assertTrue($replaced);
 
@@ -326,7 +326,7 @@ class UrlReplacerIntegrationTest extends TestCase
             ],
         ];
 
-        [$result, $replaced] = $this->replacer->replaceNthInBard($bard, 'old.com', 'https://old.com', \Inkline\Linkwise\Support\UrlHelper::UNLINK, 0);
+        [$result, $replaced] = $this->replacer->replaceNthInBard($bard, 'old.com', 'https://old.com', \Arturrossbach\Linkwise\Support\UrlHelper::UNLINK, 0);
 
         $this->assertTrue($replaced);
         $marks = $result[0]['content'][0]['marks'];
@@ -338,7 +338,7 @@ class UrlReplacerIntegrationTest extends TestCase
     {
         $md = 'See [click here](https://old.com) for more.';
 
-        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', \Inkline\Linkwise\Support\UrlHelper::UNLINK, 0);
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', \Arturrossbach\Linkwise\Support\UrlHelper::UNLINK, 0);
 
         $this->assertTrue($replaced);
         $this->assertSame('See click here for more.', $result);

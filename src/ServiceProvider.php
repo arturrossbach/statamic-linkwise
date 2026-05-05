@@ -1,19 +1,19 @@
 <?php
 
-namespace Inkline\Linkwise;
+namespace Arturrossbach\Linkwise;
 
-use Inkline\Linkwise\Commands\ApplyRuleCommand;
-use Inkline\Linkwise\Commands\BulkUnlinkCommand;
-use Inkline\Linkwise\Commands\CheckLinksCommand;
-use Inkline\Linkwise\Commands\DetailUnlinkCommand;
-use Inkline\Linkwise\Commands\IndexCommand;
-use Inkline\Linkwise\Commands\SeedTestDataCommand;
-use Inkline\Linkwise\Commands\UrlChangerApplyCommand;
-use Inkline\Linkwise\Links\LinkwiseLinkMark;
+use Arturrossbach\Linkwise\Commands\ApplyRuleCommand;
+use Arturrossbach\Linkwise\Commands\BulkUnlinkCommand;
+use Arturrossbach\Linkwise\Commands\CheckLinksCommand;
+use Arturrossbach\Linkwise\Commands\DetailUnlinkCommand;
+use Arturrossbach\Linkwise\Commands\IndexCommand;
+use Arturrossbach\Linkwise\Commands\SeedTestDataCommand;
+use Arturrossbach\Linkwise\Commands\UrlChangerApplyCommand;
+use Arturrossbach\Linkwise\Links\LinkwiseLinkMark;
 use Statamic\Fieldtypes\Bard\Augmentor;
-use Inkline\Linkwise\Subscribers\AutoLinkOnEntrySaveSubscriber;
-use Inkline\Linkwise\Subscribers\EntryBlueprintSubscriber;
-use Inkline\Linkwise\Subscribers\EntryIndexSubscriber;
+use Arturrossbach\Linkwise\Subscribers\AutoLinkOnEntrySaveSubscriber;
+use Arturrossbach\Linkwise\Subscribers\EntryBlueprintSubscriber;
+use Arturrossbach\Linkwise\Subscribers\EntryIndexSubscriber;
 use Statamic\Facades\Addon;
 use Statamic\Facades\CP\Nav;
 use Statamic\Facades\Permission;

@@ -1,15 +1,15 @@
 <?php
 
-namespace Inkline\Linkwise\Http\Controllers;
+namespace Arturrossbach\Linkwise\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Inkline\Linkwise\Exceptions\EntryConflictException;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Suggestions\InboundEngine;
-use Inkline\Linkwise\Support\BardLinkInserter;
-use Inkline\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Suggestions\InboundEngine;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Statamic\Facades\Entry;
 use Statamic\Http\Controllers\CP\CpController;
 
@@ -65,8 +65,8 @@ class InboundController extends CpController
     {
         // Refuse if a registered bulk job is running — they all rebuild the index
         // at the end and would race with these per-entry inserts.
-        if ($active = \Inkline\Linkwise\Support\JobLock::activeJob()) {
-            return response()->json(\Inkline\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob()) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
         $validated = $request->validate([

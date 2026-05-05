@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Reports\LinkReport;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Reports\LinkReport;
 use PHPUnit\Framework\TestCase;
 
 class LinkReportTest extends TestCase

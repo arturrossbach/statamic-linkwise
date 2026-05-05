@@ -1,15 +1,15 @@
 <?php
 
-namespace Inkline\Linkwise\Commands;
+namespace Arturrossbach\Linkwise\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Inkline\Linkwise\AutoLink\AutoLinkApplier;
-use Inkline\Linkwise\AutoLink\AutoLinkManager;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Support\JobLock;
-use Inkline\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Support\JobLock;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 
 /**
  * Detached artisan command that applies a single auto-link rule to all matching entries.

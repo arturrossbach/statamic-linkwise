@@ -48,7 +48,7 @@ export default defineConfig({
 
         footer: {
             message: 'Released under a commercial license.',
-            copyright: 'Copyright © 2026 Inkline',
+            copyright: 'Copyright © 2026 Artur Rossbach',
         },
 
         editLink: {

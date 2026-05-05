@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Support;
+namespace Arturrossbach\Linkwise\Support;
 
 /**
  * Single source of truth for "is this string a piece of user content vs

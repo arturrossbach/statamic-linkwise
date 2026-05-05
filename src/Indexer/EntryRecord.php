@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Indexer;
+namespace Arturrossbach\Linkwise\Indexer;
 
 class EntryRecord
 {

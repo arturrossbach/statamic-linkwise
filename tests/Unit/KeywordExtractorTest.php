@@ -1,8 +1,8 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\NLP\KeywordExtractor;
+use Arturrossbach\Linkwise\NLP\KeywordExtractor;
 use PHPUnit\Framework\TestCase;
 
 class KeywordExtractorTest extends TestCase

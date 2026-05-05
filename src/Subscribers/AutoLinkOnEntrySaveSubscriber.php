@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Subscribers;
+namespace Arturrossbach\Linkwise\Subscribers;
 
 use Illuminate\Events\Dispatcher;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Inkline\Linkwise\AutoLink\AutoLinkManager;
-use Inkline\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use Statamic\Events\EntrySaved;
 
 /**

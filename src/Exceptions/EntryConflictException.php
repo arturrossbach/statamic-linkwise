@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Exceptions;
+namespace Arturrossbach\Linkwise\Exceptions;
 
 use RuntimeException;
 

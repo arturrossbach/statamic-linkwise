@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Reports;
+namespace Arturrossbach\Linkwise\Reports;
 
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Suggestions\SuggestionEngine;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 
 class LinkReport
 {

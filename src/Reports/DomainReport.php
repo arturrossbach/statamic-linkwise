@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Reports;
+namespace Arturrossbach\Linkwise\Reports;
 
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Support\ContextExtractor;
-use Inkline\Linkwise\Support\EntryFieldWalker;
-use Inkline\Linkwise\Support\TextExtractor;
-use Inkline\Linkwise\Support\UrlHelper;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Support\ContextExtractor;
+use Arturrossbach\Linkwise\Support\EntryFieldWalker;
+use Arturrossbach\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\Support\UrlHelper;
 use Statamic\Facades\Entry;
 
 class DomainReport

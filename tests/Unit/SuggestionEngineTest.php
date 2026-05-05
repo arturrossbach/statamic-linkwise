@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Suggestions\SuggestionEngine;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use PHPUnit\Framework\TestCase;
 
 class SuggestionEngineTest extends TestCase

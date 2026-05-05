@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\AutoLink;
+namespace Arturrossbach\Linkwise\AutoLink;
 
 class AutoLinkManager
 {

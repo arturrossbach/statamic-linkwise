@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Tests;
+namespace Arturrossbach\Linkwise\Tests;
 
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 
@@ -10,7 +10,7 @@ abstract class TestCase extends OrchestraTestCase
     {
         return [
             \Statamic\Providers\StatamicServiceProvider::class,
-            \Inkline\Linkwise\ServiceProvider::class,
+            \Arturrossbach\Linkwise\ServiceProvider::class,
         ];
     }
 }

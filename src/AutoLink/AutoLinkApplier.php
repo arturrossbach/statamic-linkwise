@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\AutoLink;
+namespace Arturrossbach\Linkwise\AutoLink;
 
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Support\BardLinkInserter;
-use Inkline\Linkwise\Support\ContextExtractor;
-use Inkline\Linkwise\Support\ProseMirrorTypes;
-use Inkline\Linkwise\Support\UrlHelper;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\ContextExtractor;
+use Arturrossbach\Linkwise\Support\ProseMirrorTypes;
+use Arturrossbach\Linkwise\Support\UrlHelper;
 use Statamic\Facades\Entry;
 
 class AutoLinkApplier

@@ -1,5 +1,5 @@
 {
-    "name": "inkline/statamic-linkwise",
+    "name": "arturrossbach/linkwise",
     "type": "statamic-addon",
     "description": "Intelligent internal linking assistant for Statamic — find broken links, suggest internal links, manage rel attributes, and bulk-replace URLs.",
     "license": "proprietary",
@@ -37,12 +37,12 @@
     },
     "autoload": {
         "psr-4": {
-            "Inkline\\Linkwise\\": "src"
+            "Arturrossbach\\Linkwise\\": "src"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Inkline\\Linkwise\\Tests\\": "tests"
+            "Arturrossbach\\Linkwise\\Tests\\": "tests"
         }
     },
     "extra": {
@@ -52,7 +52,7 @@
         },
         "laravel": {
             "providers": [
-                "Inkline\\Linkwise\\ServiceProvider"
+                "Arturrossbach\\Linkwise\\ServiceProvider"
             ]
         }
     },

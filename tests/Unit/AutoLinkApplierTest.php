@@ -1,13 +1,13 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\AutoLink\AutoLinkApplier;
-use Inkline\Linkwise\AutoLink\AutoLinkManager;
-use Inkline\Linkwise\AutoLink\AutoLinkRule;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkRule;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use PHPUnit\Framework\TestCase;
 
 class AutoLinkApplierTest extends TestCase
@@ -196,7 +196,7 @@ class AutoLinkApplierTest extends TestCase
     {
         // The boost method is protected, so we test it via reflection
         // This verifies the boost logic works correctly in isolation
-        $suggestion = new \Inkline\Linkwise\Suggestions\Suggestion(
+        $suggestion = new \Arturrossbach\Linkwise\Suggestions\Suggestion(
             targetEntryId: 'test-entry',
             targetTitle: 'Test Entry',
             targetUrl: '/test',
@@ -207,7 +207,7 @@ class AutoLinkApplierTest extends TestCase
             sentenceContext: 'This is a test',
         );
 
-        $engine = new \Inkline\Linkwise\Suggestions\SuggestionEngine;
+        $engine = new \Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
         $method = new \ReflectionMethod($engine, 'applyTargetKeywordBoost');
         $method->setAccessible(true);
 

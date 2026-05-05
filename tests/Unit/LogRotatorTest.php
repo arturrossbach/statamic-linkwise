@@ -1,8 +1,8 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Support\LogRotator;
+use Arturrossbach\Linkwise\Support\LogRotator;
 use Orchestra\Testbench\TestCase;
 
 class LogRotatorTest extends TestCase

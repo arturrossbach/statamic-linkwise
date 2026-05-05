@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\AutoLink\AutoLinkManager;
-use Inkline\Linkwise\Tests\TestCase;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
+use Arturrossbach\Linkwise\Tests\TestCase;
 
 /**
  * Bulk operations on rules: deleteRules + setRulesActive.
@@ -131,32 +131,32 @@ class AutoLinkManagerBulkTest extends TestCase
 
     public function test_normalize_auto_apply_legacy_true_becomes_follow_global(): void
     {
-        $this->assertSame('follow_global', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(true));
+        $this->assertSame('follow_global', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(true));
     }
 
     public function test_normalize_auto_apply_legacy_false_becomes_never(): void
     {
-        $this->assertSame('never', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(false));
+        $this->assertSame('never', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(false));
     }
 
     public function test_normalize_auto_apply_passes_through_valid_states(): void
     {
-        $this->assertSame('follow_global', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply('follow_global'));
-        $this->assertSame('always', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply('always'));
-        $this->assertSame('never', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply('never'));
+        $this->assertSame('follow_global', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply('follow_global'));
+        $this->assertSame('always', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply('always'));
+        $this->assertSame('never', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply('never'));
     }
 
     public function test_normalize_auto_apply_unknown_falls_back_to_follow_global(): void
     {
-        $this->assertSame('follow_global', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(null));
-        $this->assertSame('follow_global', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply('invalid'));
-        $this->assertSame('follow_global', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(1));
-        $this->assertSame('follow_global', \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(''));
+        $this->assertSame('follow_global', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(null));
+        $this->assertSame('follow_global', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply('invalid'));
+        $this->assertSame('follow_global', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(1));
+        $this->assertSame('follow_global', \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(''));
     }
 
     public function test_rule_round_trips_tristate(): void
     {
-        $rule = \Inkline\Linkwise\AutoLink\AutoLinkRule::create([
+        $rule = \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::create([
             'keyword' => 'hund',
             'url' => 'https://example.com',
             'auto_apply_on_save' => 'always',

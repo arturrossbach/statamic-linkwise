@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Subscribers;
+namespace Arturrossbach\Linkwise\Subscribers;
 
 use Illuminate\Events\Dispatcher;
 use Statamic\Events\EntryBlueprintFound;

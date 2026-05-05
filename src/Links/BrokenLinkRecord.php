@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Links;
+namespace Arturrossbach\Linkwise\Links;
 
 class BrokenLinkRecord
 {

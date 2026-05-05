@@ -1,18 +1,18 @@
 <?php
 
-namespace Inkline\Linkwise\Commands;
+namespace Arturrossbach\Linkwise\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Inkline\Linkwise\Exceptions\EntryConflictException;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Links\BrokenLinkChecker;
-use Inkline\Linkwise\Links\BrokenLinkRecord;
-use Inkline\Linkwise\Links\BrokenLinkReport;
-use Inkline\Linkwise\Support\JobLock;
-use Inkline\Linkwise\Support\UrlHelper;
-use Inkline\Linkwise\UrlChanger\UrlReplacer;
+use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Links\BrokenLinkChecker;
+use Arturrossbach\Linkwise\Links\BrokenLinkRecord;
+use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Support\JobLock;
+use Arturrossbach\Linkwise\Support\UrlHelper;
+use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
 use Statamic\Facades\Entry;
 
 /**

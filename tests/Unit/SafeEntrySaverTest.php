@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Exceptions\EntryConflictException;
-use Inkline\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use PHPUnit\Framework\TestCase;
 
 class SafeEntrySaverTest extends TestCase

@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Fieldtypes;
+namespace Arturrossbach\Linkwise\Fieldtypes;
 
 use Statamic\Fields\Fieldtype;
 

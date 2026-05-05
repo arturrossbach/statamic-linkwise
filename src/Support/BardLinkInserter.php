@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Support;
+namespace Arturrossbach\Linkwise\Support;
 
-use Inkline\Linkwise\Support\SafeEntrySaver;
-use Inkline\Linkwise\Support\UrlHelper;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\Support\UrlHelper;
 use Statamic\Entries\Entry;
 use Statamic\Facades\Entry as EntryFacade;
 
@@ -215,7 +215,7 @@ class BardLinkInserter
      * Insert a link with a custom href into an entry's Bard or Markdown fields.
      */
     /**
-     * @throws \Inkline\Linkwise\Exceptions\EntryConflictException if entry was modified concurrently
+     * @throws \Arturrossbach\Linkwise\Exceptions\EntryConflictException if entry was modified concurrently
      */
     /**
      * Multi-insert variant of insertLinkIntoEntryWithHref.
@@ -223,7 +223,7 @@ class BardLinkInserter
      * Replicator fields in the entry. Returns the number of insertions made
      * (0 if none, which means no save happened).
      *
-     * @throws \Inkline\Linkwise\Exceptions\EntryConflictException if entry was modified concurrently
+     * @throws \Arturrossbach\Linkwise\Exceptions\EntryConflictException if entry was modified concurrently
      */
     public static function insertAllLinksIntoEntryWithHref(string $sourceEntryId, string $anchorText, string $href, bool $caseSensitive = false, bool $save = true): int
     {

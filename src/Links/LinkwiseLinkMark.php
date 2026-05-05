@@ -1,8 +1,8 @@
 <?php
 
-namespace Inkline\Linkwise\Links;
+namespace Arturrossbach\Linkwise\Links;
 
-use Inkline\Linkwise\Reports\DomainReport;
+use Arturrossbach\Linkwise\Reports\DomainReport;
 use Statamic\Fieldtypes\Bard\LinkMark;
 
 class LinkwiseLinkMark extends LinkMark

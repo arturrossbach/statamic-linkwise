@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Suggestions;
+namespace Arturrossbach\Linkwise\Suggestions;
 
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Keywords\TargetKeywordManager;
-use Inkline\Linkwise\NLP\Stemmer;
-use Inkline\Linkwise\NLP\Stopwords;
-use Inkline\Linkwise\Support\ContextExtractor;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
+use Arturrossbach\Linkwise\NLP\Stemmer;
+use Arturrossbach\Linkwise\NLP\Stopwords;
+use Arturrossbach\Linkwise\Support\ContextExtractor;
 
 class SuggestionEngine
 {

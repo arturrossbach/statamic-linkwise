@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Commands;
+namespace Arturrossbach\Linkwise\Commands;
 
 use Illuminate\Console\Command;
 use Statamic\Facades\Collection;

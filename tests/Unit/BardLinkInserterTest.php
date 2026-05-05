@@ -1,8 +1,8 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use PHPUnit\Framework\TestCase;
 
 class BardLinkInserterTest extends TestCase

@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Support;
+namespace Arturrossbach\Linkwise\Support;
 
 use Illuminate\Support\Facades\Cache;
 

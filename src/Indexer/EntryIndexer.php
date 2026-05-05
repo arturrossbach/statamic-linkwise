@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Indexer;
+namespace Arturrossbach\Linkwise\Indexer;
 
 use Illuminate\Support\Facades\Log;
-use Inkline\Linkwise\NLP\KeywordExtractor;
-use Inkline\Linkwise\Support\ProseMirrorTypes;
-use Inkline\Linkwise\Support\TextExtractor;
-use Inkline\Linkwise\Support\UrlHelper;
+use Arturrossbach\Linkwise\NLP\KeywordExtractor;
+use Arturrossbach\Linkwise\Support\ProseMirrorTypes;
+use Arturrossbach\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\Support\UrlHelper;
 use Statamic\Entries\Entry;
 use Statamic\Facades\Entry as EntryFacade;
 
@@ -125,8 +125,8 @@ class EntryIndexer
      */
     public function enrichWithSuggestionCountsStreamed(array $records, ?callable $onProgress = null): array
     {
-        $engine = app(\Inkline\Linkwise\Suggestions\SuggestionEngine::class);
-        $inboundEngine = app(\Inkline\Linkwise\Suggestions\InboundEngine::class);
+        $engine = app(\Arturrossbach\Linkwise\Suggestions\SuggestionEngine::class);
+        $inboundEngine = app(\Arturrossbach\Linkwise\Suggestions\InboundEngine::class);
 
         $total = count($records);
         $current = 0;
@@ -148,7 +148,7 @@ class EntryIndexer
 
             // Outbound count: SEPARATE engine call with default limit (identical to modal API)
             $outboundSuggestions = $engine->suggest($record->text, $records, $entryId, $record->outboundLinks);
-            $outboundCounts[$entryId] = \Inkline\Linkwise\Suggestions\OutboundSuggestionGrouper::countGroups($outboundSuggestions, $entryId);
+            $outboundCounts[$entryId] = \Arturrossbach\Linkwise\Suggestions\OutboundSuggestionGrouper::countGroups($outboundSuggestions, $entryId);
 
             // Collect inbound candidates + title match tracking
             foreach ($allSuggestions as $s) {
@@ -201,7 +201,7 @@ class EntryIndexer
                 // Filter 2: dry-run insert (same as modal endpoint)
                 $href = 'statamic://entry::'.$candidate['targetEntryId'];
                 try {
-                    if (\Inkline\Linkwise\Support\BardLinkInserter::insertLinkIntoEntryWithHref(
+                    if (\Arturrossbach\Linkwise\Support\BardLinkInserter::insertLinkIntoEntryWithHref(
                         $candidate['sourceEntryId'], $candidate['anchorText'], $href, false, false
                     )) {
                         $verified++;
@@ -243,8 +243,8 @@ class EntryIndexer
     public function computeSuggestionCountsForEntries(array $entryIds): array
     {
         $records = $this->load();
-        $engine = app(\Inkline\Linkwise\Suggestions\SuggestionEngine::class);
-        $inboundEngine = app(\Inkline\Linkwise\Suggestions\InboundEngine::class);
+        $engine = app(\Arturrossbach\Linkwise\Suggestions\SuggestionEngine::class);
+        $inboundEngine = app(\Arturrossbach\Linkwise\Suggestions\InboundEngine::class);
         $counts = [];
         $changed = false;
 
@@ -257,7 +257,7 @@ class EntryIndexer
 
             // Outbound: same code path as OutboundController (via shared Grouper)
             $suggestions = $engine->suggest($record->text, $records, $entryId, $record->outboundLinks);
-            $outboundCount = \Inkline\Linkwise\Suggestions\OutboundSuggestionGrouper::countGroups($suggestions, $entryId);
+            $outboundCount = \Arturrossbach\Linkwise\Suggestions\OutboundSuggestionGrouper::countGroups($suggestions, $entryId);
 
             // Inbound: use suggestFiltered (single source of truth)
             $inboundCount = count($inboundEngine->suggestFiltered($entryId));

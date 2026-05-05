@@ -1,14 +1,14 @@
 <?php
 
-namespace Inkline\Linkwise\Links;
+namespace Arturrossbach\Linkwise\Links;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Support\ContextExtractor;
-use Inkline\Linkwise\Support\EntryFieldWalker;
-use Inkline\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Support\ContextExtractor;
+use Arturrossbach\Linkwise\Support\EntryFieldWalker;
+use Arturrossbach\Linkwise\Support\TextExtractor;
 use Statamic\Facades\Entry;
 
 class BrokenLinkChecker

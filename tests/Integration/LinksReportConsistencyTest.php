@@ -13,13 +13,13 @@ if (! function_exists('app') || ! app()->isBooted()) {
     $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 }
 
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Suggestions\InboundEngine;
-use Inkline\Linkwise\Suggestions\SuggestionEngine;
-use Inkline\Linkwise\Support\BardLinkInserter;
-use Inkline\Linkwise\Support\EntryFieldWalker;
-use Inkline\Linkwise\Support\ContextExtractor;
-use Inkline\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Suggestions\InboundEngine;
+use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\EntryFieldWalker;
+use Arturrossbach\Linkwise\Support\ContextExtractor;
+use Arturrossbach\Linkwise\Support\TextExtractor;
 use Statamic\Facades\Entry;
 
 /**
@@ -976,7 +976,7 @@ if (! $workflowSuggestion) {
                 // Might be split across nodes — check concatenated text
                 $fullText = '';
                 EntryFieldWalker::walk($sourceEntry, function (array $bard) use (&$fullText) {
-                    $fullText .= \Inkline\Linkwise\Support\TextExtractor::fromBard($bard) . ' ';
+                    $fullText .= \Arturrossbach\Linkwise\Support\TextExtractor::fromBard($bard) . ' ';
                 });
                 if (mb_stripos($fullText, $anchor) !== false) {
                     $pass("9h Text preserved after unlink", "'$anchor' in concatenated text");

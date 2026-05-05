@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Commands;
+namespace Arturrossbach\Linkwise\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Suggestions\SuggestionEngine;
-use Inkline\Linkwise\Support\JobLock;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
+use Arturrossbach\Linkwise\Support\JobLock;
 
 class IndexCommand extends Command
 {

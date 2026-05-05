@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Support;
+namespace Arturrossbach\Linkwise\Support;
 
 /**
  * Walks all content fields of a Statamic entry (Bard, Replicator, Markdown,

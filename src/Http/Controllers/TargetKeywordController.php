@@ -1,10 +1,10 @@
 <?php
 
-namespace Inkline\Linkwise\Http\Controllers;
+namespace Arturrossbach\Linkwise\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Inkline\Linkwise\Keywords\TargetKeywordManager;
+use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
 use Statamic\Http\Controllers\CP\CpController;
 
 class TargetKeywordController extends CpController

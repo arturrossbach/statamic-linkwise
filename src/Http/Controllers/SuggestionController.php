@@ -1,11 +1,11 @@
 <?php
 
-namespace Inkline\Linkwise\Http\Controllers;
+namespace Arturrossbach\Linkwise\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Suggestions\SuggestionEngine;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use Statamic\Http\Controllers\CP\CpController;
 
 class SuggestionController extends CpController

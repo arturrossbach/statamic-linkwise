@@ -1,8 +1,8 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
 use PHPUnit\Framework\TestCase;
 
 class EntryRecordTest extends TestCase

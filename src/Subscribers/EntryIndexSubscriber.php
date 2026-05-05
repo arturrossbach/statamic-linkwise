@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Subscribers;
+namespace Arturrossbach\Linkwise\Subscribers;
 
 use Illuminate\Events\Dispatcher;
 use Illuminate\Support\Facades\Log;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\NLP\KeywordExtractor;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\NLP\KeywordExtractor;
 use Statamic\Events\EntryDeleted;
 use Statamic\Events\EntrySaved;
 

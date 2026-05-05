@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Support;
+namespace Arturrossbach\Linkwise\Support;
 
 use Illuminate\Support\Facades\Cache;
-use Inkline\Linkwise\Exceptions\EntryConflictException;
+use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Statamic\Entries\Entry;
 use Statamic\Facades\Entry as EntryFacade;
 

@@ -1,24 +1,24 @@
 <?php
 
-namespace Inkline\Linkwise\Http\Controllers;
+namespace Arturrossbach\Linkwise\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Inkline\Linkwise\AutoLink\AutoLinkApplier;
-use Inkline\Linkwise\AutoLink\AutoLinkManager;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Keywords\TargetKeywordManager;
-use Inkline\Linkwise\Links\BrokenLinkChecker;
-use Inkline\Linkwise\Links\BrokenLinkReport;
-use Inkline\Linkwise\Links\LinkwiseLinkMark;
-use Inkline\Linkwise\Reports\DomainReport;
-use Inkline\Linkwise\Reports\LinkReport;
-use Inkline\Linkwise\Suggestions\InboundEngine;
-use Inkline\Linkwise\Support\ContextExtractor;
-use Inkline\Linkwise\Support\EntryFieldWalker;
-use Inkline\Linkwise\Support\BardLinkInserter;
-use Inkline\Linkwise\Support\SafeEntrySaver;
-use Inkline\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
+use Arturrossbach\Linkwise\Links\BrokenLinkChecker;
+use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Links\LinkwiseLinkMark;
+use Arturrossbach\Linkwise\Reports\DomainReport;
+use Arturrossbach\Linkwise\Reports\LinkReport;
+use Arturrossbach\Linkwise\Suggestions\InboundEngine;
+use Arturrossbach\Linkwise\Support\ContextExtractor;
+use Arturrossbach\Linkwise\Support\EntryFieldWalker;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\Support\TextExtractor;
 use Inertia\Inertia;
 use Statamic\Http\Controllers\CP\CpController;
 
@@ -382,8 +382,8 @@ class DashboardController extends CpController
                 // prop. Eliminates the sync-risk of duplicating "50" in two
                 // places (was a code-review blocker).
                 'limits' => [
-                    'max_keywords_per_entry' => \Inkline\Linkwise\Http\Controllers\TargetKeywordController::MAX_KEYWORDS_PER_ENTRY,
-                    'max_keyword_length' => \Inkline\Linkwise\Http\Controllers\TargetKeywordController::MAX_KEYWORD_LENGTH,
+                    'max_keywords_per_entry' => \Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController::MAX_KEYWORDS_PER_ENTRY,
+                    'max_keyword_length' => \Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController::MAX_KEYWORD_LENGTH,
                 ],
             ],
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
@@ -457,7 +457,7 @@ class DashboardController extends CpController
         $outboundSuggestionCount = 0;
         $record = $records[$entryId] ?? null;
         if ($record) {
-            $engine = app(\Inkline\Linkwise\Suggestions\SuggestionEngine::class);
+            $engine = app(\Arturrossbach\Linkwise\Suggestions\SuggestionEngine::class);
             $outboundSuggestionCount = count($engine->suggest($record->text, $records, $entryId, $record->outboundLinks));
         }
 
@@ -488,15 +488,15 @@ class DashboardController extends CpController
 
     public function checkLinks(Request $request): JsonResponse
     {
-        if ($active = \Inkline\Linkwise\Support\JobLock::activeJob('check')) {
-            return response()->json(\Inkline\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('check')) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
         // Spawn the check as a detached background process — web worker returns immediately.
         // This frees all session/file locks and doesn't block navigation or other CP requests.
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PHP_BINARY);
-        $log = escapeshellarg(\Inkline\Linkwise\Support\LogRotator::prepare('check-links.log', 'Check Links'));
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('check-links.log', 'Check Links'));
 
         \Illuminate\Support\Facades\Cache::put('linkwise:check:status', ['phase' => 'starting'], 300);
         \Illuminate\Support\Facades\Cache::forget('linkwise:check:cancel');
@@ -524,15 +524,15 @@ class DashboardController extends CpController
 
     public function rebuildIndex(Request $request): JsonResponse
     {
-        if ($active = \Inkline\Linkwise\Support\JobLock::activeJob('scan')) {
-            return response()->json(\Inkline\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('scan')) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
         // Spawn the scan as a detached background process — web worker returns immediately.
         // This frees all session/file locks and doesn't block navigation or other CP requests.
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PHP_BINARY);
-        $log = escapeshellarg(\Inkline\Linkwise\Support\LogRotator::prepare('scan-content.log', 'Scan Content'));
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('scan-content.log', 'Scan Content'));
 
         \Illuminate\Support\Facades\Cache::put('linkwise:scan:status', ['phase' => 'starting'], 300);
         \Illuminate\Support\Facades\Cache::forget('linkwise:scan:cancel');
@@ -558,8 +558,8 @@ class DashboardController extends CpController
 
     public function bulkUnlink(Request $request): JsonResponse
     {
-        if ($active = \Inkline\Linkwise\Support\JobLock::activeJob('bulkunlink')) {
-            return response()->json(\Inkline\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('bulkunlink')) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
         $validated = $request->validate([
@@ -582,7 +582,7 @@ class DashboardController extends CpController
 
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PHP_BINARY);
-        $log = escapeshellarg(\Inkline\Linkwise\Support\LogRotator::prepare('bulk-unlink.log', 'Bulk Unlink'));
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('bulk-unlink.log', 'Bulk Unlink'));
 
         exec("$php $artisan linkwise:bulk-unlink >> $log 2>&1 &");
 
@@ -610,7 +610,7 @@ class DashboardController extends CpController
      */
     public function brokenLinksCsv(): \Symfony\Component\HttpFoundation\StreamedResponse
     {
-        $report = new \Inkline\Linkwise\Links\BrokenLinkReport;
+        $report = new \Arturrossbach\Linkwise\Links\BrokenLinkReport;
         // load() returns ['metadata' => ..., 'broken_links' => BrokenLinkRecord[]]
         // — must iterate the broken_links bucket, not the wrapper array.
         $records = $report->load()['broken_links'];
@@ -673,7 +673,7 @@ class DashboardController extends CpController
      */
     public function domainsCsv(): \Symfony\Component\HttpFoundation\StreamedResponse
     {
-        $report = new \Inkline\Linkwise\Reports\DomainReport($this->indexer);
+        $report = new \Arturrossbach\Linkwise\Reports\DomainReport($this->indexer);
         $domainsData = $report->toArray();
         $filename = 'linkwise-domains-'.now()->format('Y-m-d').'.csv';
 
@@ -718,8 +718,8 @@ class DashboardController extends CpController
      */
     public function detailUnlinkAsync(Request $request): JsonResponse
     {
-        if ($active = \Inkline\Linkwise\Support\JobLock::activeJob('detailunlink')) {
-            return response()->json(\Inkline\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('detailunlink')) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
         $validated = $request->validate([
@@ -740,7 +740,7 @@ class DashboardController extends CpController
         $allHashes = $validated['entry_hashes'] ?? [];
         $replacementEntryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
         $relevantHashes = array_intersect_key($allHashes, $replacementEntryIds);
-        $conflicts = \Inkline\Linkwise\Support\SafeEntrySaver::verifyHashes($relevantHashes);
+        $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($relevantHashes);
         if (! empty($conflicts)) {
             $title = reset($conflicts);
 
@@ -779,7 +779,7 @@ class DashboardController extends CpController
 
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PHP_BINARY);
-        $log = escapeshellarg(\Inkline\Linkwise\Support\LogRotator::prepare('detail-unlink.log', 'Detail Unlink'));
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('detail-unlink.log', 'Detail Unlink'));
 
         exec("$php $artisan linkwise:detail-unlink >> $log 2>&1 &");
 
@@ -809,14 +809,14 @@ class DashboardController extends CpController
      */
     public function bulkClear(Request $request, string $kind): JsonResponse
     {
-        \Inkline\Linkwise\Support\JobLock::forceClear($kind);
+        \Arturrossbach\Linkwise\Support\JobLock::forceClear($kind);
 
         return response()->json(['success' => true, 'cleared' => $kind]);
     }
 
     public function bulkStatus(Request $request): JsonResponse
     {
-        $snapshot = \Inkline\Linkwise\Support\JobLock::snapshot();
+        $snapshot = \Arturrossbach\Linkwise\Support\JobLock::snapshot();
         if (! $snapshot) {
             return response()->json(['phase' => 'idle']);
         }
@@ -858,7 +858,7 @@ class DashboardController extends CpController
             return [];
         }
 
-        $stemmer = new \Inkline\Linkwise\NLP\Stemmer;
+        $stemmer = new \Arturrossbach\Linkwise\NLP\Stemmer;
         $textWords = preg_split('/[\s\p{P}]+/u', mb_strtolower($entryRecord->title.' '.$entryRecord->text));
         $textWords = array_filter($textWords, fn ($w) => mb_strlen($w) >= 2);
 
@@ -1351,7 +1351,7 @@ class DashboardController extends CpController
     /**
      * Extract Laravel-log entries that mention Linkwise. Each Laravel log
      * entry is a multi-line block starting with `[YYYY-MM-DD HH:MM:SS]` —
-     * we split on that boundary, filter blocks containing "Inkline\Linkwise"
+     * we split on that boundary, filter blocks containing "Arturrossbach\Linkwise"
      * or a case-insensitive "linkwise" mention, and keep the most recent
      * $maxEntries. This is the only place stack traces actually live.
      *

@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\UrlChanger;
+namespace Arturrossbach\Linkwise\UrlChanger;
 
-use Inkline\Linkwise\Exceptions\EntryConflictException;
-use Inkline\Linkwise\Support\ContextExtractor;
-use Inkline\Linkwise\Support\ProseMirrorTypes;
-use Inkline\Linkwise\Support\SafeEntrySaver;
-use Inkline\Linkwise\Support\UrlHelper;
+use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
+use Arturrossbach\Linkwise\Support\ContextExtractor;
+use Arturrossbach\Linkwise\Support\ProseMirrorTypes;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\Support\UrlHelper;
 use Statamic\Facades\Entry;
 
 class UrlReplacer
@@ -605,7 +605,7 @@ class UrlReplacer
         foreach ($fields as $handle => $field) {
             $val = $entry->get($handle);
             if ($field->type() === 'bard' && is_array($val)) {
-                $fullText .= ' '.\Inkline\Linkwise\Support\TextExtractor::fromBard($val);
+                $fullText .= ' '.\Arturrossbach\Linkwise\Support\TextExtractor::fromBard($val);
             } elseif ($field->type() === 'markdown' && is_string($val)) {
                 $fullText .= ' '.preg_replace('/\[([^\[\]]+)\]\([^)]+\)/', '$1', $val);
             } elseif ($field->type() === 'replicator' && is_array($val)) {
@@ -615,7 +615,7 @@ class UrlReplacer
                     foreach ($set as $key => $v) {
                         if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) continue;
                         if (is_array($v) && ! empty($v) && ProseMirrorTypes::looksLikeBardContent($v)) {
-                            $fullText .= ' '.\Inkline\Linkwise\Support\TextExtractor::fromBard($v);
+                            $fullText .= ' '.\Arturrossbach\Linkwise\Support\TextExtractor::fromBard($v);
                         }
                     }
                 }

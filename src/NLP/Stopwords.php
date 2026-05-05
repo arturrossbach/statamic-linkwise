@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\NLP;
+namespace Arturrossbach\Linkwise\NLP;
 
 class Stopwords
 {

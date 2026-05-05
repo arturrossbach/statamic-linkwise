@@ -1,10 +1,10 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\AutoLink\AutoLinkManager;
-use Inkline\Linkwise\AutoLink\AutoLinkRule;
-use Inkline\Linkwise\Tests\TestCase;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkRule;
+use Arturrossbach\Linkwise\Tests\TestCase;
 
 /**
  * Truth table for AutoLinkManager::findDuplicate().

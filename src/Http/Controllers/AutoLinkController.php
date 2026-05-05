@@ -1,14 +1,14 @@
 <?php
 
-namespace Inkline\Linkwise\Http\Controllers;
+namespace Arturrossbach\Linkwise\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Inkline\Linkwise\AutoLink\AutoLinkApplier;
-use Inkline\Linkwise\AutoLink\AutoLinkManager;
-use Inkline\Linkwise\Exceptions\EntryConflictException;
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
+use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
+use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Statamic\Http\Controllers\CP\CpController;
 
 class AutoLinkController extends CpController
@@ -75,7 +75,7 @@ class AutoLinkController extends CpController
      * Used so newly created or updated rules show real numbers in the Rules table
      * without requiring a page reload.
      */
-    protected function computeRuleStats(\Inkline\Linkwise\AutoLink\AutoLinkRule $rule): array
+    protected function computeRuleStats(\Arturrossbach\Linkwise\AutoLink\AutoLinkRule $rule): array
     {
         $applier = new AutoLinkApplier($this->indexer, $this->manager);
         $preview = $applier->applyRule($rule, true);
@@ -301,7 +301,7 @@ class AutoLinkController extends CpController
                 'skip_if_exists' => $this->boolFromCsv($get('skip if exists')),
                 'case_sensitive' => $caseSensitive,
                 // Lowercase before normalize — Excel-users often type "Always" / "Never"
-                'auto_apply_on_save' => \Inkline\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(
+                'auto_apply_on_save' => \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::normalizeAutoApply(
                     mb_strtolower($get('auto apply on save', 'follow_global'))
                 ),
                 'active' => $this->boolFromCsv($get('active', 'yes')),
@@ -473,8 +473,8 @@ class AutoLinkController extends CpController
 
         // Reject if ANY bulk job is running (apply / bulk-unlink / scan / check) —
         // they all touch the index and entry files; running two in parallel races.
-        if ($active = \Inkline\Linkwise\Support\JobLock::activeJob('applyrule')) {
-            return response()->json(\Inkline\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('applyrule')) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
         \Illuminate\Support\Facades\Cache::put('linkwise:applyrule:payload', [
@@ -491,7 +491,7 @@ class AutoLinkController extends CpController
 
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PHP_BINARY);
-        $log = escapeshellarg(\Inkline\Linkwise\Support\LogRotator::prepare('apply-rule.log', 'Apply Rule (single)'));
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('apply-rule.log', 'Apply Rule (single)'));
 
         exec("$php $artisan linkwise:apply-rule >> $log 2>&1 &");
 
@@ -508,8 +508,8 @@ class AutoLinkController extends CpController
      */
     public function applySelectedAsync(Request $request): JsonResponse
     {
-        if ($active = \Inkline\Linkwise\Support\JobLock::activeJob('applyrule')) {
-            return response()->json(\Inkline\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('applyrule')) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
         $validated = $request->validate([
@@ -541,7 +541,7 @@ class AutoLinkController extends CpController
 
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PHP_BINARY);
-        $log = escapeshellarg(\Inkline\Linkwise\Support\LogRotator::prepare('apply-rule.log', 'Apply Rule (selected)'));
+        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('apply-rule.log', 'Apply Rule (selected)'));
 
         exec("$php $artisan linkwise:apply-rule >> $log 2>&1 &");
 

@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Suggestions;
+namespace Arturrossbach\Linkwise\Suggestions;
 
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
 
 /**
  * Single source of truth for outbound suggestion grouping + counting.

@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Keywords;
+namespace Arturrossbach\Linkwise\Keywords;
 
 class TargetKeywordManager
 {

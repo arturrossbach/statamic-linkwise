@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Commands;
+namespace Arturrossbach\Linkwise\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
-use Inkline\Linkwise\Links\BrokenLinkChecker;
-use Inkline\Linkwise\Links\BrokenLinkReport;
-use Inkline\Linkwise\Support\JobLock;
+use Arturrossbach\Linkwise\Links\BrokenLinkChecker;
+use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Support\JobLock;
 
 class CheckLinksCommand extends Command
 {

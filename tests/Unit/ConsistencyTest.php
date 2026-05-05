@@ -1,14 +1,14 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Reports\LinkReport;
-use Inkline\Linkwise\Suggestions\InboundSuggestion;
-use Inkline\Linkwise\Suggestions\Suggestion;
-use Inkline\Linkwise\Suggestions\SuggestionEngine;
-use Inkline\Linkwise\Support\BardLinkInserter;
-use Inkline\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Reports\LinkReport;
+use Arturrossbach\Linkwise\Suggestions\InboundSuggestion;
+use Arturrossbach\Linkwise\Suggestions\Suggestion;
+use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
+use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\TextExtractor;
 use PHPUnit\Framework\TestCase;
 
 class ConsistencyTest extends TestCase
@@ -267,7 +267,7 @@ class ConsistencyTest extends TestCase
 
     public function test_auto_link_rule_roundtrip_preserves_data(): void
     {
-        $rule = \Inkline\Linkwise\AutoLink\AutoLinkRule::create([
+        $rule = \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::create([
             'keyword' => 'Test Keyword',
             'url' => 'https://example.com',
             'once_per_post' => false,
@@ -276,7 +276,7 @@ class ConsistencyTest extends TestCase
             'collections' => ['blog'],
         ]);
 
-        $restored = \Inkline\Linkwise\AutoLink\AutoLinkRule::fromArray($rule->toArray());
+        $restored = \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::fromArray($rule->toArray());
 
         $this->assertSame($rule->keyword, $restored->keyword);
         $this->assertSame($rule->url, $restored->url);
@@ -288,7 +288,7 @@ class ConsistencyTest extends TestCase
 
     public function test_statamic_entry_url_detected_as_internal(): void
     {
-        $rule = \Inkline\Linkwise\AutoLink\AutoLinkRule::create([
+        $rule = \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::create([
             'keyword' => 'Test',
             'url' => 'statamic://entry::abc-123',
         ]);
@@ -299,7 +299,7 @@ class ConsistencyTest extends TestCase
 
     public function test_http_url_detected_as_external(): void
     {
-        $rule = \Inkline\Linkwise\AutoLink\AutoLinkRule::create([
+        $rule = \Arturrossbach\Linkwise\AutoLink\AutoLinkRule::create([
             'keyword' => 'Test',
             'url' => 'https://example.com',
         ]);

@@ -1,9 +1,9 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Links\BrokenLinkRecord;
-use Inkline\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Links\BrokenLinkRecord;
+use Arturrossbach\Linkwise\Links\BrokenLinkReport;
 use PHPUnit\Framework\TestCase;
 
 class BrokenLinkReportTest extends TestCase

@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Suggestions;
+namespace Arturrossbach\Linkwise\Suggestions;
 
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Keywords\TargetKeywordManager;
-use Inkline\Linkwise\Support\ContextExtractor;
-use Inkline\Linkwise\Support\TextExtractor;
-use Inkline\Linkwise\Support\UrlHelper;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
+use Arturrossbach\Linkwise\Support\ContextExtractor;
+use Arturrossbach\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\Support\UrlHelper;
 use Statamic\Facades\Entry;
 
 class InboundEngine
@@ -128,7 +128,7 @@ class InboundEngine
             $href = 'statamic://entry::'.$s->targetEntryId;
 
             try {
-                return \Inkline\Linkwise\Support\BardLinkInserter::insertLinkIntoEntryWithHref(
+                return \Arturrossbach\Linkwise\Support\BardLinkInserter::insertLinkIntoEntryWithHref(
                     $s->sourceEntryId, $s->anchorText, $href, false, false
                 );
             } catch (\Throwable) {
@@ -279,7 +279,7 @@ class InboundEngine
                     continue;
                 }
 
-                if (\Inkline\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($val)) {
+                if (\Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($val)) {
                     if ($this->bardHasLinkedText($val, $anchorText)) {
                         return true;
                     }

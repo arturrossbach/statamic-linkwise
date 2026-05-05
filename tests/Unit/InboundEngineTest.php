@@ -1,12 +1,12 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Indexer\EntryIndexer;
-use Inkline\Linkwise\Indexer\EntryRecord;
-use Inkline\Linkwise\Keywords\TargetKeywordManager;
-use Inkline\Linkwise\Suggestions\InboundEngine;
-use Inkline\Linkwise\Suggestions\SuggestionEngine;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
+use Arturrossbach\Linkwise\Suggestions\InboundEngine;
+use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use PHPUnit\Framework\TestCase;
 
 class InboundEngineTest extends TestCase

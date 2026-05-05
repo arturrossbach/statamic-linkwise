@@ -1,13 +1,13 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Inkline\Linkwise\Http\Controllers\AutoLinkController;
-use Inkline\Linkwise\Http\Controllers\TargetKeywordController;
-use Inkline\Linkwise\Http\Controllers\DashboardController;
-use Inkline\Linkwise\Http\Controllers\IgnoredLinkController;
-use Inkline\Linkwise\Http\Controllers\InboundController;
-use Inkline\Linkwise\Http\Controllers\OutboundController;
-use Inkline\Linkwise\Http\Controllers\UrlChangerController;
+use Arturrossbach\Linkwise\Http\Controllers\AutoLinkController;
+use Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController;
+use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
+use Arturrossbach\Linkwise\Http\Controllers\IgnoredLinkController;
+use Arturrossbach\Linkwise\Http\Controllers\InboundController;
+use Arturrossbach\Linkwise\Http\Controllers\OutboundController;
+use Arturrossbach\Linkwise\Http\Controllers\UrlChangerController;
 
 Route::middleware('can:manage linkwise')->group(function () {
 

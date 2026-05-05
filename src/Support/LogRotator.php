@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Support;
+namespace Arturrossbach\Linkwise\Support;
 
 /**
  * Append-mode log helper for Linkwise's heavy-bulk command outputs.

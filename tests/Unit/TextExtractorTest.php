@@ -1,8 +1,8 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
-use Inkline\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\Support\TextExtractor;
 use PHPUnit\Framework\TestCase;
 
 class TextExtractorTest extends TestCase

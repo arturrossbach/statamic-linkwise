@@ -1,6 +1,6 @@
 <?php
 
-namespace Inkline\Linkwise\Tests\Unit;
+namespace Arturrossbach\Linkwise\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 

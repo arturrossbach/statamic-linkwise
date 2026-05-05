@@ -1,6 +1,6 @@
 # Commercial License
 
-Copyright © 2026 Artur Roßbach (trading as Inkline). All rights reserved.
+Copyright © 2026 Artur Roßbach. All rights reserved.
 
 This software ("Linkwise") is licensed, not sold. Your use of Linkwise is governed by the terms below.
 
