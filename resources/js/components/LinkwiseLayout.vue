@@ -26,6 +26,7 @@
                                 <DropdownSeparator />
                                 <DropdownItem text="Report a bug" icon="alert-warning-exclamation-mark" @click="openGithubIssue" />
                                 <DropdownItem text="Email support" icon="mail" @click="openSupportEmail" />
+                                <DropdownItem text="Statamic Discord" icon="social-discord-logo" @click="openDiscord" />
                                 <DropdownSeparator />
                                 <DropdownItem text="Download diagnostic ZIP" icon="download" @click="confirmDebugExportWithLogs" />
                                 <DropdownSeparator />
@@ -184,6 +185,8 @@
                 <span class="opacity-50 mx-1">·</span>
                 <a :href="supportMailto" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Email us</a>
                 <span class="opacity-50 mx-1">·</span>
+                <a href="https://statamic.com/discord" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Discord</a>
+                <span class="opacity-50 mx-1">·</span>
                 <a href="#" @click.prevent="confirmDebugExportWithLogs" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Download diagnostic ZIP</a>
             </div>
         </div>
@@ -222,6 +225,10 @@ const DOCS_URL = 'https://github.com/arturrossbach/statamic-linkwise#readme';
 // transfer (e.g. arturrossbach/linkwise) — the bug.yml template name is stable.
 const SUPPORT_EMAIL = 'linkwise.support@gmail.com';
 const GITHUB_ISSUES_NEW_URL = 'https://github.com/arturrossbach/statamic-linkwise/issues/new?template=bug.yml';
+// Statamic's official Discord — addon-specific discussions in #addons.
+// Worth surfacing as a fourth support channel for users who prefer chat
+// over GitHub issues / email and to plug Linkwise into the community.
+const DISCORD_URL = 'https://statamic.com/discord';
 
 export default {
     components: { Head, Link, Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal },
@@ -740,6 +747,15 @@ export default {
          */
         openSupportEmail() {
             window.location.href = this.supportMailto;
+        },
+
+        /**
+         * Help dropdown: open Statamic's official Discord in a new tab.
+         * Statamic Marketplace creators use #addons there for quick chat
+         * support — fourth channel beyond GitHub-issue / email / diagnostic-ZIP.
+         */
+        openDiscord() {
+            window.open(DISCORD_URL, '_blank', 'noopener,noreferrer');
         },
 
         /**

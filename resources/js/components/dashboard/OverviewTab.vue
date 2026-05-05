@@ -272,6 +272,7 @@
                 <div class="flex flex-wrap gap-2 shrink-0">
                     <Button @click="openGithubIssue" text="Report a bug" icon="alert-warning-exclamation-mark" />
                     <Button @click="openSupportEmail" text="Email us" icon="mail" />
+                    <Button @click="openDiscord" text="Discord" icon="social-discord-logo" />
                     <Button @click="downloadDiagnosticZip" text="Diagnostic ZIP" icon="download" />
                 </div>
             </div>
@@ -485,6 +486,15 @@ export default {
 
         openSupportEmail() {
             window.location.href = 'mailto:linkwise.support@gmail.com?subject=' + encodeURIComponent('Linkwise support');
+        },
+
+        /**
+         * Help-Card: open the official Statamic Discord — fourth support
+         * channel beside GitHub-issue / email / diagnostic-ZIP. The
+         * #addons channel there is where Statamic-creator chat happens.
+         */
+        openDiscord() {
+            window.open('https://statamic.com/discord', '_blank', 'noopener,noreferrer');
         },
 
         /**
