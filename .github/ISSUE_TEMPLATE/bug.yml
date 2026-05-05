@@ -1,0 +1,27 @@
+name: Bug report
+description: Something not working as expected
+labels: ["bug"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Thanks for taking the time. The more we know upfront, the faster we fix.
+
+              **Pro tip:** Attach your diagnostic ZIP (CP → Linkwise → Help → Download diagnostic ZIP). It includes versions, counts, runtime info — no URLs or content. We can debug ~3× faster with it.
+
+    - type: textarea
+      id: what
+      attributes:
+          label: What went wrong?
+          description: What you tried and what happened instead. Screenshots welcome.
+          placeholder: "I clicked Apply on an Auto-Link rule, expected the count to update, but the page just reloaded with the old number."
+      validations:
+          required: true
+
+    - type: input
+      id: versions
+      attributes:
+          label: Versions (optional — open the diagnostic ZIP, info.txt has them)
+          placeholder: "Linkwise 1.0.0 / Statamic 6.0 / PHP 8.2"
+      validations:
+          required: false

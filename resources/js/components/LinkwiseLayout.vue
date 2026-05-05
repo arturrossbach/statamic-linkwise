@@ -24,6 +24,9 @@
                             <DropdownMenu>
                                 <DropdownItem text="Documentation" icon="external-link" @click="openDocs" />
                                 <DropdownSeparator />
+                                <DropdownItem text="Report a bug" icon="alert-warning-exclamation-mark" @click="openGithubIssue" />
+                                <DropdownItem text="Email support" icon="mail" @click="openSupportEmail" />
+                                <DropdownSeparator />
                                 <DropdownItem text="Download diagnostic ZIP" icon="download" @click="downloadDebugExport(false)" />
                                 <DropdownItem text="Download diagnostic ZIP — with logs" icon="warning-diamond" @click="confirmDebugExportWithLogs" />
                                 <DropdownSeparator />
@@ -155,6 +158,19 @@
             </Alert>
 
             <slot />
+
+            <!-- Per-page support footer. Three independent paths so a buyer
+                 who hits a bug picks whichever fits — we still get the report.
+                 Visible on every Linkwise tab AFTER the tab content; deliberately
+                 understated so it doesn't compete with the data. -->
+            <div class="text-xs text-gray-400 dark:text-gray-500 text-center mt-12 mb-4 select-none">
+                Need help?
+                <a :href="githubIssueUrl" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Open issue</a>
+                <span class="opacity-50 mx-1">·</span>
+                <a :href="supportMailto" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Email us</a>
+                <span class="opacity-50 mx-1">·</span>
+                <a href="#" @click.prevent="downloadDebugExport(false)" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Download diagnostic ZIP</a>
+            </div>
         </div>
 
         <!-- Debug-export "with logs" confirmation. Default download path is
@@ -184,6 +200,14 @@ const LINKWISE_VERSION = '1.0.0-dev';
 const DEBUG_EXPORT_URL = '/cp/linkwise/debug-export';
 const DOCS_URL = 'https://github.com/arturrossbach-cloud/statamic-linkwise#readme';
 
+// Support channels surfaced on every Linkwise page (footer + Help dropdown).
+// Designed for minimum friction: GitHub issue + email + diagnostic ZIP, three
+// independent paths so a buyer who hits a bug can pick whichever fits and we
+// still get the report. Update GITHUB_ISSUES_NEW_URL after a possible repo
+// transfer (e.g. inkline/linkwise) — the bug.yml template name is stable.
+const SUPPORT_EMAIL = 'linkwise.support@gmail.com';
+const GITHUB_ISSUES_NEW_URL = 'https://github.com/arturrossbach-cloud/statamic-linkwise/issues/new?template=bug.yml';
+
 export default {
     components: { Head, Link, Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal },
 
@@ -201,6 +225,27 @@ export default {
         // way for support to ask "what version are you running?".
         linkwiseVersion() {
             return LINKWISE_VERSION;
+        },
+
+        // Per-page support footer + Help dropdown both use these. The mailto
+        // pre-fills a 4-line skeleton (version + symptoms + expectation + ZIP
+        // hint) so the user doesn't stare at a blank email and bail. Subject
+        // is constant so support emails group naturally in the inbox.
+        supportMailto() {
+            const subject = encodeURIComponent('Linkwise support');
+            const body = encodeURIComponent(
+                `Linkwise version: ${LINKWISE_VERSION}\n\n` +
+                `What went wrong:\n\n\n` +
+                `What I expected:\n\n\n` +
+                `(Tip: attach your diagnostic ZIP — CP → Linkwise → Help → Download diagnostic ZIP)`,
+            );
+            return `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
+        },
+
+        // GitHub issue URL with bug.yml template prefilled. Opens to the
+        // issue-form picker which lands the user directly in the form.
+        githubIssueUrl() {
+            return GITHUB_ISSUES_NEW_URL;
         },
 
         /**
@@ -297,11 +342,15 @@ export default {
         },
 
         completionBannerIcon() {
+            // Statamic's icon registry is a glob over vendor/.../svg/icons/*.svg
+            // — names without a matching SVG file render as empty (silent
+            // console.warn). The 'circle-*' family doesn't exist in the
+            // registry; map to the actual file names so the banner shows.
             return ({
-                success: 'circle-check',
-                warning: 'circle-alert',
-                error: 'circle-x',
-                default: 'circle-info',
+                success: 'checkmark',
+                warning: 'alert-warning-exclamation-mark',
+                error: 'x-square',
+                default: 'info',
             })[this.completionBannerVariant];
         },
 
@@ -602,6 +651,23 @@ export default {
          */
         openDocs() {
             window.open(DOCS_URL, '_blank', 'noopener,noreferrer');
+        },
+
+        /**
+         * Help dropdown: open the GitHub bug-report template in a new tab.
+         * Mirror of the footer link — surfaced in two places because users who
+         * scan the header for help shouldn't need to scroll the page.
+         */
+        openGithubIssue() {
+            window.open(GITHUB_ISSUES_NEW_URL, '_blank', 'noopener,noreferrer');
+        },
+
+        /**
+         * Help dropdown: open mailto with pre-filled subject + 4-line body
+         * skeleton. Uses the same template as the footer's "Email us" link.
+         */
+        openSupportEmail() {
+            window.location.href = this.supportMailto;
         },
 
         /**

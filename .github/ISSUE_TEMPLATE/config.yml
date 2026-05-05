@@ -1,0 +1,9 @@
+# Allow blank issues so the bug template stays a guide, not a wall.
+# Anyone preferring email or with a sensitive concern reaches us via the
+# contact link below — three independent paths so reports don't get lost
+# to friction.
+blank_issues_enabled: true
+contact_links:
+    - name: Email support
+      url: mailto:linkwise.support@gmail.com
+      about: Prefer email or have a sensitive bug? Reach us directly.
