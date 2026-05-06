@@ -195,7 +195,13 @@ class EntryIndexer
                     if ($inboundEngine->anchorIsLinkedInEntry($candidate['sourceEntryId'], $candidate['anchorText'])) {
                         continue;
                     }
-                } catch (\Throwable) {
+                } catch (\Throwable $e) {
+                    // Falls through to Filter 2; the dry-run insert will fail
+                    // for already-linked anchors anyway, so a Filter 1 throw
+                    // doesn't currently overcount. Log so we notice when it
+                    // happens — silent failure here masked the indexAll bug
+                    // for a full day before someone noticed.
+                    Log::warning('[Linkwise] anchorIsLinkedInEntry failed during Phase 2: '.$e->getMessage());
                 }
 
                 // Filter 2: dry-run insert (same as modal endpoint)
@@ -207,7 +213,8 @@ class EntryIndexer
                         $verified++;
                         $seen[$dedupKey] = true;
                     }
-                } catch (\Throwable) {
+                } catch (\Throwable $e) {
+                    Log::warning('[Linkwise] dry-run insert failed during Phase 2 for entry '.$candidate['sourceEntryId'].': '.$e->getMessage());
                 }
             }
 
