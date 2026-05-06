@@ -529,11 +529,28 @@ class BardLinkInserter
             return null; // Already linked
         }
 
+        // Build skip-ranges for existing markdown links — both the anchor
+        // text and the URL portion are off-limits. Without this, a candidate
+        // matching a substring of an existing link's anchor (e.g. "development"
+        // landing inside `[Modern web development](url)`) or its URL portion
+        // (e.g. "statamic" landing inside `statamic://entry::uuid`) would
+        // silently corrupt the content with nested `[[anchor]](url)](url)`
+        // syntax. Same pattern as insertAllLinksIntoMarkdown — single-insert
+        // path was missing it, the multi-insert path always had it.
+        $skipRanges = [];
+        if (preg_match_all('/\[[^\]]*\]\([^\)]+\)/u', $markdown, $matches, PREG_OFFSET_CAPTURE)) {
+            foreach ($matches[0] as [$text, $byteOffset]) {
+                $charOffset = mb_strlen(substr($markdown, 0, $byteOffset));
+                $skipRanges[] = [$charOffset, $charOffset + mb_strlen($text)];
+            }
+        }
+
         $anchorLen = mb_strlen($anchorText);
         $offset = 0;
 
         // Walk through all occurrences. Return on the first one that sits at a word boundary
-        // (so "database" skips "databases" and hits the standalone "Database" next).
+        // (so "database" skips "databases" and hits the standalone "Database" next)
+        // AND is not inside an existing markdown link.
         while (true) {
             $pos = $caseSensitive
                 ? mb_strpos($markdown, $anchorText, $offset)
@@ -544,11 +561,21 @@ class BardLinkInserter
             }
 
             if (static::isAtWordBoundary($markdown, $pos, $anchorLen)) {
-                $actualText = mb_substr($markdown, $pos, $anchorLen);
-                $before = mb_substr($markdown, 0, $pos);
-                $after = mb_substr($markdown, $pos + $anchorLen);
+                $inSkipRange = false;
+                foreach ($skipRanges as [$start, $end]) {
+                    if ($pos >= $start && $pos < $end) {
+                        $inSkipRange = true;
+                        break;
+                    }
+                }
 
-                return $before.'['.$actualText.']('.$href.')'.$after;
+                if (! $inSkipRange) {
+                    $actualText = mb_substr($markdown, $pos, $anchorLen);
+                    $before = mb_substr($markdown, 0, $pos);
+                    $after = mb_substr($markdown, $pos + $anchorLen);
+
+                    return $before.'['.$actualText.']('.$href.')'.$after;
+                }
             }
 
             $offset = $pos + $anchorLen;

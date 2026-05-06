@@ -711,6 +711,84 @@ class BardLinkInserterTest extends TestCase
         $this->assertTrue($hasLinkMark, 'Nested Bard must receive link mark');
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // insertLinkIntoMarkdown skipRanges: never insert INTO an existing
+    // markdown link's anchor text OR URL portion. Without this guard,
+    // multi-rule auto-linking on the same Markdown text recursively
+    // corrupted content with nested `[[anchor]](url)](url)` syntax —
+    // a real bug observed in prose-peak-test 2026-05-06.
+    // ─────────────────────────────────────────────────────────────────────
+
+    public function test_markdown_insert_does_not_match_inside_existing_anchor_text(): void
+    {
+        // Existing link wraps "Modern web development". A second auto-link
+        // rule for "development" must NOT match here — the anchor lives
+        // inside another anchor's text.
+        $markdown = 'See [Modern web development](statamic://entry::abc-123) for details.';
+
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            $markdown,
+            'development',
+            'statamic://entry::other-456',
+        );
+
+        $this->assertNull($result, 'Anchor inside existing anchor text must not produce a new link');
+    }
+
+    public function test_markdown_insert_does_not_match_inside_existing_url(): void
+    {
+        // Statamic internal URLs use `statamic://entry::uuid` form. A keyword
+        // matching "statamic" must NOT inject a link into the URL — that
+        // produced `[statamic](other-url)://entry::uuid` corruption that
+        // breaks the original href entirely.
+        $markdown = 'See [Modern web development](statamic://entry::abc-123) for details.';
+
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            $markdown,
+            'statamic',
+            'https://example.com/statamic-info',
+        );
+
+        $this->assertNull($result, 'Anchor inside existing URL must not produce a new link');
+    }
+
+    public function test_markdown_insert_does_not_match_word_inside_external_url(): void
+    {
+        // Same protection applies to external URLs. A keyword "example"
+        // that happens to appear inside `https://example.com/page` must
+        // not be wrapped — would produce `[https://[example](url).com/page]`-
+        // class corruption.
+        $markdown = 'Visit [our docs](https://example.com/page) often.';
+
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            $markdown,
+            'example',
+            'statamic://entry::other',
+        );
+
+        $this->assertNull($result);
+    }
+
+    public function test_markdown_insert_still_finds_safe_occurrence_outside_links(): void
+    {
+        // Regression guard: when the anchor occurs both INSIDE an existing
+        // link and OUTSIDE one, the safe outside occurrence must still get
+        // wrapped. Otherwise legitimate matches would silently fail.
+        $markdown = 'See [Modern web development](statamic://entry::abc-123) — development is fun.';
+
+        $result = BardLinkInserter::insertLinkIntoMarkdown(
+            $markdown,
+            'development',
+            'statamic://entry::dev-target',
+        );
+
+        $this->assertNotNull($result, 'Safe outside occurrence must still be wrapped');
+        // Inside-link "development" stays as plain text inside the existing anchor.
+        $this->assertStringContainsString('[Modern web development](statamic://entry::abc-123)', $result);
+        // Outside-link "development" gets the new link.
+        $this->assertStringContainsString('[development](statamic://entry::dev-target)', $result);
+    }
+
     public function test_replicator_walker_skips_meta_keys(): void
     {
         // The set-level keys `type` and `id` are metadata, not content.
