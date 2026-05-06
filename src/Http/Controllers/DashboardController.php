@@ -1115,33 +1115,66 @@ class DashboardController extends CpController
         //    Modal-confirmed by the user before download fires. This block is
         //    where debugging actually happens: full state JSON + stack traces.
         if ($includeLogs) {
-            // 6a. Linkwise's own logs (progress trails — apply-rule, scan, etc.)
+            // 6a. Linkwise's own logs — including LogRotator-rotated `.log.1`
+            //     files. A long-running scan can hit the 5MB rotation
+            //     threshold mid-flight, leaving the early portion in `.log.1`
+            //     while the live tail sits in `.log`. Without including both
+            //     we'd lose evidence of the very crashes the rotation was
+            //     triggered by.
             if (is_dir($storagePath)) {
-                foreach (glob($storagePath.'/*.log') as $logPath) {
+                foreach (glob($storagePath.'/*.log*') as $logPath) {
+                    if (! is_readable($logPath)) {
+                        continue;
+                    }
                     $name = basename($logPath);
+                    // Skip non-log files that happen to match the glob.
+                    if (! preg_match('/\.log(\.\d+)?$/', $name)) {
+                        continue;
+                    }
                     $tail = $this->tailLines($logPath, 500);
                     $zip->addFromString('logs/'.$name, $tail);
                 }
             }
 
-            // 6b. Laravel error log — filtered to Linkwise-related entries.
-            //     THIS is where actual stack traces live (Linkwise's own *.log
-            //     are progress logs, not error logs). Multi-line capture
-            //     because stack traces span dozens of lines.
-            $laravelLog = storage_path('logs/laravel.log');
-            if (is_readable($laravelLog)) {
-                $linkwiseEntries = $this->extractLinkwiseLogEntries($laravelLog, 50);
+            // 6b. Laravel error log — covers BOTH the `single` channel
+            //     (laravel.log) and the `daily` channel (laravel-YYYY-MM-DD.log).
+            //     Without the daily glob, sites running Laravel's daily logger
+            //     would have an empty filtered file every time — the
+            //     "no Linkwise entries found" message was misleading rather
+            //     than missing logs being a debug-flow gap.
+            //
+            //     Cap to the 7 most recent files to bound ZIP size on long-
+            //     running sites without losing the typical "what happened
+            //     yesterday" debug case.
+            $laravelLogs = is_dir(storage_path('logs'))
+                ? array_filter(glob(storage_path('logs/laravel*.log')) ?: [], 'is_readable')
+                : [];
+            usort($laravelLogs, fn ($a, $b) => filemtime($b) <=> filemtime($a));
+            $laravelLogs = array_slice($laravelLogs, 0, 7);
+
+            if (! empty($laravelLogs)) {
+                $combinedFiltered = '';
+                foreach ($laravelLogs as $logPath) {
+                    $base = basename($logPath);
+                    // Per-file filtered + per-file full-tail. Per-file output
+                    // lets support immediately tell which day a stack trace
+                    // came from without parsing timestamps.
+                    $filtered = $this->extractLinkwiseLogEntries($logPath, 50);
+                    if ($filtered !== '') {
+                        $combinedFiltered .= "===== {$base} =====\n".$filtered."\n";
+                    }
+                    $tail = $this->tailLines($logPath, 1000);
+                    $zip->addFromString('logs/'.$base.'-tail.log', $tail);
+                }
                 $zip->addFromString(
                     'logs/laravel-linkwise-errors.log',
-                    $linkwiseEntries !== '' ? $linkwiseEntries : "(no Linkwise-related entries found in laravel.log)\n",
+                    $combinedFiltered !== '' ? $combinedFiltered : "(no Linkwise-related entries found in any laravel*.log file)\n",
                 );
-
-                // 6b-extra. Full unfiltered tail of laravel.log. Catches
-                // Statamic-core exceptions triggered by Linkwise calls that
-                // don't mention "linkwise" in their stack — would otherwise
-                // be invisible to the filtered file above.
-                $fullTail = $this->tailLines($laravelLog, 1000);
-                $zip->addFromString('logs/laravel-full-tail.log', $fullTail);
+            } else {
+                $zip->addFromString(
+                    'logs/laravel-linkwise-errors.log',
+                    "(no readable laravel*.log files found in storage/logs/)\n",
+                );
             }
 
             // 6c. Full state JSONs — needed to reproduce "rule X doesn't fire"
@@ -1199,15 +1232,25 @@ class DashboardController extends CpController
             "  storage-stats.json           — file sizes + mtimes\n\n".
             ($includeLogs
                 ? "VERBOSE additions (may contain PII — review before sharing):\n".
-                  "  logs/*.log                   — Linkwise progress logs\n".
-                  "                                 (apply, scan, bulk-unlink)\n".
+                  "  logs/*.log[.N]               — Linkwise progress logs.\n".
+                  "                                 Includes LogRotator-rotated\n".
+                  "                                 .log.1 archives so debugging\n".
+                  "                                 a long scan that triggered\n".
+                  "                                 rotation mid-flight stays\n".
+                  "                                 possible.\n".
                   "  logs/laravel-linkwise-errors.log\n".
-                  "                               — stack traces from laravel.log\n".
-                  "                                 filtered to Linkwise mentions\n".
-                  "  logs/laravel-full-tail.log   — last 1000 lines of\n".
-                  "                                 laravel.log (unfiltered).\n".
-                  "                                 Catches non-Linkwise-mentioned\n".
-                  "                                 errors triggered by Linkwise.\n".
+                  "                               — stack traces filtered to\n".
+                  "                                 Linkwise mentions, combined\n".
+                  "                                 across ALL laravel*.log files\n".
+                  "                                 with per-file headers.\n".
+                  "                                 Covers both `single` and\n".
+                  "                                 `daily` Laravel log channels.\n".
+                  "  logs/laravel*.log-tail.log   — Per-channel last 1000 lines,\n".
+                  "                                 unfiltered. Catches Statamic-\n".
+                  "                                 core exceptions triggered by\n".
+                  "                                 Linkwise calls that don't\n".
+                  "                                 mention 'linkwise' themselves.\n".
+                  "                                 Capped to 7 most-recent files.\n".
                   "  state/broken-links.json      — full broken-link report\n".
                   "                                 (URLs, anchor text, context)\n".
                   "  state/autolink-rules.json    — rule keyword + URL targets\n".
