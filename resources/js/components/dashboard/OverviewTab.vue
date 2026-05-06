@@ -266,13 +266,14 @@
                 <div class="flex-1 min-w-0">
                     <h3 class="font-semibold text-base text-gray-900 dark:text-gray-100">Need help with Linkwise?</h3>
                     <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        Open an issue on GitHub, email us, or download a diagnostic ZIP — we ship fixes ~3× faster with the ZIP attached.
+                        Open an issue on GitHub, ask in the Statamic Discord (#addons), email us,
+                        or download a diagnostic ZIP — we ship fixes ~3× faster with the ZIP attached.
                     </p>
                 </div>
                 <div class="flex flex-wrap gap-2 shrink-0">
                     <Button @click="openGithubIssue" text="Report a bug" icon="alert-warning-exclamation-mark" />
                     <Button @click="openSupportEmail" text="Email us" icon="mail" />
-                    <Button @click="openDiscord" text="Discord" icon="social-discord-logo" />
+                    <Button @click="openDiscord" text="Discord" icon="social-discord-logo" v-tooltip="'Opens Statamic\'s official Discord — discuss Linkwise in #addons or DM @arossbach_'" />
                     <Button @click="downloadDiagnosticZip" text="Diagnostic ZIP" icon="download" />
                 </div>
             </div>
