@@ -395,20 +395,14 @@ class BardLinkInserter
 
                     return true;
                 }
-            } elseif (in_array($field->type(), ['markdown', 'textarea', 'text'], true)
-                && is_string($value) && ! empty($value) && $handle !== 'title'
-                && ($field->type() === 'markdown' || InsertableContentFilter::isContent($value, $handle))) {
-                // textarea/text fields at top-level are handled the same way
-                // as markdown — insertLinkIntoMarkdown wraps the anchor with
-                // [text](href) syntax. Rendering is the user's template
-                // responsibility; Linkwise's job is to write the syntax
-                // wherever a linkable opportunity sits, regardless of how
-                // the field will eventually be rendered. Skip 'title' since
-                // we never link the entry's own title field. For text/textarea
-                // (but NOT markdown — that field type is full content by
-                // contract) the InsertableContentFilter additionally rejects
-                // top-level URL/asset-handle fields like `link` or `image_url`
-                // so we don't wrap a raw URL value in markdown link syntax.
+            } elseif ($field->type() === 'markdown' && is_string($value) && ! empty($value) && $handle !== 'title') {
+                // Only `markdown` fields receive markdown-link syntax. `text`
+                // and `textarea` are plaintext per Statamic's contract — writing
+                // `[anchor](url)` into them would surface as visible literal
+                // syntax in any template that doesn't manually pipe through
+                // `| markdown`. A future opt-in (`linkwise: true` in the
+                // blueprint) can re-enable per-field coverage for users who
+                // know their template renders the field as markdown.
                 $modified = static::insertLinkIntoMarkdown($value, $anchorText, $href, $caseSensitive);
 
                 if ($modified !== null) {
@@ -576,28 +570,14 @@ class BardLinkInserter
                     continue;
                 }
 
-                // Plain-string field nested in a replicator (Peak Cards
-                // heading/text, accordion bodies, button labels, etc.).
-                // Treat the same way as a top-level markdown field: wrap
-                // the anchor with [text](href). Filter out non-content
-                // strings (UUIDs from entry/asset references, numeric and
-                // boolean-like values, anything too short to be content)
-                // so we never try to insert a link into a UUID or a
-                // config-enum string. Quality filters mirror those used
-                // on the read side in EntryFieldWalker.
-                if (is_string($value)) {
-                    if (! InsertableContentFilter::isContent($value, (string) $key)) {
-                        continue;
-                    }
-                    $modified = static::insertLinkIntoMarkdown($value, $anchorText, $href, $caseSensitive);
-                    if ($modified !== null) {
-                        $sets[$i][$key] = $modified;
-
-                        return $sets;
-                    }
-                    continue;
-                }
-
+                // Plain-string fields nested in a replicator (Peak Card
+                // headings, button labels, accordion plaintext bodies, …)
+                // are NOT linked: at the value layer we cannot tell a
+                // markdown-rendered set field apart from a plain `text`
+                // field, and writing `[anchor](url)` into a plaintext
+                // template surfaces as visible literal syntax. Bard
+                // fragments inside the set are still walked below — those
+                // carry structured link marks and are always safe.
                 if (! is_array($value) || empty($value)) {
                     continue;
                 }
@@ -612,66 +592,6 @@ class BardLinkInserter
                     }
                 } elseif (static::looksLikeReplicatorContent($value)) {
                     $modified = static::processReplicatorWithHref($value, $anchorText, $href, $caseSensitive);
-
-                    if ($modified !== null) {
-                        $sets[$i][$key] = $modified;
-
-                        return $sets;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Process a Replicator field value to find and modify nested Bard content.
-     */
-    protected static function processReplicator(array $sets, string $anchorText, string $targetEntryId): ?array
-    {
-        $href = 'statamic://entry::'.$targetEntryId;
-
-        foreach ($sets as $i => $set) {
-            if (! is_array($set)) {
-                continue;
-            }
-
-            foreach ($set as $key => $value) {
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) {
-                    continue;
-                }
-
-                // Plain-string field — same coverage as the WithHref path
-                // so legacy callers (insertLinkIntoEntry → insertLink path)
-                // also reach card text and other non-Bard nested content.
-                if (is_string($value)) {
-                    if (! InsertableContentFilter::isContent($value, (string) $key)) {
-                        continue;
-                    }
-                    $modified = static::insertLinkIntoMarkdown($value, $anchorText, $href);
-                    if ($modified !== null) {
-                        $sets[$i][$key] = $modified;
-
-                        return $sets;
-                    }
-                    continue;
-                }
-
-                if (! is_array($value) || empty($value)) {
-                    continue;
-                }
-
-                if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $modified = static::insertLink($value, $anchorText, $targetEntryId);
-
-                    if ($modified !== null) {
-                        $sets[$i][$key] = $modified;
-
-                        return $sets;
-                    }
-                } elseif (static::looksLikeReplicatorContent($value)) {
-                    $modified = static::processReplicator($value, $anchorText, $targetEntryId);
 
                     if ($modified !== null) {
                         $sets[$i][$key] = $modified;

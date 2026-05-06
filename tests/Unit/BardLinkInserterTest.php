@@ -596,4 +596,139 @@ class BardLinkInserterTest extends TestCase
 
         $this->assertNull($result, 'Should return null when already linked to same target');
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Retreat tests: V1 only writes to `bard` (structured) and `markdown`
+    // (top-level). Plain-string fields (text/textarea) and plain-string
+    // values nested in Replicator sets are NEVER touched, because they
+    // render as plaintext per Statamic's contract — writing markdown-link
+    // syntax there surfaces as visible literal `[anchor](url)`.
+    // ─────────────────────────────────────────────────────────────────────
+
+    public function test_replicator_walker_does_not_touch_plain_string_in_set(): void
+    {
+        // Simulates a Peak Card set: plain-string `heading` + Bard `text`.
+        $sets = [
+            [
+                'type' => 'card',
+                'id' => 'set-1',
+                'heading' => 'Welcome to coffee',
+                'text' => [
+                    [
+                        'type' => 'paragraph',
+                        'content' => [
+                            ['type' => 'text', 'text' => 'We brew coffee daily.'],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $reflection = new \ReflectionMethod(BardLinkInserter::class, 'processReplicatorWithHref');
+        $reflection->setAccessible(true);
+
+        $result = $reflection->invoke(null, $sets, 'coffee', 'statamic://entry::target-123');
+
+        $this->assertNotNull($result, 'Bard fragment in set should still be linked');
+
+        // `heading` (plain string) must remain literally unchanged
+        $this->assertSame('Welcome to coffee', $result[0]['heading']);
+
+        // `text` (Bard) must contain a link mark on the anchor
+        $textNodes = $result[0]['text'][0]['content'];
+        $hasLinkMark = false;
+        foreach ($textNodes as $node) {
+            foreach ($node['marks'] ?? [] as $mark) {
+                if (($mark['type'] ?? '') === 'link') {
+                    $hasLinkMark = true;
+                    break 2;
+                }
+            }
+        }
+        $this->assertTrue($hasLinkMark, 'Bard fragment must receive link mark');
+    }
+
+    public function test_replicator_walker_returns_null_when_only_plain_strings_present(): void
+    {
+        // A set with ONLY plain strings (no Bard, no nested replicator).
+        // Result must be null — no insertion attempted, no markdown syntax
+        // injected into plaintext fields.
+        $sets = [
+            [
+                'type' => 'card',
+                'id' => 'set-1',
+                'heading' => 'Talk about coffee',
+                'subtitle' => 'A coffee story',
+                'cta_label' => 'Buy coffee now',
+            ],
+        ];
+
+        $reflection = new \ReflectionMethod(BardLinkInserter::class, 'processReplicatorWithHref');
+        $reflection->setAccessible(true);
+
+        $result = $reflection->invoke(null, $sets, 'coffee', 'statamic://entry::target-123');
+
+        $this->assertNull($result, 'Plain-string-only set must NOT be linked');
+    }
+
+    public function test_replicator_walker_recurses_into_nested_bard_via_grid(): void
+    {
+        // Nested replicator (e.g. a Grid containing Cards): outer set has
+        // an inner array of sets. Bard inside the inner set should still
+        // be reached.
+        $sets = [
+            [
+                'type' => 'grid',
+                'id' => 'set-outer',
+                'cells' => [
+                    [
+                        'type' => 'card',
+                        'id' => 'set-inner',
+                        'body' => [
+                            [
+                                'type' => 'paragraph',
+                                'content' => [
+                                    ['type' => 'text', 'text' => 'About coffee culture.'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $reflection = new \ReflectionMethod(BardLinkInserter::class, 'processReplicatorWithHref');
+        $reflection->setAccessible(true);
+
+        $result = $reflection->invoke(null, $sets, 'coffee', 'statamic://entry::target-123');
+
+        $this->assertNotNull($result, 'Nested Bard fragment should be linked');
+
+        $innerBody = $result[0]['cells'][0]['body'][0]['content'];
+        $hasLinkMark = collect($innerBody)->contains(
+            fn ($n) => collect($n['marks'] ?? [])->contains(fn ($m) => ($m['type'] ?? '') === 'link')
+        );
+        $this->assertTrue($hasLinkMark, 'Nested Bard must receive link mark');
+    }
+
+    public function test_replicator_walker_skips_meta_keys(): void
+    {
+        // The set-level keys `type` and `id` are metadata, not content.
+        // Even though `id` could match an anchor by coincidence, the
+        // walker must skip those keys entirely.
+        $sets = [
+            [
+                'type' => 'coffee',
+                'id' => 'coffee-card',
+                'heading' => 'irrelevant',
+            ],
+        ];
+
+        $reflection = new \ReflectionMethod(BardLinkInserter::class, 'processReplicatorWithHref');
+        $reflection->setAccessible(true);
+
+        $result = $reflection->invoke(null, $sets, 'coffee', 'statamic://entry::target-123');
+
+        $this->assertNull($result, 'Meta keys must never be linked');
+    }
 }

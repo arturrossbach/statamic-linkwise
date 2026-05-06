@@ -3,19 +3,18 @@
 namespace Arturrossbach\Linkwise\Support;
 
 /**
- * Walks all content fields of a Statamic entry (Bard, Replicator, Markdown,
- * plain text/textarea) and calls visitor callbacks for each piece of content
- * found.
+ * Walks all content fields of a Statamic entry (Bard, Replicator, Markdown)
+ * and calls visitor callbacks for each piece of structured content found.
  *
  * Eliminates the duplicated field-traversal boilerplate across 8+ files.
  *
- * IMPORTANT: the $onMarkdown callback also fires for plain-string values
- * nested inside Replicator sets (card text fields, accordion bodies, button
- * labels, etc.). Treating those as "markdown" is safe — link extractors only
- * match `[text](url)` patterns and ignore non-markdown content. Without this
- * branch, a Peak site that uses Cards/Accordion/Quote sets had its non-Bard
- * content completely invisible to broken-link checks, domain reports, and
- * inbound/outbound link counting.
+ * Plain-string values (`text`/`textarea` field types, plus plain-string keys
+ * nested in Replicator sets) are deliberately NOT visited. Statamic's contract
+ * for those types is plaintext rendering, so `[anchor](url)` syntax there is
+ * literal text — not a link. Treating it as a link would mean reporting
+ * outbound links Linkwise cannot reach (the write side does not modify
+ * plaintext fields either), creating ghost links the user could see in
+ * DetailModal but never remove.
  */
 class EntryFieldWalker
 {
@@ -49,9 +48,7 @@ class EntryFieldWalker
 
     /**
      * Recursively walk Replicator sets. Calls $onBard for each nested Bard
-     * field, and $onMarkdown for each plain-string value that carries actual
-     * content (after filtering UUIDs, numerics, booleans, and very short
-     * strings to keep noise out of downstream link/keyword extraction).
+     * fragment. Plain-string values are skipped (see class docblock for why).
      */
     public static function walkReplicator(array $sets, callable $onBard, ?callable $onMarkdown = null): void
     {
@@ -63,24 +60,6 @@ class EntryFieldWalker
             foreach ($set as $key => $value) {
                 // Skip replicator metadata keys (id, type, enabled)
                 if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) {
-                    continue;
-                }
-
-                // Plain string — treat as markdown so link extractors run.
-                // Filtering goes through the shared InsertableContentFilter
-                // so the read side (this walker) and the write side
-                // (BardLinkInserter) reject the exact same shapes — no
-                // asymmetry where the indexer would surface a URL/asset
-                // string as content but the inserter would refuse to
-                // touch it (or, worse, the other way around).
-                if (is_string($value)) {
-                    if (! $onMarkdown) {
-                        continue;
-                    }
-                    if (! InsertableContentFilter::isContent($value, (string) $key)) {
-                        continue;
-                    }
-                    $onMarkdown(trim($value));
                     continue;
                 }
 
