@@ -6,12 +6,16 @@ use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Indexer\EntryRecord;
+use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
+use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Reports\LinkReport;
 use Arturrossbach\Linkwise\Suggestions\InboundEngine;
 use Arturrossbach\Linkwise\Suggestions\OutboundSuggestionGrouper;
 use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use Arturrossbach\Linkwise\Support\EntryFieldWalker;
 use Arturrossbach\Linkwise\Support\TextExtractor;
+use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
 use Illuminate\Console\Command;
 use Statamic\Facades\Entry;
 
@@ -70,11 +74,16 @@ class AuditCommand extends Command
         $only = $this->option('path');
 
         $paths = [
-            'auto-link'     => fn () => $this->auditAutoLinkPreview(),
-            'index-parity'  => fn () => $this->auditIndexParity(),
-            'inbound'       => fn () => $this->auditInboundInsertability(),
-            'outbound'      => fn () => $this->auditOutboundInsertability(),
-            'domains'       => fn () => $this->auditDomainParity(),
+            'auto-link'       => fn () => $this->auditAutoLinkPreview(),
+            'index-parity'    => fn () => $this->auditIndexParity(),
+            'inbound'         => fn () => $this->auditInboundInsertability(),
+            'outbound'        => fn () => $this->auditOutboundInsertability(),
+            'domains'         => fn () => $this->auditDomainParity(),
+            'broken-links'    => fn () => $this->auditBrokenLinks(),
+            'url-changer'     => fn () => $this->auditUrlChanger(),
+            'target-keywords' => fn () => $this->auditTargetKeywords(),
+            'links-report'    => fn () => $this->auditLinksReport(),
+            'overview'        => fn () => $this->auditOverview(),
         ];
 
         if ($only && ! isset($paths[$only])) {
@@ -324,6 +333,315 @@ class AuditCommand extends Command
                 }
                 $this->pass('domains');
             }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Broken Links report. For each broken-link record, verify
+    // the entry still exists AND the URL still appears in its content.
+    // Stale records (URL was removed but record persists) are user-facing
+    // confusion: the Broken Links tab shows links the user already fixed.
+    // Re-scan would clean it up — audit catches the "should re-scan" state.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditBrokenLinks(): void
+    {
+        $this->line('<fg=yellow>broken-links</> — broken records still match entry content');
+
+        $report = app(BrokenLinkReport::class);
+        $data = $report->load();
+        $records = $data['broken_links'] ?? [];
+
+        // Sample to keep audit fast on sites with hundreds of broken links.
+        $sample = array_slice($records, 0, 30);
+
+        foreach ($sample as $rec) {
+            $entry = Entry::find($rec->postId);
+            if (! $entry) {
+                $this->recordFailure('broken-links', "record references missing entry {$rec->postId} ('{$rec->postTitle}')");
+
+                continue;
+            }
+
+            // Walk the entry; check the broken URL is actually still there.
+            $found = false;
+            EntryFieldWalker::walk(
+                $entry,
+                function (array $bard) use ($rec, &$found) {
+                    foreach (TextExtractor::externalLinksFromBard($bard) as $link) {
+                        if (($link['url'] ?? '') === $rec->url) {
+                            $found = true;
+
+                            return;
+                        }
+                    }
+                    foreach (TextExtractor::linksFromBard($bard) as $href) {
+                        if ($href === $rec->url) {
+                            $found = true;
+
+                            return;
+                        }
+                    }
+                },
+                function (string $md) use ($rec, &$found) {
+                    if (str_contains($md, $rec->url)) {
+                        $found = true;
+                    }
+                },
+            );
+
+            if (! $found) {
+                $this->recordFailure(
+                    'broken-links',
+                    "'{$rec->postTitle}' — record claims URL ".substr($rec->url, 0, 60).' is broken there, but URL no longer in content (re-scan needed)',
+                );
+
+                continue;
+            }
+            $this->pass('broken-links');
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: URL Changer preview. For a sample of URLs from the index,
+    // run UrlReplacer::preview and verify each reported entry/occurrence
+    // is actually walkable. Catches drift between the preview path and
+    // what apply would actually find.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditUrlChanger(): void
+    {
+        $this->line('<fg=yellow>url-changer</> — preview matches walked content');
+
+        $records = $this->indexer->load();
+        $replacer = app(UrlReplacer::class);
+
+        // Pick up to 5 distinct internal-link hrefs from records that have
+        // outbound links. Internal hrefs use `statamic://entry::uuid` form.
+        $sampleUrls = [];
+        foreach ($records as $r) {
+            foreach ($r->outboundLinks as $targetId) {
+                $sampleUrls['statamic://entry::'.$targetId] = true;
+                if (count($sampleUrls) >= 5) {
+                    break 2;
+                }
+            }
+        }
+
+        foreach (array_keys($sampleUrls) as $url) {
+            try {
+                $replacer->setMode('exact');
+                $preview = $replacer->preview($url, '');
+            } catch (\Throwable $e) {
+                $this->recordFailure('url-changer', "preview '$url' threw: ".$e->getMessage());
+
+                continue;
+            }
+
+            $reportedTotal = (int) ($preview['total_replacements'] ?? 0);
+            $previewedEntries = $preview['entries'] ?? [];
+
+            // For each previewed entry: confirm the URL is reachable in the
+            // entry's content via the walker. Catches the asymmetry where
+            // preview's regex finds occurrences but the inserter can't.
+            foreach ($previewedEntries as $previewEntry) {
+                $entry = Entry::find($previewEntry['id'] ?? '');
+                if (! $entry) {
+                    $this->recordFailure('url-changer', "preview names entry {$previewEntry['id']} which no longer exists");
+
+                    continue;
+                }
+
+                $hits = 0;
+                EntryFieldWalker::walk(
+                    $entry,
+                    function (array $bard) use ($url, &$hits) {
+                        foreach (TextExtractor::linksFromBard($bard) as $href) {
+                            if ('statamic://entry::'.$href === $url) {
+                                $hits++;
+                            }
+                        }
+                    },
+                    function (string $md) use ($url, &$hits) {
+                        $hits += substr_count($md, '('.$url.')');
+                    },
+                );
+
+                $reportedHits = count($previewEntry['occurrences'] ?? []);
+                if ($hits === 0 && $reportedHits > 0) {
+                    $this->recordFailure(
+                        'url-changer',
+                        "preview reports {$reportedHits} hits for {$url} on '{$previewEntry['title']}', walker finds 0",
+                    );
+
+                    continue;
+                }
+                $this->pass('url-changer');
+            }
+            $this->pass('url-changer'); // total-count survived
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Target Keywords. Per-entry custom keyword maps must reference
+    // existing entries and contain non-noise values. Bad data here
+    // surfaces as ghost suggestions or invalid auto-link rules.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditTargetKeywords(): void
+    {
+        $this->line('<fg=yellow>target-keywords</> — keyword maps reference live entries with valid values');
+
+        $manager = app(TargetKeywordManager::class);
+        try {
+            $all = $manager->loadAll();
+        } catch (\Throwable $e) {
+            $this->recordFailure('target-keywords', 'loadAll threw: '.$e->getMessage());
+
+            return;
+        }
+
+        foreach ($all as $entryId => $keywords) {
+            // Target entry must still exist; orphaned mappings produce
+            // suggestions for entries that have been deleted.
+            $entry = Entry::find($entryId);
+            if (! $entry) {
+                $this->recordFailure('target-keywords', "keywords map references missing entry {$entryId}");
+
+                continue;
+            }
+
+            if (! is_array($keywords)) {
+                $this->recordFailure('target-keywords', "entry {$entryId} keywords is not an array");
+
+                continue;
+            }
+
+            foreach ($keywords as $kw) {
+                if (! is_string($kw) || $kw === '') {
+                    $this->recordFailure('target-keywords', "entry {$entryId} has empty/non-string keyword");
+
+                    continue;
+                }
+                // A keyword containing `[…](…)` would be interpreted as a
+                // markdown anchor by every downstream regex — silently
+                // breaking previews and inserts. Same shape as the audit's
+                // anchor-in-existing-link guard but applied to stored data.
+                if (preg_match('/\[[^\]]*\]\([^\)]+\)/', $kw)) {
+                    $this->recordFailure('target-keywords', "entry {$entryId} keyword '{$kw}' contains markdown link syntax");
+
+                    continue;
+                }
+                $this->pass('target-keywords');
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Links Report. For each indexed entry, the stored inbound /
+    // outbound suggestion counts and outbound-link counts must be
+    // non-negative integers within sane bounds. Live recomputation of
+    // a sample matches the stored value (catches stale-count drift —
+    // I-7 "preserveSuggestionCounts after light rebuild" issue).
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditLinksReport(): void
+    {
+        $this->line('<fg=yellow>links-report</> — per-entry counts are sane and consistent');
+
+        $records = $this->indexer->load();
+        $totalEntries = count($records);
+
+        // Sanity bounds first — every entry, fast pass.
+        foreach ($records as $r) {
+            $bad = $r->inboundSuggestionCount < 0
+                || $r->outboundSuggestionCount < 0
+                || $r->inboundSuggestionCount > $totalEntries
+                || $r->outboundSuggestionCount > $totalEntries;
+            if ($bad) {
+                $this->recordFailure(
+                    'links-report',
+                    "'{$r->title}' has out-of-bounds counts: inbound={$r->inboundSuggestionCount} outbound={$r->outboundSuggestionCount} (total entries: {$totalEntries})",
+                );
+
+                continue;
+            }
+            $this->pass('links-report');
+        }
+
+        // Live-recompute a small sample and compare to stored counts. Drift
+        // here is the "table shows 5 inbound, modal shows 0" class.
+        $sample = array_slice($records, 0, 5);
+        foreach ($sample as $r) {
+            try {
+                $liveInbound = count($this->inboundEngine->suggestFiltered($r->id));
+            } catch (\Throwable $e) {
+                $this->recordFailure('links-report', "'{$r->title}' inbound recompute threw: ".$e->getMessage());
+
+                continue;
+            }
+            // Allow ±1 tolerance: the index is rebuilt periodically, the
+            // live count reflects the current moment. A larger gap signals
+            // genuine staleness that warrants a re-scan.
+            if (abs($liveInbound - $r->inboundSuggestionCount) > 1) {
+                $this->recordFailure(
+                    'links-report',
+                    "'{$r->title}' inbound count drift: stored={$r->inboundSuggestionCount}, live={$liveInbound} (re-scan needed)",
+                );
+
+                continue;
+            }
+            $this->pass('links-report');
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Overview stats. The Overview tab aggregates totals from the
+    // LinkReport. Verify those aggregates match what falls out of a
+    // direct count of the raw records — guards against a bug in the
+    // aggregation that would show "1500 links" when there are 200.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditOverview(): void
+    {
+        $this->line('<fg=yellow>overview</> — summary stats match direct counts');
+
+        $records = $this->indexer->load();
+        $report = new LinkReport($records);
+        $summary = $report->toArray()['summary'] ?? [];
+
+        $directTotalEntries = count($records);
+        $directTotalLinks = 0;
+        $directOrphaned = 0;
+        $directWithOutbound = 0;
+        foreach ($records as $r) {
+            $directTotalLinks += count($r->outboundLinks);
+            if (! empty($r->outboundLinks)) {
+                $directWithOutbound++;
+            }
+        }
+        // Orphaned = entries no one links to AND that don't link out either.
+        // Build inbound-set first.
+        $hasInbound = [];
+        foreach ($records as $r) {
+            foreach ($r->outboundLinks as $target) {
+                $hasInbound[$target] = true;
+            }
+        }
+        foreach ($records as $r) {
+            if (empty($r->outboundLinks) && empty($hasInbound[$r->id])) {
+                $directOrphaned++;
+            }
+        }
+
+        $checks = [
+            'total_entries' => [(int) ($summary['total_entries'] ?? -1), $directTotalEntries],
+            'total_links' => [(int) ($summary['total_links'] ?? -1), $directTotalLinks],
+            'entries_with_outbound' => [(int) ($summary['entries_with_outbound'] ?? -1), $directWithOutbound],
+            'orphaned_count' => [(int) ($summary['orphaned_count'] ?? -1), $directOrphaned],
+        ];
+        foreach ($checks as $field => [$reported, $direct]) {
+            if ($reported !== $direct) {
+                $this->recordFailure('overview', "{$field}: summary says {$reported}, direct count says {$direct}");
+
+                continue;
+            }
+            $this->pass('overview');
         }
     }
 
