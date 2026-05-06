@@ -9,6 +9,7 @@ use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Links\BrokenLinkReport;
 use Arturrossbach\Linkwise\Support\JobLock;
+use Arturrossbach\Linkwise\Support\UrlHelper;
 use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
 
 /**
@@ -115,8 +116,16 @@ class DetailUnlinkCommand extends Command
             try {
                 // applySelected handles per-entry hash check and atomic save.
                 // Search arg is empty — we use exact match per replacement
-                // via the matched_url.
-                $result = $this->replacer->applySelected('', $entryReps);
+                // via the matched_url. Inject the UNLINK sentinel as new_url
+                // so applySelected → replaceNthInBard / Markdown / Replicator
+                // fall into the "remove the link mark" branches instead of
+                // hitting an undefined `new_url` index. The DetailModal UI
+                // never sends new_url because the action is purely a removal.
+                $entryRepsForCall = array_map(
+                    fn (array $r) => $r + ['new_url' => UrlHelper::UNLINK],
+                    $entryReps,
+                );
+                $result = $this->replacer->applySelected('', $entryRepsForCall);
 
                 $entryReplacementCount = count($entryReps);
                 $actualReplacements = $result['total_replacements'] ?? 0;

@@ -183,7 +183,24 @@ class LinkInsertCommand extends Command
     protected function finalizeIndex(): void
     {
         try {
-            $this->indexer->indexAll();
+            $previousCount = count($this->indexer->load());
+            $this->indexer->clearCache();
+            $records = $this->indexer->buildIndex();
+
+            // Empty-index guard mirrors DetailUnlinkCommand: if a buildIndex
+            // crash returns 0 records when we previously had data, refuse
+            // to overwrite — the user would lose all suggestion + outbound
+            // counts. Better to keep stale data and surface a warning than
+            // wipe the index because of a transient error.
+            if (count($records) === 0 && $previousCount > 0) {
+                Log::warning(
+                    '[Linkwise] LinkInsertCommand: refusing to save empty index (previous had '.$previousCount.' records)',
+                );
+
+                return;
+            }
+
+            $this->indexer->save($records);
         } catch (\Throwable $e) {
             Log::warning('[Linkwise] LinkInsertCommand finalizeIndex failed: '.$e->getMessage());
         }
