@@ -133,8 +133,14 @@ class ApplyRuleCommand extends Command
             ], 600);
         };
 
+        // Cancel hook polled inside the applier's record loop. Without this,
+        // applyRule runs to completion regardless of clicks on the Cancel
+        // button — the post-call cancel branch only fires AFTER all records
+        // have been processed, making Cancel feel broken on long rules.
+        $shouldCancel = fn () => (bool) Cache::get('linkwise:applyrule:cancel');
+
         try {
-            $result = $applier->applyRule($rule, false, $progressCallback);
+            $result = $applier->applyRule($rule, false, $progressCallback, $shouldCancel);
         } catch (\Throwable $e) {
             Log::warning('[Linkwise] ApplyRuleCommand failed: '.$e->getMessage());
             Cache::put('linkwise:applyrule:status', [
@@ -224,6 +230,11 @@ class ApplyRuleCommand extends Command
             array_merge(array_keys($conflictedEntries), $userExcluded)
         ));
 
+        // Polled inside applyRule's record loop so a Cancel click takes effect
+        // mid-rule (not just at rule boundaries). Combined with the per-rule
+        // boundary check below this gives ~one-record cancellation latency.
+        $shouldCancel = fn () => (bool) Cache::get('linkwise:applyrule:cancel');
+
         foreach ($ruleIds as $idx => $ruleId) {
             // Cancel mid-batch: stops cleanly, reports partial result.
             if (Cache::get('linkwise:applyrule:cancel')) {
@@ -295,7 +306,7 @@ class ApplyRuleCommand extends Command
             };
 
             try {
-                $result = $applier->applyRule($rule, false, $progressCallback);
+                $result = $applier->applyRule($rule, false, $progressCallback, $shouldCancel);
             } catch (\Throwable $e) {
                 Log::warning('[Linkwise] ApplyRuleCommand multi apply failed for '.$rule->keyword.': '.$e->getMessage());
                 continue;
@@ -304,6 +315,12 @@ class ApplyRuleCommand extends Command
             $linksAdded = $result['links_added'] ?? 0;
             $totalLinksAdded += $linksAdded;
             $ruleResults[$rule->id] = $linksAdded;
+
+            // Cancelled mid-rule: skip the per-rule stamp (rule didn't fully
+            // apply) and let the next iteration's flag check write phase=cancelled.
+            if (! empty($result['cancelled'])) {
+                break;
+            }
 
             // Stamp last-applied per rule (same semantics as single-rule path).
             try {

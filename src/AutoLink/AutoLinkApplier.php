@@ -30,9 +30,14 @@ class AutoLinkApplier
     /**
      * Apply a single rule to all matching entries.
      *
-     * @return array{entries_checked: int, links_added: int, entries_skipped: int, affected_entries: array}
+     * @param  ?callable  $shouldCancel  Optional cancel hook. Polled at each
+     *                                   record boundary; when it returns true
+     *                                   the loop exits early and `$result['cancelled']`
+     *                                   is set. The partial result is returned
+     *                                   so the caller can persist progress.
+     * @return array{entries_checked: int, links_added: int, entries_skipped: int, affected_entries: array, cancelled?: bool}
      */
-    public function applyRule(AutoLinkRule $rule, bool $preview = false, ?callable $onProgress = null): array
+    public function applyRule(AutoLinkRule $rule, bool $preview = false, ?callable $onProgress = null, ?callable $shouldCancel = null): array
     {
         $records = $this->indexer->load();
         $result = [
@@ -50,6 +55,16 @@ class AutoLinkApplier
         $processed = 0;
 
         foreach ($records as $record) {
+            // Cancel check at iteration boundary. Polled BEFORE expensive work
+            // so a click on the Cancel button takes effect within ~one record
+            // instead of running the full rule to completion. The partial
+            // result still flows back to the caller via `cancelled => true`.
+            if ($shouldCancel && $shouldCancel()) {
+                $result['cancelled'] = true;
+
+                return $result;
+            }
+
             $processed++;
             if ($onProgress) {
                 $onProgress($processed, $totalRecords, $result['links_added']);

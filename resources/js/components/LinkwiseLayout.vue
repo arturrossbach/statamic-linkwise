@@ -271,6 +271,19 @@ export default {
             return GITHUB_ISSUES_NEW_URL;
         },
 
+        /**
+         * Last completed (or cancelled / errored) bulk — drives the persistent
+         * dismissible banner so the user gets the outcome even if they missed
+         * the toast. Single source of truth: `bulkState.lastCompletion` in the
+         * shared bulkOperationService. Child components (LinksReportTab,
+         * AutoLinkingTab) call recordCompletion() which writes to that shared
+         * reactive state — this computed picks the change up directly so the
+         * banner updates regardless of who recorded the completion.
+         */
+        lastCompletion() {
+            return bulkState.lastCompletion;
+        },
+
         // Count of currently-visible persistent notifications. Drives the
         // <details> summary "X notifications" + the v-if that hides the
         // entire accordion when nothing is pending.
@@ -432,7 +445,13 @@ export default {
                 const t = e.entry_title ? ` for "${e.entry_title}"` : '';
                 if (n > 0 && skipped === 0) return `${n} ${direction} link(s) removed${t}.`;
                 if (n > 0) return `${n} ${direction} link(s) removed${t}, ${skipped} skipped.`;
-                return `Could not remove any ${direction} links${t} — ${skipped} skipped.`;
+                // 0 succeeded — surface the top error reason from the
+                // command's per-item errors map (same pattern as inboundinsert).
+                // Without this, the user sees "X skipped" with no idea why.
+                const errs = e.errors || {};
+                const reasons = Object.entries(errs).sort((a, b) => b[1] - a[1]);
+                const topReason = reasons[0]?.[0] || 'links not found in entry content';
+                return `Could not remove any ${direction} links${t} — ${topReason}.`;
             }
             if (kind === 'inboundinsert' || kind === 'outboundinsert') {
                 const direction = kind === 'inboundinsert' ? 'inbound' : 'outbound';
@@ -547,10 +566,6 @@ export default {
             // populated on mount if the user reloaded mid-bulk. Drives the
             // recovery banner; cleared via dismissInterruptedBulk().
             interruptedBulk: null,
-            // Snapshot of the LAST COMPLETED bulk — drives a persistent
-            // dismissible banner so the user gets the outcome even if they
-            // missed the toast (away from screen / coffee break).
-            lastCompletion: null,
             bulkPollTimer: null,
             cancelling: false,
             forceClearing: false,
@@ -599,7 +614,9 @@ export default {
         // Pick up the last-completed-bulk result so the persistent banner
         // survives tab switches and reloads — toast might be gone after 12s
         // but the user might still want to know "did my apply finish OK".
-        this.lastCompletion = getLastCompletion();
+        // Side-effect: hydrates bulkState.lastCompletion from sessionStorage
+        // so the computed `lastCompletion` below picks it up reactively.
+        getLastCompletion();
 
         // Restore the persisted "dismissed for which index_built_at" marker
         // so reloads + tab switches don't resurrect the stale-check banner
@@ -787,7 +804,6 @@ export default {
 
         dismissCompletion() {
             clearLastCompletion();
-            this.lastCompletion = null;
         },
 
         route(name) {
@@ -954,8 +970,9 @@ export default {
                     total: status.total,
                     extra: status.extra || {},
                 };
+                // recordCompletion writes to bulkState.lastCompletion (reactive
+                // shared) — the layout's `lastCompletion` computed picks it up.
                 recordCompletion(completionSnap);
-                this.lastCompletion = { ...completionSnap, recordedAt: Date.now() };
 
                 // Scan needs a full reload to refresh entries data — but only
                 // if WE observed the scan running in this layout instance.

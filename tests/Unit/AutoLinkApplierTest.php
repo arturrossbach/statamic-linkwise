@@ -8,7 +8,7 @@ use Arturrossbach\Linkwise\AutoLink\AutoLinkRule;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Indexer\EntryRecord;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
-use PHPUnit\Framework\TestCase;
+use Arturrossbach\Linkwise\Tests\TestCase;
 
 class AutoLinkApplierTest extends TestCase
 {
@@ -236,5 +236,107 @@ class AutoLinkApplierTest extends TestCase
         $this->assertTrue($restored->skipIfExists);
         $this->assertTrue($restored->caseSensitive);
         $this->assertSame(['blog', 'docs'], $restored->collections);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Cancel-hook tests for applyRule. Bug: ApplyRuleCommand wrote a cancel
+    // flag into the cache, but applyRule never read it — so a Cancel click
+    // only took effect AFTER the rule had run to completion. Fix: applyRule
+    // now polls a `?callable $shouldCancel` at each record boundary and
+    // short-circuits with `cancelled => true` in the result.
+    // ─────────────────────────────────────────────────────────────────────
+
+    public function test_apply_rule_cancel_returns_immediately_on_first_iteration(): void
+    {
+        $records = $this->makeRecords(['a', 'b', 'c', 'd', 'e']);
+        $applier = new AutoLinkApplier($this->fakeIndexer($records), $this->fakeManager());
+        $rule = AutoLinkRule::create([
+            'keyword' => 'zzznonexistent',
+            'url' => 'https://example.com',
+        ]);
+
+        $callCount = 0;
+        $shouldCancel = function () use (&$callCount) {
+            $callCount++;
+            return true; // cancel on first call
+        };
+
+        $result = $applier->applyRule($rule, false, null, $shouldCancel);
+
+        $this->assertTrue($result['cancelled'] ?? false, 'cancelled flag must be set');
+        $this->assertSame(0, $result['entries_checked'], 'no records should be processed');
+        $this->assertSame(0, $result['links_added']);
+        $this->assertSame(1, $callCount, 'cancel hook called exactly once before short-circuit');
+    }
+
+    public function test_apply_rule_cancel_short_circuits_mid_loop(): void
+    {
+        $records = $this->makeRecords(['a', 'b', 'c', 'd', 'e']);
+        $applier = new AutoLinkApplier($this->fakeIndexer($records), $this->fakeManager());
+        $rule = AutoLinkRule::create([
+            'keyword' => 'zzznonexistent',
+            'url' => 'https://example.com',
+        ]);
+
+        $callCount = 0;
+        $shouldCancel = function () use (&$callCount) {
+            $callCount++;
+            return $callCount > 2; // first two iterations proceed, third cancels
+        };
+
+        $result = $applier->applyRule($rule, false, null, $shouldCancel);
+
+        $this->assertTrue($result['cancelled'] ?? false);
+        $this->assertSame(2, $result['entries_checked'], 'two records should have been processed');
+        $this->assertSame(3, $callCount, 'cancel hook called once per iteration including the cancelling one');
+    }
+
+    public function test_apply_rule_without_cancel_callback_runs_to_completion(): void
+    {
+        // Regression guard: passing null for $shouldCancel must not change
+        // existing behavior — the loop runs all records, no cancelled flag.
+        $records = $this->makeRecords(['a', 'b', 'c']);
+        $applier = new AutoLinkApplier($this->fakeIndexer($records), $this->fakeManager());
+        $rule = AutoLinkRule::create([
+            'keyword' => 'zzznonexistent',
+            'url' => 'https://example.com',
+        ]);
+
+        $result = $applier->applyRule($rule, false, null, null);
+
+        $this->assertArrayNotHasKey('cancelled', $result, 'no cancelled flag when not cancelled');
+        $this->assertSame(3, $result['entries_checked']);
+    }
+
+    /** Build a list of EntryRecords with the given IDs and harmless text. */
+    private function makeRecords(array $ids): array
+    {
+        return array_map(fn (string $id) => new EntryRecord(
+            id: $id,
+            title: "Entry $id",
+            url: "/entry/$id",
+            collection: 'pages',
+            text: 'Some unrelated content with no matching keyword.',
+            outboundLinks: [],
+        ), $ids);
+    }
+
+    private function fakeIndexer(array $records): EntryIndexer
+    {
+        return new class($records) extends EntryIndexer {
+            public function __construct(private array $records) {}
+
+            public function load(): array
+            {
+                return $this->records;
+            }
+        };
+    }
+
+    private function fakeManager(): AutoLinkManager
+    {
+        return new class extends AutoLinkManager {
+            public function __construct() {}
+        };
     }
 }
