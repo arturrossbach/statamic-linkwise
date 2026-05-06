@@ -15,20 +15,41 @@ use ReflectionMethod;
  */
 class ContentSafetyValidatorTest extends TestCase
 {
-    /** Helper: invoke private validateMarkdown directly with a fake entry-id/field. */
+    /**
+     * Helper: invoke the private collectFromMarkdown directly. Builds a
+     * violations array, then throws the first violation as a
+     * ContentCorruptionException so the test's expectException works.
+     * Returns silently when no violation is found.
+     */
     private function validateMd(string $markdown): void
     {
-        $m = new ReflectionMethod(ContentSafetyValidator::class, 'validateMarkdown');
+        $violations = [];
+        $m = new ReflectionMethod(ContentSafetyValidator::class, 'collectFromMarkdown');
         $m->setAccessible(true);
-        $m->invoke(null, 'test-entry', 'body', $markdown);
+        $m->invokeArgs(null, ['body', $markdown, &$violations]);
+
+        if (! empty($violations)) {
+            $first = $violations[0];
+            throw new \Arturrossbach\Linkwise\Exceptions\ContentCorruptionException(
+                'test-entry', $first['field'], $first['reason'], $first['excerpt']
+            );
+        }
     }
 
-    /** Helper: invoke private validateBardTree directly. */
+    /** Same shape, but for the Bard tree walker. */
     private function validateBard(array $content): void
     {
-        $m = new ReflectionMethod(ContentSafetyValidator::class, 'validateBardTree');
+        $violations = [];
+        $m = new ReflectionMethod(ContentSafetyValidator::class, 'collectFromBardTree');
         $m->setAccessible(true);
-        $m->invoke(null, 'test-entry', 'body', $content);
+        $m->invokeArgs(null, ['body', $content, &$violations]);
+
+        if (! empty($violations)) {
+            $first = $violations[0];
+            throw new \Arturrossbach\Linkwise\Exceptions\ContentCorruptionException(
+                'test-entry', $first['field'], $first['reason'], $first['excerpt']
+            );
+        }
     }
 
     // ─── Markdown invariant: nested-anchor closing `]](` ─────────────
@@ -252,5 +273,58 @@ class ContentSafetyValidatorTest extends TestCase
         ]];
         $this->validateBard($bard);
         $this->expectNotToPerformAssertions();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Collection mode: collectFromMarkdown / collectFromBardTree must NOT
+    // bail on first violation. Multiple violations in the same content
+    // must all surface — required for the diff-based validation in
+    // SafeEntrySaver to count properly (1 pre-existing + 1 new = 2 must
+    // be distinguishable from 1 pre-existing + 0 new = 1).
+    // ─────────────────────────────────────────────────────────────────────
+
+    public function test_markdown_collects_all_violations_not_just_first(): void
+    {
+        // Two distinct corruption sites in one markdown string. The old
+        // throw-on-first behaviour would only see one — the new collect
+        // path must surface both.
+        $md = "First [a [b](c)](d) here. And second [e]([nested](u)://x). Done.";
+        $violations = [];
+        $m = new ReflectionMethod(ContentSafetyValidator::class, 'collectFromMarkdown');
+        $m->setAccessible(true);
+        $m->invokeArgs(null, ['body', $md, &$violations]);
+
+        // Expect at least two violations across both corrupt segments —
+        // the unmatched-bracket and the nested-URL pattern.
+        $this->assertGreaterThanOrEqual(2, count($violations), 'multiple corruptions must be collected');
+
+        $reasons = array_column($violations, 'reason');
+        $this->assertTrue(
+            collect($reasons)->contains(fn ($r) => str_contains($r, 'unmatched `[`')),
+            'unmatched-bracket reason must appear',
+        );
+        $this->assertTrue(
+            collect($reasons)->contains(fn ($r) => str_contains($r, 'another `](`')),
+            'nested-URL reason must appear',
+        );
+    }
+
+    public function test_count_by_key_groups_by_field_and_reason(): void
+    {
+        // Two violations with the same (field, reason) collapse to count=2;
+        // a third with a different reason is its own bucket. This is what
+        // ensureNoNewViolations uses to detect "save introduced new
+        // corruption" — same key with higher count after vs before.
+        $violations = [
+            ['field' => 'body', 'reason' => 'reason-A', 'excerpt' => 'one'],
+            ['field' => 'body', 'reason' => 'reason-A', 'excerpt' => 'two'],
+            ['field' => 'body', 'reason' => 'reason-B', 'excerpt' => 'three'],
+        ];
+        $m = new ReflectionMethod(ContentSafetyValidator::class, 'countByKey');
+        $m->setAccessible(true);
+        $counts = $m->invoke(null, $violations);
+
+        $this->assertSame(2, $counts['body::reason-A']);
+        $this->assertSame(1, $counts['body::reason-B']);
     }
 }

@@ -32,15 +32,11 @@ class SafeEntrySaver
      */
     public static function save(Entry $entry, string $expectedHash): void
     {
-        // Final guard before content reaches disk: refuse to save anything
-        // that violates Linkwise's content-safety invariants. Catches the
-        // catastrophic-corruption class (`[[anchor]](url)](url)`, broken
-        // Bard trees, malformed link hrefs) BEFORE the user is affected.
-        // ContentCorruptionException bubbles up to the caller — every
-        // bulk command + controller logs + surfaces it as a clear error.
-        ContentSafetyValidator::ensureSafe($entry);
-
-        // Reload the entry from disk to get current state
+        // Reload the entry from disk to get current state. We need this for
+        // both the conflict-check below AND the diff-based content-safety
+        // validation: we only block saves that INTRODUCE new corruption,
+        // not saves that touch entries with pre-existing corruption from
+        // earlier dev iterations or manual paste.
         $current = EntryFacade::find($entry->id());
 
         if (! $current) {
@@ -51,6 +47,9 @@ class SafeEntrySaver
                 );
             }
 
+            // First-ever save (no on-disk state to diff against): fall back
+            // to absolute validation. Anything corrupt is genuinely new.
+            ContentSafetyValidator::ensureSafe($entry);
             self::saveWithCascadeGuard($entry);
 
             return;
@@ -64,6 +63,16 @@ class SafeEntrySaver
                 entryTitle: $entry->get('title') ?? $entry->slug() ?? $entry->id(),
             );
         }
+
+        // Diff-based content-safety check: throws ContentCorruptionException
+        // only when this save would introduce NEW violations the on-disk
+        // state didn't already have. Linkwise is responsible for what we
+        // change — pre-existing corruption is the user's data hygiene
+        // problem, surfaced by `php artisan linkwise:audit`. Without this
+        // diff, legitimate operations (e.g. removing a clean link from an
+        // entry that ALSO contains an unrelated pre-existing corrupt link)
+        // would be blocked too, which is the wrong default.
+        ContentSafetyValidator::ensureNoNewViolations($current, $entry);
 
         self::saveWithCascadeGuard($entry);
     }
