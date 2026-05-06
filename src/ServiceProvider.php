@@ -3,6 +3,7 @@
 namespace Arturrossbach\Linkwise;
 
 use Arturrossbach\Linkwise\Commands\ApplyRuleCommand;
+use Arturrossbach\Linkwise\Commands\AuditCommand;
 use Arturrossbach\Linkwise\Commands\BulkUnlinkCommand;
 use Arturrossbach\Linkwise\Commands\CheckLinksCommand;
 use Arturrossbach\Linkwise\Commands\DetailUnlinkCommand;
@@ -33,6 +34,7 @@ class ServiceProvider extends AddonServiceProvider
         DetailUnlinkCommand::class,
         LinkInsertCommand::class,
         SeedTestDataCommand::class,
+        AuditCommand::class,
     ];
 
     protected $routes = [
