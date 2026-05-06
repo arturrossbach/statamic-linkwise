@@ -562,31 +562,6 @@ class AutoLinkController extends CpController
         return response()->json(['success' => true]);
     }
 
-    public function applyAll(Request $request): JsonResponse
-    {
-        $preview = $request->boolean('preview', false);
-        $conflictedEntries = ! $preview
-            ? SafeEntrySaver::verifyHashes($request->input('entry_hashes', []))
-            : [];
-
-        $applier = new AutoLinkApplier($this->indexer, $this->manager);
-        $applier->setExcludedEntries(array_keys($conflictedEntries));
-        $result = $applier->applyAll($preview);
-
-        if (! empty($conflictedEntries)) {
-            $result['conflicts'] = array_values($conflictedEntries);
-            $result['conflict_message'] = count($conflictedEntries).' entry/entries were modified by another user and skipped.';
-        }
-
-        if (! $preview && ($result['links_added'] ?? 0) > 0) {
-            $this->indexer->clearCache();
-            $records = $this->indexer->buildIndex();
-            $this->indexer->save($records);
-        }
-
-        return response()->json($result);
-    }
-
     /**
      * Compute fresh hashes for entries that had hashes sent in the request.
      */

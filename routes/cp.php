@@ -136,8 +136,6 @@ Route::middleware('can:manage linkwise')->group(function () {
         ->name('linkwise.autolink.apply-async.status');
     Route::post('linkwise/autolink/apply-async/cancel', [AutoLinkController::class, 'applyAsyncCancel'])
         ->name('linkwise.autolink.apply-async.cancel');
-    Route::post('linkwise/autolink/apply-all', [AutoLinkController::class, 'applyAll'])
-        ->name('linkwise.autolink.apply-all');
 
     // Target Keywords
     Route::post('linkwise/target-keywords/{entryId}', [TargetKeywordController::class, 'update'])

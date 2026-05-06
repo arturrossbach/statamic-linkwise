@@ -492,37 +492,5 @@ class AutoLinkApplier
         return false;
     }
 
-    /**
-     * Apply all active rules.
-     *
-     * @return array{total_rules: int, total_links_added: int, results: array}
-     */
-    public function applyAll(bool $preview = false): array
-    {
-        $rules = $this->manager->loadRules();
-        $totalLinksAdded = 0;
-        $results = [];
-
-        foreach ($rules as $rule) {
-            if (! $rule->active) {
-                continue;
-            }
-
-            $result = $this->applyRule($rule, $preview);
-            $totalLinksAdded += $result['links_added'];
-            $results[] = [
-                'rule_id' => $rule->id,
-                'keyword' => $rule->keyword,
-                'links_added' => $result['links_added'],
-                'entries_checked' => $result['entries_checked'],
-            ];
-        }
-
-        return [
-            'total_rules' => count($results),
-            'total_links_added' => $totalLinksAdded,
-            'results' => $results,
-        ];
-    }
 
 }

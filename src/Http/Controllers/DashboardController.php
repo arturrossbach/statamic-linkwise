@@ -326,7 +326,6 @@ class DashboardController extends CpController
                 'auto_apply_on_save_enabled' => (bool) config('linkwise.auto_apply_on_save_enabled', false),
                 'urls' => [
                     'store' => cp_route('linkwise.autolink.store'),
-                    'apply_all' => cp_route('linkwise.autolink.apply-all'),
                     'apply_async' => cp_route('linkwise.autolink.apply-async', '__ID__'),
                     'apply_selected_async' => cp_route('linkwise.autolink.apply-selected-async'),
                     'apply_async_status' => cp_route('linkwise.autolink.apply-async.status'),
