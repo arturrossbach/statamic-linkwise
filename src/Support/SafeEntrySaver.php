@@ -32,6 +32,14 @@ class SafeEntrySaver
      */
     public static function save(Entry $entry, string $expectedHash): void
     {
+        // Final guard before content reaches disk: refuse to save anything
+        // that violates Linkwise's content-safety invariants. Catches the
+        // catastrophic-corruption class (`[[anchor]](url)](url)`, broken
+        // Bard trees, malformed link hrefs) BEFORE the user is affected.
+        // ContentCorruptionException bubbles up to the caller — every
+        // bulk command + controller logs + surfaces it as a clear error.
+        ContentSafetyValidator::ensureSafe($entry);
+
         // Reload the entry from disk to get current state
         $current = EntryFacade::find($entry->id());
 
