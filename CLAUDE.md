@@ -113,6 +113,25 @@ This checklist exists because skipping it has caused bugs in every single sessio
 - NEVER run the full Playwright suite during development — only targeted tests with `--grep`
 - When a value appears in multiple views: verify BOTH views show the same number via tinker before asking the user to test
 
+## BLOCKING: linkwise:audit before "kannst testen"
+
+Before posting any "kannst testen" / "feature complete" / "fertig" message
+that touches Linkwise code, you MUST:
+
+1. Run `php artisan linkwise:audit` against `~/Herd/prose-peak-test`
+2. Confirm exit code 0, OR explicitly document each remaining failure as a
+   known limitation (data corruption from earlier dev iterations vs new bugs)
+3. Only then tell the user to test
+
+This is the corruption-prevention gate. Audit failures that look like new
+bugs MUST be triaged before claiming done. Skipping this is how today's
+catastrophic markdown-corruption bug shipped — the audit would have caught
+it in 10 seconds.
+
+Path-specific runs are fine for fast iteration:
+`php artisan linkwise:audit --path=auto-link` (or any single path).
+Full audit is mandatory before user-facing test asks.
+
 ## Data Flow — Single Sources of Truth
 
 When changing anything related to these, trace the full flow first:
