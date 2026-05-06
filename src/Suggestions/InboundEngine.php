@@ -131,7 +131,15 @@ class InboundEngine
                 return \Arturrossbach\Linkwise\Support\BardLinkInserter::insertLinkIntoEntryWithHref(
                     $s->sourceEntryId, $s->anchorText, $href, false, false
                 );
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                // EntryConflictException is expected when the entry was edited
+                // concurrently — silently exclude the suggestion. Other Throwables
+                // are real bugs; log them so they can be tracked down. Same
+                // pattern as EntryIndexer Phase 2 silent catches.
+                \Illuminate\Support\Facades\Log::warning(
+                    '[Linkwise] InboundEngine dry-run filter failed for entry '.$s->sourceEntryId.': '.$e->getMessage()
+                );
+
                 return false;
             }
         }));
@@ -177,7 +185,14 @@ class InboundEngine
                 if ($this->anchorIsLinkedInEntry($sourceRecord->id, $keyword)) {
                     continue;
                 }
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                // Entry::find() not available in unit tests — falling through
+                // means we may suggest a candidate whose anchor is already
+                // linked, but the dry-run filter in suggestFiltered catches
+                // those. Log so we notice in production.
+                \Illuminate\Support\Facades\Log::warning(
+                    '[Linkwise] InboundEngine custom-keyword anchor check failed for entry '.$sourceRecord->id.': '.$e->getMessage()
+                );
             }
 
             $context = ContextExtractor::extractStructured($sourceText, $keyword);
@@ -232,12 +247,13 @@ class InboundEngine
                 if ($this->replicatorHasLinkedAnchor($value, $anchorText)) {
                     return true;
                 }
-            } elseif (in_array($field->type(), ['markdown', 'textarea', 'text'], true)
+            } elseif ($field->type() === 'markdown'
                 && is_string($value) && ! empty($value) && $handle !== 'title') {
-                // Symmetric to BardLinkInserter: any plain-string field at
-                // top-level can carry a markdown link via [text](href). Check
-                // for it so the dry-run filter doesn't re-suggest the same
-                // anchor that's already been linked there.
+                // Only `markdown` fields can host a markdown-syntax link that
+                // Linkwise will respect. `text` / `textarea` are plaintext per
+                // Statamic's contract — the retreat in BardLinkInserter does
+                // not write markdown syntax there, so checking for it here
+                // would be inconsistent with the write side.
                 if ($this->markdownHasLinkedOverlap($value, $anchorText)) {
                     return true;
                 }
