@@ -273,7 +273,7 @@
                 <div class="flex flex-wrap gap-2 shrink-0">
                     <Button @click="openGithubIssue" text="Report a bug" icon="alert-warning-exclamation-mark" />
                     <Button @click="openSupportEmail" text="Email us" icon="mail" />
-                    <Button @click="openDiscord" text="Discord" icon="social-discord-logo" v-tooltip="'Opens Statamic\'s official Discord — discuss Linkwise in #addons or DM @arossbach_'" />
+                    <Button @click="openDiscord" text="Discord" icon="social-discord-logo" v-tooltip="'Opens Statamic\'s official Discord — discuss Linkwise in #addons or DM @artur_rossbach'" />
                     <Button @click="downloadDiagnosticZip" text="Diagnostic ZIP" icon="download" />
                 </div>
             </div>
