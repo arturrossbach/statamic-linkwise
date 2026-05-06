@@ -79,12 +79,12 @@ class OutboundController extends CpController
         }
 
         $validated = $request->validate([
-            'entry_id' => ['required', 'string'],
-            'content_hash' => ['sometimes', 'string'],
+            'entry_id' => ['required', 'string', 'max:64'],
+            'content_hash' => ['sometimes', 'string', 'max:64'],
             'insertions' => ['required', 'array', 'min:1', 'max:200'],
-            'insertions.*.target_entry_id' => ['required', 'string'],
-            'insertions.*.anchor_text' => ['required', 'string'],
-            'entry_title' => ['sometimes', 'nullable', 'string'],
+            'insertions.*.target_entry_id' => ['required', 'string', 'max:64'],
+            'insertions.*.anchor_text' => ['required', 'string', 'max:500'],
+            'entry_title' => ['sometimes', 'nullable', 'string', 'max:300'],
         ]);
 
         $entryId = $validated['entry_id'];

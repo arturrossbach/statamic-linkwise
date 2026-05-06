@@ -21,8 +21,8 @@ class IgnoredLinkController extends CpController
     public function ignore(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'post_id' => ['required', 'string'],
-            'url' => ['required', 'string'],
+            'post_id' => ['required', 'string', 'max:64'],
+            'url' => ['required', 'string', 'max:2048'],
         ]);
 
         $found = $this->report->setIgnored($validated['post_id'], $validated['url'], true);
@@ -37,8 +37,8 @@ class IgnoredLinkController extends CpController
     public function unignore(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'post_id' => ['required', 'string'],
-            'url' => ['required', 'string'],
+            'post_id' => ['required', 'string', 'max:64'],
+            'url' => ['required', 'string', 'max:2048'],
         ]);
 
         $found = $this->report->setIgnored($validated['post_id'], $validated['url'], false);

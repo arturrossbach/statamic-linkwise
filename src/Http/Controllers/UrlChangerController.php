@@ -24,7 +24,7 @@ class UrlChangerController extends CpController
     public function preview(Request $request): JsonResponse
     {
         $request->validate([
-            'search' => 'nullable|string',
+            'search' => 'nullable|string|max:2048',
             'mode' => 'string|in:smart,exact',
         ]);
 
@@ -56,17 +56,17 @@ class UrlChangerController extends CpController
     public function apply(Request $request): JsonResponse
     {
         $request->validate([
-            'search' => 'nullable|string',
-            'entry_hashes' => 'sometimes|array',
+            'search' => 'nullable|string|max:2048',
+            'entry_hashes' => 'sometimes|array|max:50000',
             'mode' => 'sometimes|in:smart,exact',
-            'replacements' => 'required|array|min:1',
-            'replacements.*.entry_id' => 'required|string',
-            'replacements.*.field' => 'nullable|string',
-            'replacements.*.field_type' => 'nullable|string',
-            'replacements.*.matched_url' => 'required|string',
+            'replacements' => 'required|array|min:1|max:5000',
+            'replacements.*.entry_id' => 'required|string|max:64',
+            'replacements.*.field' => 'nullable|string|max:80',
+            'replacements.*.field_type' => 'nullable|string|max:40',
+            'replacements.*.matched_url' => 'required|string|max:2048',
             'replacements.*.occurrence_index' => 'required|numeric|min:0',
-            'replacements.*.new_url' => 'required|string|min:3', // Use UrlHelper::UNLINK to unlink
-            'replacements.*.search' => 'nullable|string', // Per-item search override for batch unlink
+            'replacements.*.new_url' => 'required|string|min:3|max:2048', // Use UrlHelper::UNLINK to unlink
+            'replacements.*.search' => 'nullable|string|max:2048', // Per-item search override for batch unlink
         ]);
 
         // Mode controls URL matching semantics:
@@ -191,18 +191,18 @@ class UrlChangerController extends CpController
         }
 
         $validated = $request->validate([
-            'search' => 'nullable|string',
+            'search' => 'nullable|string|max:2048',
             'mode' => 'sometimes|in:smart,exact',
             'action' => 'required|in:apply,unlink',
-            'entry_hashes' => 'sometimes|array',
-            'replacements' => 'required|array|min:1',
-            'replacements.*.entry_id' => 'required|string',
-            'replacements.*.field' => 'nullable|string',
-            'replacements.*.field_type' => 'nullable|string',
-            'replacements.*.matched_url' => 'required|string',
+            'entry_hashes' => 'sometimes|array|max:50000',
+            'replacements' => 'required|array|min:1|max:5000',
+            'replacements.*.entry_id' => 'required|string|max:64',
+            'replacements.*.field' => 'nullable|string|max:80',
+            'replacements.*.field_type' => 'nullable|string|max:40',
+            'replacements.*.matched_url' => 'required|string|max:2048',
             'replacements.*.occurrence_index' => 'required|numeric|min:0',
-            'replacements.*.new_url' => 'required|string|min:3',
-            'replacements.*.search' => 'nullable|string',
+            'replacements.*.new_url' => 'required|string|min:3|max:2048',
+            'replacements.*.search' => 'nullable|string|max:2048',
         ]);
 
         // Verify hashes upfront — fail-fast 409 if any conflict before we

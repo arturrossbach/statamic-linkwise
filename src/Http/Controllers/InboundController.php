@@ -74,12 +74,12 @@ class InboundController extends CpController
         }
 
         $validated = $request->validate([
-            'entry_hashes' => ['sometimes', 'array'],
+            'entry_hashes' => ['sometimes', 'array', 'max:50000'],
             'insertions' => ['required', 'array', 'min:1', 'max:200'],
-            'insertions.*.source_entry_id' => ['required', 'string'],
-            'insertions.*.target_entry_id' => ['required', 'string'],
-            'insertions.*.anchor_text' => ['required', 'string'],
-            'entry_title' => ['sometimes', 'nullable', 'string'],
+            'insertions.*.source_entry_id' => ['required', 'string', 'max:64'],
+            'insertions.*.target_entry_id' => ['required', 'string', 'max:64'],
+            'insertions.*.anchor_text' => ['required', 'string', 'max:500'],
+            'entry_title' => ['sometimes', 'nullable', 'string', 'max:300'],
         ]);
 
         // Pre-flight hash check — fail-fast 409 before dispatch instead of

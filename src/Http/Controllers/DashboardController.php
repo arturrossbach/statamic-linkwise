@@ -562,14 +562,14 @@ class DashboardController extends CpController
         }
 
         $validated = $request->validate([
-            'replacements' => 'required|array|min:1',
-            'replacements.*.entry_id' => 'required|string',
-            'replacements.*.matched_url' => 'required|string',
-            'replacements.*.new_url' => 'required|string',
-            'replacements.*.field' => 'nullable|string',
-            'replacements.*.field_type' => 'nullable|string',
+            'replacements' => 'required|array|min:1|max:5000',
+            'replacements.*.entry_id' => 'required|string|max:64',
+            'replacements.*.matched_url' => 'required|string|max:2048',
+            'replacements.*.new_url' => 'required|string|max:2048',
+            'replacements.*.field' => 'nullable|string|max:80',
+            'replacements.*.field_type' => 'nullable|string|max:40',
             'replacements.*.occurrence_index' => 'nullable|integer',
-            'replacements.*.search' => 'nullable|string',
+            'replacements.*.search' => 'nullable|string|max:2048',
         ]);
 
         \Illuminate\Support\Facades\Cache::put('linkwise:bulkunlink:payload', $validated, 600);
@@ -722,16 +722,16 @@ class DashboardController extends CpController
         }
 
         $validated = $request->validate([
-            'replacements' => 'required|array|min:1',
-            'replacements.*.entry_id' => 'required|string',
-            'replacements.*.field' => 'nullable|string',
-            'replacements.*.field_type' => 'nullable|string',
-            'replacements.*.matched_url' => 'required|string',
+            'replacements' => 'required|array|min:1|max:5000',
+            'replacements.*.entry_id' => 'required|string|max:64',
+            'replacements.*.field' => 'nullable|string|max:80',
+            'replacements.*.field_type' => 'nullable|string|max:40',
+            'replacements.*.matched_url' => 'required|string|max:2048',
             'replacements.*.occurrence_index' => 'required|numeric|min:0',
-            'replacements.*.search' => 'nullable|string',
-            'entry_hashes' => 'sometimes|array',
+            'replacements.*.search' => 'nullable|string|max:2048',
+            'entry_hashes' => 'sometimes|array|max:50000',
             'source_mode' => 'sometimes|in:inbound,outbound',
-            'entry_title' => 'sometimes|nullable|string',
+            'entry_title' => 'sometimes|nullable|string|max:300',
         ]);
 
         // Pre-flight hash check — fail-fast 409 before dispatch instead of

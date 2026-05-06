@@ -30,13 +30,14 @@ class AutoLinkController extends CpController
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'keyword' => 'required|string|min:1',
-            'url' => 'required|string',
+            'keyword' => 'required|string|min:1|max:200',
+            'url' => 'required|string|max:2048',
             'once_per_post' => 'boolean',
             'skip_if_exists' => 'boolean',
             'case_sensitive' => 'boolean',
             'auto_apply_on_save' => 'in:follow_global,always,never',
-            'collections' => 'array',
+            'collections' => 'array|max:100',
+            'collections.*' => 'string|max:80',
         ]);
 
         $data['keyword'] = trim($data['keyword']);
@@ -92,13 +93,14 @@ class AutoLinkController extends CpController
     public function update(Request $request, string $id): JsonResponse
     {
         $data = $request->validate([
-            'keyword' => 'string|min:1',
-            'url' => 'string',
+            'keyword' => 'string|min:1|max:200',
+            'url' => 'string|max:2048',
             'once_per_post' => 'boolean',
             'skip_if_exists' => 'boolean',
             'case_sensitive' => 'boolean',
             'auto_apply_on_save' => 'in:follow_global,always,never',
-            'collections' => 'array',
+            'collections' => 'array|max:100',
+            'collections.*' => 'string|max:80',
             'active' => 'boolean',
         ]);
 
@@ -124,8 +126,8 @@ class AutoLinkController extends CpController
     public function destroyMany(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'ids' => 'required|array|min:1',
-            'ids.*' => 'string',
+            'ids' => 'required|array|min:1|max:1000',
+            'ids.*' => 'string|max:64',
         ]);
 
         $removed = $this->manager->deleteRules($data['ids']);
@@ -370,8 +372,8 @@ class AutoLinkController extends CpController
     public function toggleMany(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'ids' => 'required|array|min:1',
-            'ids.*' => 'string',
+            'ids' => 'required|array|min:1|max:1000',
+            'ids.*' => 'string|max:64',
             'active' => 'required|boolean',
         ]);
 
@@ -513,11 +515,11 @@ class AutoLinkController extends CpController
         }
 
         $validated = $request->validate([
-            'rule_ids' => 'required|array|min:1',
-            'rule_ids.*' => 'required|string',
-            'entry_hashes' => 'sometimes|array',
-            'excluded_entry_ids' => 'sometimes|array',
-            'excluded_entry_ids.*' => 'string',
+            'rule_ids' => 'required|array|min:1|max:1000',
+            'rule_ids.*' => 'required|string|max:64',
+            'entry_hashes' => 'sometimes|array|max:50000',
+            'excluded_entry_ids' => 'sometimes|array|max:50000',
+            'excluded_entry_ids.*' => 'string|max:64',
         ]);
 
         // Defensive: wipe any leftover terminal-status from a previous run so
