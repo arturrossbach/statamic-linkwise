@@ -95,6 +95,11 @@ class UrlChangerApplyCommand extends Command
 
         // Forensic snapshot before any writes — entry IDs from the grouped
         // replacements, hashes from the payload's entry_hashes map.
+        $snapshotItems = array_map(fn (array $r) => [
+            'entry_id' => $r['entry_id'] ?? '',
+            'matched_url' => $r['matched_url'] ?? '',
+            'new_url' => $r['new_url'] ?? '',
+        ], $replacements);
         app(BulkSnapshotStore::class)->record(
             kind: 'urlchanger',
             entryIds: array_keys($byEntry),
@@ -105,6 +110,7 @@ class UrlChangerApplyCommand extends Command
                 'mode' => $mode,
                 'replacement_count' => $total,
             ],
+            items: $snapshotItems,
         );
 
         Cache::put('linkwise:urlchanger:status', [

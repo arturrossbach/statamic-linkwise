@@ -55,6 +55,16 @@ class BulkSnapshotStore
      * @param  array<string, mixed>  $summary  Kind-specific metadata (rule keyword,
      *   search term, source mode, etc.) — surfaced verbatim in the activity-log
      *   detail view, so it should be human-readable.
+     * @param  list<array<string, mixed>>  $items  Per-item operation data so the
+     *   activity-log drawer can show "anchor 'vue.js' inserted in entry X" and
+     *   the deep-link button can route to URL Changer with the right search.
+     *   Shape varies by kind:
+     *     - applyrule:        [{entry_id, anchor_text, url}]
+     *     - inboundinsert:    [{entry_id, source_entry_id, target_entry_id, anchor_text}]
+     *     - outboundinsert:   [{entry_id, source_entry_id, target_entry_id, anchor_text}]
+     *     - detailunlink:     [{entry_id, matched_url, anchor_text}]
+     *     - bulkunlink:       [{entry_id, matched_url}]
+     *     - urlchanger:       [{entry_id, matched_url, new_url}]
      * @return string  The snapshot id (also used as filename without .json).
      */
     public function record(
@@ -62,6 +72,7 @@ class BulkSnapshotStore
         array $entryIds,
         array $preHashes = [],
         array $summary = [],
+        array $items = [],
     ): string {
         $this->cleanupStale();
         $this->ensureDirectory();
@@ -81,6 +92,18 @@ class BulkSnapshotStore
             $trimmed = true;
         }
 
+        // Cap items to the same MAX so a 5000-replacement URL changer batch
+        // doesn't blow up the file. Activity-log surfaces these for forensics
+        // — we don't need to round-trip every single one.
+        $itemsTrimmed = false;
+        $itemCountTotal = count($items);
+        if ($itemCountTotal > self::MAX_ENTRIES_PER_SNAPSHOT) {
+            $items = array_slice($items, 0, self::MAX_ENTRIES_PER_SNAPSHOT);
+            $itemsTrimmed = true;
+        }
+        // Filter out non-array items defensively (caller should send arrays).
+        $items = array_values(array_filter($items, 'is_array'));
+
         $data = [
             'id' => $id,
             'kind' => $kind,
@@ -90,8 +113,11 @@ class BulkSnapshotStore
             'entry_ids' => $entryIds,
             'pre_hashes' => $preHashes,
             'summary' => $summary,
+            'items' => $items,
             'entry_count_total' => $totalCount,
             'entries_trimmed' => $trimmed,
+            'item_count_total' => $itemCountTotal,
+            'items_trimmed' => $itemsTrimmed,
         ];
 
         try {

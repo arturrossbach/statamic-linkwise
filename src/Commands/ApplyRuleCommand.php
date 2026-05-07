@@ -107,6 +107,11 @@ class ApplyRuleCommand extends Command
             fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
             $preview['affected_entries'] ?? [],
         )));
+        $snapshotItems = array_map(fn (string $id) => [
+            'entry_id' => $id,
+            'anchor_text' => $rule->keyword,
+            'url' => $rule->url,
+        ], $previewEntryIds);
         app(BulkSnapshotStore::class)->record(
             kind: 'applyrule',
             entryIds: $previewEntryIds,
@@ -116,6 +121,7 @@ class ApplyRuleCommand extends Command
                 'rule_keyword' => $rule->keyword,
                 'estimated_links' => $totalEstimate,
             ],
+            items: $snapshotItems,
         );
 
         Cache::put('linkwise:applyrule:status', [
@@ -264,7 +270,23 @@ class ApplyRuleCommand extends Command
         // which we use as best-effort); entry IDs are the union from the
         // payload's entry_hashes (the frontend captures hashes for every entry
         // visible in the rule-preview tables).
+        //
+        // Items here list the RULES (one per rule), not the entries — multi-
+        // rule mode doesn't pre-compute per-entry effects (would cost a
+        // preview-pass per rule × all entries). The activity-log shows the
+        // batch as "applied N rules" and links each rule's keyword + URL.
         $batchEntryIds = is_array($entryHashes) ? array_keys($entryHashes) : [];
+        $snapshotItems = [];
+        foreach ($ruleIds as $rid) {
+            $r = $this->manager->getRule($rid);
+            if ($r) {
+                $snapshotItems[] = [
+                    'rule_id' => $r->id,
+                    'anchor_text' => $r->keyword,
+                    'url' => $r->url,
+                ];
+            }
+        }
         app(BulkSnapshotStore::class)->record(
             kind: 'applyrule',
             entryIds: $batchEntryIds,
@@ -274,6 +296,7 @@ class ApplyRuleCommand extends Command
                 'rule_ids' => $ruleIds,
                 'total_rules' => $totalRules,
             ],
+            items: $snapshotItems,
         );
 
         // Polled inside applyRule's record loop so a Cancel click takes effect

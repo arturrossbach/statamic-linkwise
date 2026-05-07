@@ -114,6 +114,11 @@ class UrlChangerController extends CpController
             array_column($request->replacements, 'entry_id'),
             'is_string',
         )));
+        $snapshotItems = array_map(fn (array $r) => [
+            'entry_id' => $r['entry_id'] ?? '',
+            'matched_url' => $r['matched_url'] ?? '',
+            'new_url' => $r['new_url'] ?? '',
+        ], $request->replacements);
         app(BulkSnapshotStore::class)->record(
             kind: 'urlchanger',
             entryIds: $snapshotEntryIds,
@@ -124,6 +129,7 @@ class UrlChangerController extends CpController
                 'replacement_count' => count($request->replacements),
                 'caller' => 'sync', // distinguishes per-row Broken-Links unlink from the async batch
             ],
+            items: $snapshotItems,
         );
 
         try {

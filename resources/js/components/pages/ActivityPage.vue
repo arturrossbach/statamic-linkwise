@@ -93,9 +93,19 @@
                     </ul>
                 </Alert>
 
-                <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    <strong>{{ detail.entries.length }}</strong> {{ detail.entries.length === 1 ? 'entry' : 'entries' }} were affected:
-                </p>
+                <div class="flex items-center justify-between mb-2 gap-3">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                        <strong>{{ detail.entries.length }}</strong> {{ detail.entries.length === 1 ? 'entry' : 'entries' }} were affected:
+                    </p>
+                    <a
+                        v-if="detail.deep_link_url_changer"
+                        :href="detail.deep_link_url_changer"
+                        class="text-xs text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+                        v-tooltip="'Open the URL Changer with the same search pre-filled, so you can manually unlink or replace these in bulk.'"
+                    >
+                        Find these in URL Changer ↗
+                    </a>
+                </div>
 
                 <Panel>
                     <div class="overflow-x-auto">
@@ -104,6 +114,7 @@
                                 <tr>
                                     <th scope="col" class="text-left">Title</th>
                                     <th scope="col" class="text-left">Collection</th>
+                                    <th scope="col" class="text-left">What happened</th>
                                     <th scope="col" class="text-left">Status since bulk</th>
                                     <th scope="col" class="text-right"></th>
                                 </tr>
@@ -112,6 +123,16 @@
                                 <tr v-for="e in detail.entries" :key="e.id">
                                     <td>{{ e.title }}</td>
                                     <td class="text-xs text-gray-500">{{ e.collection || '—' }}</td>
+                                    <td class="text-xs text-gray-600 dark:text-gray-400">
+                                        <div v-if="e.items && e.items.length > 0" class="space-y-0.5">
+                                            <div v-for="(item, i) in e.items" :key="i" class="leading-snug">
+                                                <span v-if="item.anchor_text" class="font-mono text-xs">"{{ item.anchor_text }}"</span>
+                                                <span v-if="item.matched_url" class="text-gray-500"> → {{ truncateUrl(item.matched_url) }}</span>
+                                                <span v-if="item.new_url" class="text-gray-500"> → {{ truncateUrl(item.new_url) }}</span>
+                                            </div>
+                                        </div>
+                                        <span v-else class="text-gray-400">—</span>
+                                    </td>
                                     <td class="text-xs">
                                         <Badge :variant="statusVariant(e.status)" :text="statusLabel(e.status)" />
                                     </td>
@@ -257,6 +278,19 @@ export default {
             } catch {
                 return iso;
             }
+        },
+
+        truncateUrl(url) {
+            if (!url) return '';
+            // statamic://entry::UUID is the verbose internal form — replace with
+            // a compact "→ entry" so the table doesn't get hijacked by 60-char URIs.
+            if (url.startsWith('statamic://entry::')) {
+                return 'entry: ' + url.replace('statamic://entry::', '').slice(0, 8) + '…';
+            }
+            if (url.length > 50) {
+                return url.slice(0, 47) + '…';
+            }
+            return url;
         },
     },
 };

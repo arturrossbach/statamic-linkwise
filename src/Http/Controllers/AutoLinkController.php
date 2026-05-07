@@ -434,6 +434,11 @@ class AutoLinkController extends CpController
                 $previewForSnapshot['affected_entries'] ?? [],
             )));
             $hashes = $request->input('entry_hashes', []);
+            $snapshotItems = array_map(fn (string $id) => [
+                'entry_id' => $id,
+                'anchor_text' => $rule->keyword,
+                'url' => $rule->url,
+            ], $snapshotEntryIds);
             app(BulkSnapshotStore::class)->record(
                 kind: 'applyrule',
                 entryIds: $snapshotEntryIds,
@@ -443,6 +448,7 @@ class AutoLinkController extends CpController
                     'rule_keyword' => $rule->keyword,
                     'caller' => 'sync',
                 ],
+                items: $snapshotItems,
             );
         }
 

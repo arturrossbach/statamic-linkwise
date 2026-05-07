@@ -454,6 +454,24 @@ class DashboardController extends CpController
         }
 
         $statuses = $store->compareToCurrent($snap);
+
+        // Build a per-entry index of items so the drawer can show
+        // "anchor 'vue.js' inserted" / "removed link to /old-url" etc.
+        // Most kinds key items by entry_id; link-insert items use
+        // source_entry_id (the entry being modified). Multi-rule applyrule
+        // items have rule_id but no entry_id — those are listed separately.
+        $itemsByEntry = [];
+        foreach ($snap['items'] ?? [] as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            $key = $item['entry_id'] ?? $item['source_entry_id'] ?? null;
+            if ($key === null) {
+                continue;
+            }
+            $itemsByEntry[$key][] = $item;
+        }
+
         $entries = [];
         foreach ($snap['entry_ids'] ?? [] as $entryId) {
             $title = $entryId;
@@ -475,13 +493,55 @@ class DashboardController extends CpController
                 'collection' => $collection,
                 'edit_url' => $editUrl,
                 'status' => $statuses[$entryId] ?? 'unknown',
+                'items' => $itemsByEntry[$entryId] ?? [],
             ];
         }
+
+        // Compute a deep-link to URL Changer search if we have a meaningful
+        // search term. Used by the drawer's "Find these in URL Changer" button.
+        $deepLinkSearch = $this->deepLinkSearchFor($snap);
 
         return response()->json([
             'snapshot' => $snap,
             'entries' => $entries,
+            'deep_link_url_changer' => $deepLinkSearch
+                ? cp_route('linkwise.urlchanger').'?search='.urlencode($deepLinkSearch)
+                : null,
         ]);
+    }
+
+    /**
+     * Pick a sensible URL Changer search term based on the snapshot kind.
+     * Lets the user jump from the activity-log straight into a tab where
+     * they can manually unlink/re-link the same set of links.
+     *
+     * Returns null when no meaningful term exists (e.g. detailunlink doesn't
+     * have a single common URL across items).
+     */
+    protected function deepLinkSearchFor(array $snap): ?string
+    {
+        $kind = $snap['kind'] ?? '';
+        $items = $snap['items'] ?? [];
+        $summary = $snap['summary'] ?? [];
+
+        if ($kind === 'applyrule') {
+            // Single-rule: the rule's URL. Multi-rule: skip (different URLs).
+            if (($summary['mode'] ?? '') === 'multi-rule') {
+                return null;
+            }
+            $first = $items[0] ?? null;
+            return is_array($first) && ! empty($first['url']) ? $first['url'] : null;
+        }
+        if ($kind === 'urlchanger') {
+            return $summary['search'] ?? null;
+        }
+        if ($kind === 'inboundinsert' || $kind === 'outboundinsert') {
+            // The target entry is the same across all items in inbound mode;
+            // for outbound the source is shared. Either way, no single URL.
+            return null;
+        }
+
+        return null;
     }
 
     public function urlChanger(Request $request): \Inertia\Response

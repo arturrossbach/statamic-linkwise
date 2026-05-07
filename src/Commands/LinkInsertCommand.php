@@ -91,6 +91,11 @@ class LinkInsertCommand extends Command
             fn ($i) => is_array($i) ? ($i['source_entry_id'] ?? null) : null,
             $insertions,
         ))));
+        $snapshotItems = array_map(fn (array $i) => [
+            'source_entry_id' => $i['source_entry_id'] ?? '',
+            'target_entry_id' => $i['target_entry_id'] ?? '',
+            'anchor_text' => $i['anchor_text'] ?? '',
+        ], array_filter($insertions, 'is_array'));
         app(BulkSnapshotStore::class)->record(
             kind: $kind,
             entryIds: $touchedSources,
@@ -100,6 +105,7 @@ class LinkInsertCommand extends Command
                 'entry_title' => $entryTitle,
                 'insertion_count' => $total,
             ],
+            items: $snapshotItems,
         );
 
         Cache::put($statusKey, [

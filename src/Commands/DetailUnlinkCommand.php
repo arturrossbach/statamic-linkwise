@@ -85,6 +85,11 @@ class DetailUnlinkCommand extends Command
         // Forensic snapshot — see BulkSnapshotStore. Recorded BEFORE writes
         // so the activity-log can show "this bulk affected entries X, Y, Z"
         // even if the bulk later crashes or is cancelled mid-flight.
+        $snapshotItems = array_map(fn (array $r) => [
+            'entry_id' => $r['entry_id'] ?? '',
+            'matched_url' => $r['matched_url'] ?? '',
+            'anchor_text' => $r['anchor_text'] ?? '',
+        ], $replacements);
         app(BulkSnapshotStore::class)->record(
             kind: 'detailunlink',
             entryIds: array_keys($byEntry),
@@ -94,6 +99,7 @@ class DetailUnlinkCommand extends Command
                 'entry_title' => $entryTitle,
                 'replacement_count' => $total,
             ],
+            items: $snapshotItems,
         );
 
         Cache::put('linkwise:detailunlink:status', [
