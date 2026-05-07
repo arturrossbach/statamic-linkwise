@@ -74,4 +74,75 @@ class EntryRecordTest extends TestCase
         $this->assertSame($original->outboundLinks, $restored->outboundLinks);
         $this->assertSame($original->keywords, $restored->keywords);
     }
+
+    public function test_throws_on_missing_id(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        EntryRecord::fromArray([
+            'title' => 'No id',
+            'collection' => 'articles',
+        ]);
+    }
+
+    public function test_throws_on_missing_title(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        EntryRecord::fromArray([
+            'id' => 'abc-123',
+            'collection' => 'articles',
+        ]);
+    }
+
+    public function test_throws_on_missing_collection(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        EntryRecord::fromArray([
+            'id' => 'abc-123',
+            'title' => 'No collection',
+        ]);
+    }
+
+    public function test_throws_on_non_string_id(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        EntryRecord::fromArray([
+            'id' => 123, // int, not string
+            'title' => 'Bad id',
+            'collection' => 'articles',
+        ]);
+    }
+
+    public function test_accepts_empty_title_string(): void
+    {
+        // Empty string is a valid title (untitled drafts are real),
+        // missing/null/non-string is not.
+        $record = EntryRecord::fromArray([
+            'id' => 'abc',
+            'title' => '',
+            'collection' => 'articles',
+        ]);
+        $this->assertSame('', $record->title);
+    }
+
+    public function test_falls_back_on_optional_fields_when_wrong_type(): void
+    {
+        $record = EntryRecord::fromArray([
+            'id' => 'abc',
+            'title' => 'T',
+            'collection' => 'articles',
+            'url' => 123, // wrong type → null
+            'text' => ['array'], // wrong type → ''
+            'outbound_links' => 'not-an-array', // wrong type → []
+            'keywords' => 'nope', // wrong type → []
+            'inbound_suggestion_count' => '5', // numeric string → 5
+            'has_title_match' => 'yes', // truthy string → true
+        ]);
+
+        $this->assertNull($record->url);
+        $this->assertSame('', $record->text);
+        $this->assertSame([], $record->outboundLinks);
+        $this->assertSame([], $record->keywords);
+        $this->assertSame(5, $record->inboundSuggestionCount);
+        $this->assertTrue($record->hasTitleMatch);
+    }
 }

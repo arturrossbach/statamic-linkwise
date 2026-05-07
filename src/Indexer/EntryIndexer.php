@@ -450,9 +450,26 @@ class EntryIndexer
 
         $records = [];
 
+        // Skip-on-invalid: one corrupt index entry must not break the
+        // whole CP. EntryRecord::fromArray throws InvalidArgumentException
+        // when required fields are missing — we log + skip and keep
+        // serving the rest of the index. The audit command surfaces the
+        // exact corrupt records for hygiene later.
         foreach ($data as $item) {
-            $record = EntryRecord::fromArray($item);
-            $records[$record->id] = $record;
+            if (! is_array($item)) {
+                \Illuminate\Support\Facades\Log::warning(
+                    '[Linkwise] EntryIndexer: skipping non-array index entry',
+                );
+                continue;
+            }
+            try {
+                $record = EntryRecord::fromArray($item);
+                $records[$record->id] = $record;
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning(
+                    '[Linkwise] EntryIndexer: skipping corrupt index entry — '.$e->getMessage(),
+                );
+            }
         }
 
         $this->cachedRecords = $records;

@@ -53,23 +53,35 @@ class BrokenLinkRecord
         ];
     }
 
+    /**
+     * @throws \InvalidArgumentException when required fields are missing.
+     *   Loaders MUST catch and skip — one corrupt record can't break the
+     *   whole report read.
+     */
     public static function fromArray(array $data): self
     {
+        if (empty($data['post_id']) || ! is_string($data['post_id'])) {
+            throw new \InvalidArgumentException('BrokenLinkRecord: missing required field "post_id"');
+        }
+        if (empty($data['url']) || ! is_string($data['url'])) {
+            throw new \InvalidArgumentException('BrokenLinkRecord: missing required field "url"');
+        }
+
         // Backwards-compat: old reports had only 'checked_at' — use it for both fields
         $firstDetected = $data['first_detected_at'] ?? $data['checked_at'] ?? '';
         $lastChecked = $data['last_checked_at'] ?? $data['checked_at'] ?? '';
 
         return new self(
             postId: $data['post_id'],
-            postTitle: $data['post_title'],
+            postTitle: isset($data['post_title']) && is_string($data['post_title']) ? $data['post_title'] : '',
             url: $data['url'],
-            anchorText: $data['anchor_text'] ?? '',
-            type: $data['type'] ?? 'external',
-            statusCode: $data['status_code'] ?? null,
-            errorType: $data['error_type'] ?? 'unknown',
-            firstDetectedAt: $firstDetected,
-            lastCheckedAt: $lastChecked,
-            sentenceContext: $data['sentence_context'] ?? '',
+            anchorText: isset($data['anchor_text']) && is_string($data['anchor_text']) ? $data['anchor_text'] : '',
+            type: isset($data['type']) && is_string($data['type']) ? $data['type'] : 'external',
+            statusCode: isset($data['status_code']) && is_numeric($data['status_code']) ? (int) $data['status_code'] : null,
+            errorType: isset($data['error_type']) && is_string($data['error_type']) ? $data['error_type'] : 'unknown',
+            firstDetectedAt: is_string($firstDetected) ? $firstDetected : '',
+            lastCheckedAt: is_string($lastChecked) ? $lastChecked : '',
+            sentenceContext: isset($data['sentence_context']) && is_string($data['sentence_context']) ? $data['sentence_context'] : '',
             ignored: (bool) ($data['ignored'] ?? false),
         );
     }

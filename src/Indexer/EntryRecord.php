@@ -70,19 +70,34 @@ class EntryRecord
         ];
     }
 
+    /**
+     * @throws \InvalidArgumentException when required fields are missing/empty.
+     *   Loaders MUST catch this and skip the offending record so that
+     *   one corrupt entry can't break the whole index read.
+     */
     public static function fromArray(array $data): self
     {
+        if (empty($data['id']) || ! is_string($data['id'])) {
+            throw new \InvalidArgumentException('EntryRecord: missing required field "id"');
+        }
+        if (! isset($data['title']) || ! is_string($data['title'])) {
+            throw new \InvalidArgumentException('EntryRecord: missing required field "title"');
+        }
+        if (empty($data['collection']) || ! is_string($data['collection'])) {
+            throw new \InvalidArgumentException('EntryRecord: missing required field "collection"');
+        }
+
         return new self(
             id: $data['id'],
             title: $data['title'],
-            url: $data['url'] ?? null,
+            url: isset($data['url']) && is_string($data['url']) ? $data['url'] : null,
             collection: $data['collection'],
-            text: $data['text'] ?? '',
-            outboundLinks: $data['outbound_links'] ?? [],
-            keywords: $data['keywords'] ?? [],
-            inboundSuggestionCount: $data['inbound_suggestion_count'] ?? 0,
-            outboundSuggestionCount: $data['outbound_suggestion_count'] ?? 0,
-            hasTitleMatch: $data['has_title_match'] ?? false,
+            text: isset($data['text']) && is_string($data['text']) ? $data['text'] : '',
+            outboundLinks: isset($data['outbound_links']) && is_array($data['outbound_links']) ? $data['outbound_links'] : [],
+            keywords: isset($data['keywords']) && is_array($data['keywords']) ? $data['keywords'] : [],
+            inboundSuggestionCount: (int) ($data['inbound_suggestion_count'] ?? 0),
+            outboundSuggestionCount: (int) ($data['outbound_suggestion_count'] ?? 0),
+            hasTitleMatch: (bool) ($data['has_title_match'] ?? false),
         );
     }
 }

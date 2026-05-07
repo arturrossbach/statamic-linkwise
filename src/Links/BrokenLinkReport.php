@@ -66,8 +66,22 @@ class BrokenLinkReport
         }
 
         $records = [];
-        foreach ($data['broken_links'] ?? [] as $item) {
-            $records[] = BrokenLinkRecord::fromArray($item);
+        $rawRecords = $data['broken_links'] ?? [];
+        if (! is_array($rawRecords)) {
+            $rawRecords = [];
+        }
+        // Skip-on-invalid: one corrupt record can't break the Broken Links tab.
+        foreach ($rawRecords as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            try {
+                $records[] = BrokenLinkRecord::fromArray($item);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning(
+                    '[Linkwise] BrokenLinkReport: skipping corrupt record — '.$e->getMessage(),
+                );
+            }
         }
 
         return [

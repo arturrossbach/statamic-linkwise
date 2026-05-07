@@ -13,16 +13,27 @@ class LinkwiseLinkMark extends LinkMark
     {
         $result = parent::renderHTML($mark, $HTMLAttributes);
 
-        // Parent's renderHTML unsets attributes with null values from the stored content.
-        // We re-apply our domain-based rel attribute AFTER that cleanup.
-        if (is_array($result) && isset($result[1]) && is_array($result[1])) {
-            $href = $result[1]['href'] ?? '';
-            $domainRel = $this->getDomainRelAttribute($href);
+        // Domain-rel application MUST NEVER crash the public page. Any throw
+        // here would crash a Bard-rendered article on the live site (Linkwise
+        // replaces Bard's LinkMark via Augmentor::replaceExtension at boot).
+        // We wrap ONLY our additive logic — parent's render is left as-is so
+        // a Statamic-internal failure remains visible to its own error handlers.
+        try {
+            // Parent's renderHTML unsets attributes with null values from the stored content.
+            // We re-apply our domain-based rel attribute AFTER that cleanup.
+            if (is_array($result) && isset($result[1]) && is_array($result[1])) {
+                $href = $result[1]['href'] ?? '';
+                $domainRel = $this->getDomainRelAttribute($href);
 
-            if ($domainRel) {
-                $existingRel = $result[1]['rel'] ?? '';
-                $result[1]['rel'] = trim($existingRel ? $existingRel.' '.$domainRel : $domainRel);
+                if ($domainRel) {
+                    $existingRel = $result[1]['rel'] ?? '';
+                    $result[1]['rel'] = trim($existingRel ? $existingRel.' '.$domainRel : $domainRel);
+                }
             }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
+                '[Linkwise] LinkwiseLinkMark domain-rel skipped — '.$e->getMessage(),
+            );
         }
 
         return $result;

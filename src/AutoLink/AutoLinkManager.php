@@ -29,8 +29,21 @@ class AutoLinkManager
         }
 
         $rules = [];
+        // Skip-on-invalid: one corrupt rule entry must not break the Auto-Link tab.
         foreach ($data as $item) {
-            $rules[$item['id']] = AutoLinkRule::fromArray($item);
+            if (! is_array($item) || empty($item['id']) || ! is_string($item['id'])) {
+                \Illuminate\Support\Facades\Log::warning(
+                    '[Linkwise] AutoLinkManager: skipping rule entry without valid "id"',
+                );
+                continue;
+            }
+            try {
+                $rules[$item['id']] = AutoLinkRule::fromArray($item);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning(
+                    '[Linkwise] AutoLinkManager: skipping corrupt rule "'.$item['id'].'" — '.$e->getMessage(),
+                );
+            }
         }
 
         return $rules;

@@ -80,8 +80,22 @@ class AutoLinkRule
         ];
     }
 
+    /**
+     * @throws \InvalidArgumentException when required fields are missing.
+     *   Loaders MUST catch + skip — one corrupt rule can't break the tab.
+     */
     public static function fromArray(array $data): self
     {
+        if (empty($data['id']) || ! is_string($data['id'])) {
+            throw new \InvalidArgumentException('AutoLinkRule: missing required field "id"');
+        }
+        if (! isset($data['keyword']) || ! is_string($data['keyword'])) {
+            throw new \InvalidArgumentException('AutoLinkRule: missing required field "keyword"');
+        }
+        if (! isset($data['url']) || ! is_string($data['url'])) {
+            throw new \InvalidArgumentException('AutoLinkRule: missing required field "url"');
+        }
+
         return new self(
             id: $data['id'],
             keyword: $data['keyword'],
