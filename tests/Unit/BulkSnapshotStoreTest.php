@@ -141,6 +141,26 @@ class BulkSnapshotStoreTest extends TestCase
         $this->assertNull($store->get('does-not-exist'));
     }
 
+    public function test_mark_reverted_sets_fields(): void
+    {
+        $store = new BulkSnapshotStore($this->tempDir);
+
+        $id = $store->record('applyrule', ['e1'], ['e1' => 'h1']);
+        $store->markReverted($id, 'revert-snap-id');
+
+        $reloaded = $store->get($id);
+        $this->assertNotNull($reloaded['reverted_at'] ?? null);
+        $this->assertSame('revert-snap-id', $reloaded['reverted_by']);
+    }
+
+    public function test_mark_reverted_is_idempotent_silent_on_missing_id(): void
+    {
+        $store = new BulkSnapshotStore($this->tempDir);
+        // Must not throw on unknown id
+        $store->markReverted('does-not-exist', 'whatever');
+        $this->assertTrue(true); // reached without throwing
+    }
+
     public function test_record_doesnt_throw_when_directory_uncreatable(): void
     {
         // Path that can't be created (file collision)

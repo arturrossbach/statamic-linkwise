@@ -431,12 +431,27 @@ class DashboardController extends CpController
                 'entry_count_total' => $snap['entry_count_total'] ?? count($snap['entry_ids'] ?? []),
                 'preview_titles' => $previewTitles,
                 'summary' => $snap['summary'] ?? [],
+                'reverted_at' => $snap['reverted_at'] ?? null,
+                'reverted_by' => $snap['reverted_by'] ?? null,
             ];
         }, $snapshots);
 
         return Inertia::render('linkwise::Activity', [
             'snapshots' => $listing,
             'detailUrl' => cp_route('linkwise.activity.detail', '__ID__'),
+            'markRevertedUrl' => cp_route('linkwise.activity.mark-reverted', '__ID__'),
+            // Endpoints used by the Revert flow — frontend builds the inverse
+            // payload from snapshot.items and POSTs to whichever fits the kind.
+            'revertEndpoints' => [
+                // applyrule + inboundinsert + outboundinsert revert through detail-unlink-async
+                'detailUnlink' => cp_route('linkwise.detail-unlink.async'),
+                // detailunlink (inbound) revert through inbound-insert
+                'inboundInsert' => cp_route('linkwise.inbound.insert'),
+                // detailunlink (outbound) revert through outbound-insert
+                'outboundInsert' => cp_route('linkwise.outbound.insert'),
+                // urlchanger revert through urlchanger apply-async with swapped URLs
+                'urlChangerApply' => cp_route('linkwise.url-changer.apply-async'),
+            ],
         ] + $this->staleCheckProps());
     }
 
@@ -508,6 +523,24 @@ class DashboardController extends CpController
                 ? cp_route('linkwise.urlchanger').'?search='.urlencode($deepLinkSearch)
                 : null,
         ]);
+    }
+
+    /**
+     * Mark a snapshot as reverted. Called by the activity-log Revert flow
+     * once the inverse bulk has been dispatched. The server doesn't verify
+     * the new bulk's success here (the activity-log will pick up the result
+     * status of the new snapshot anyway) — this just flips the original's
+     * "[Reverted]" badge so the Revert button hides on subsequent reads.
+     */
+    public function markActivityReverted(Request $request, string $id): JsonResponse
+    {
+        $request->validate([
+            'reverted_by' => 'nullable|string|max:128',
+        ]);
+        app(\Arturrossbach\Linkwise\Support\BulkSnapshotStore::class)
+            ->markReverted($id, $request->input('reverted_by'));
+
+        return response()->json(['success' => true]);
     }
 
     /**

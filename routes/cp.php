@@ -38,6 +38,8 @@ Route::middleware('can:manage linkwise')->group(function () {
         ->name('linkwise.activity');
     Route::get('linkwise/activity/{id}', [DashboardController::class, 'activityDetail'])
         ->name('linkwise.activity.detail');
+    Route::post('linkwise/activity/{id}/mark-reverted', [DashboardController::class, 'markActivityReverted'])
+        ->name('linkwise.activity.mark-reverted');
 
     // ─── Suggestion Insert ───────────────────────────────────────────
 

@@ -49,6 +49,7 @@
                             </td>
                             <td class="whitespace-nowrap">
                                 <Badge :variant="kindVariant(snap.kind)" :text="kindLabel(snap.kind)" />
+                                <Badge v-if="snap.reverted_at" variant="default" text="↶ Reverted" class="ml-1" v-tooltip="'Reverted at ' + formatAbsolute(snap.reverted_at)" />
                             </td>
                             <td class="whitespace-nowrap text-xs">
                                 {{ snap.started_by || '—' }}
@@ -82,9 +83,32 @@
                     <p v-if="summaryLabel(detail.snapshot)" class="mt-1">{{ summaryLabel(detail.snapshot) }}</p>
                 </div>
 
-                <Alert variant="default" class="mb-3">
+                <!-- Revert action — when the operation is reversible (most apply / insert /
+                     URL-changer ops are), Linkwise can dispatch the inverse bulk for you.
+                     Otherwise we fall back to the manual recovery instructions. -->
+                <div v-if="canRevert" class="mb-3 rounded-md border border-blue-200 dark:border-blue-900/30 bg-blue-50 dark:bg-blue-900/10 p-3">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-blue-900 dark:text-blue-200">Revert this operation</p>
+                            <p class="text-xs text-blue-700 dark:text-blue-300 mt-0.5 leading-relaxed">
+                                {{ revertExplanation }}
+                                <span v-if="ageWarning" class="block mt-1 text-amber-700 dark:text-amber-400">{{ ageWarning }}</span>
+                            </p>
+                        </div>
+                        <Button
+                            text="Revert…"
+                            variant="primary"
+                            size="sm"
+                            :disabled="reverting"
+                            @click="confirmRevert = true"
+                        />
+                    </div>
+                </div>
+                <Alert v-else variant="default" class="mb-3">
                     <p class="text-sm">
-                        <strong>How to undo:</strong> Linkwise can't restore entries directly — that's by design. Use whichever recovery path fits your setup:
+                        <strong>How to undo this:</strong>
+                        <span v-if="nonReversibleReason">{{ nonReversibleReason }}</span>
+                        <span v-else>Linkwise can't auto-revert this operation — use whichever recovery path fits your setup:</span>
                     </p>
                     <ul class="text-xs mt-2 ml-4 list-disc space-y-0.5 leading-relaxed">
                         <li><strong>Statamic Revisions</strong> (if enabled on the collection): open the entry → Revisions → restore.</li>
@@ -146,20 +170,37 @@
                 </Panel>
             </div>
         </Stack>
+
+        <!-- Revert confirmation modal — fired from the drawer's "Revert…" button.
+             Surfaces the planned-effects preview (X will be reverted, Y were
+             modified since and will be skipped) so the user can decide. -->
+        <ConfirmationModal
+            :open="confirmRevert"
+            @update:open="val => confirmRevert = val"
+            @confirm="doRevert"
+            :title="'Revert this operation?'"
+            :body-text="confirmBodyText"
+            button-text="Revert"
+            :busy="reverting"
+        />
     </LinkwiseLayout>
 </template>
 
 <script>
 import LinkwiseLayout from '../LinkwiseLayout.vue';
 import HelpIcon from '../shared/HelpIcon.vue';
-import { Card, Panel, Button, Badge, Stack, Alert } from '@statamic/cms/ui';
+import { Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal } from '@statamic/cms/ui';
+import { isReversible, nonReversibleReason as computeNonReversibleReason, buildRevertRequest } from '../../services/revertHelper.js';
+import { setHeavyState } from '../../services/bulkOperationService.js';
 
 export default {
-    components: { LinkwiseLayout, HelpIcon, Card, Panel, Button, Badge, Stack, Alert },
+    components: { LinkwiseLayout, HelpIcon, Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal },
 
     props: {
         snapshots: { type: Array, default: () => [] },
         detailUrl: { type: String, required: true },
+        markRevertedUrl: { type: String, default: '' },
+        revertEndpoints: { type: Object, default: () => ({}) },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },
@@ -169,6 +210,8 @@ export default {
         return {
             detail: null,
             detailLoading: false,
+            confirmRevert: false,
+            reverting: false,
         };
     },
 
@@ -176,6 +219,47 @@ export default {
         detailTitle() {
             if (!this.detail) return '';
             return this.kindLabel(this.detail.snapshot.kind) + ' details';
+        },
+
+        canRevert() {
+            return this.detail && isReversible(this.detail.snapshot);
+        },
+
+        nonReversibleReason() {
+            return this.detail ? computeNonReversibleReason(this.detail.snapshot) : null;
+        },
+
+        revertExplanation() {
+            if (!this.detail) return '';
+            const snap = this.detail.snapshot;
+            const itemCount = (snap.items || []).length;
+            const modifiedCount = (this.detail.entries || []).filter(e => e.status === 'modified').length;
+            const deletedCount = (this.detail.entries || []).filter(e => e.status === 'deleted').length;
+            const skippable = modifiedCount + deletedCount;
+            const willRevert = Math.max(0, itemCount - skippable);
+
+            const verb = snap.kind === 'urlchanger' ? 're-replace URLs' : 'unlink the inserted links';
+
+            if (skippable === 0) {
+                return `Linkwise will ${verb} for ${willRevert} item${willRevert === 1 ? '' : 's'} via the same heavy-bulk pipeline. Progress shows in the global banner.`;
+            }
+            return `Linkwise will ${verb} for ${willRevert} item${willRevert === 1 ? '' : 's'}. ${skippable} entr${skippable === 1 ? 'y was' : 'ies were'} edited or deleted since this bulk and will be skipped.`;
+        },
+
+        ageWarning() {
+            if (!this.detail) return null;
+            const startedAt = this.detail.snapshot.started_at;
+            if (!startedAt) return null;
+            const days = Math.floor((Date.now() - new Date(startedAt).getTime()) / 86400000);
+            if (days >= 7) {
+                return `Note: this operation is ${days} day${days === 1 ? '' : 's'} old. Other edits made since then may overlap with the revert.`;
+            }
+            return null;
+        },
+
+        confirmBodyText() {
+            if (!this.detail) return '';
+            return this.revertExplanation;
         },
     },
 
@@ -201,6 +285,77 @@ export default {
 
         closeDetail() {
             this.detail = null;
+        },
+
+        async doRevert() {
+            this.confirmRevert = false;
+            if (!this.detail || this.reverting) return;
+
+            const request = buildRevertRequest(this.detail.snapshot, this.revertEndpoints);
+            if (!request) {
+                Statamic.$toast.error('This operation cannot be reverted.');
+                return;
+            }
+
+            this.reverting = true;
+            const csrfToken = Statamic.$config.get('csrfToken');
+            try {
+                const response = await fetch(request.url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify(request.payload),
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    const reason = data?.error || data?.message || `HTTP ${response.status}`;
+                    Statamic.$toast.error(`Could not start revert: ${reason}`);
+                    this.reverting = false;
+                    return;
+                }
+                Statamic.$toast.success('Revert started — see banner above for progress.');
+
+                // Mark the original snapshot as reverted. Best-effort — the
+                // revert bulk runs server-side regardless; this just hides
+                // the Revert button on the activity-log row.
+                if (this.markRevertedUrl) {
+                    const markUrl = this.markRevertedUrl.replace('__ID__', encodeURIComponent(this.detail.snapshot.id));
+                    fetch(markUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        body: JSON.stringify({}),
+                    }).catch(() => {});
+                }
+
+                // Banner state — heavy bulk runs detached, LinkwiseLayout's
+                // poller will refresh as the revert progresses across tabs.
+                setHeavyState({
+                    kind: request.kindLabel === 'replace' ? 'urlchanger' : 'detailunlink',
+                    label: 'reverting bulk',
+                    current: 0,
+                    total: (request.payload.replacements || []).length,
+                    canCancel: false,
+                    cancelUrl: null,
+                    heartbeat: Math.floor(Date.now() / 1000),
+                    context: { entryTitle: 'Revert', sourceMode: request.payload.source_mode || '' },
+                });
+
+                // Close drawer + reload activity-log so the new snapshot + the
+                // [Reverted] badge on the original both appear immediately.
+                this.detail = null;
+                setTimeout(() => this.$inertia.reload({ only: ['snapshots'] }), 600);
+            } catch (e) {
+                Statamic.$toast.error(`Could not start revert: ${e.message || 'network error'}`);
+            } finally {
+                this.reverting = false;
+            }
         },
 
         kindLabel(kind) {

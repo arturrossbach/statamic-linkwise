@@ -177,6 +177,36 @@ class BulkSnapshotStore
     }
 
     /**
+     * Mark a snapshot as reverted. Called by the activity-log Revert flow
+     * once the inverse bulk has finished. The activity-log UI uses these
+     * fields to show a "[Reverted]" badge and to disable the Revert button
+     * (avoids double-revert which would re-apply the original op).
+     */
+    public function markReverted(string $id, ?string $revertedBy = null): void
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return;
+        }
+        $data = $this->readFile($path);
+        if ($data === null) {
+            return;
+        }
+        $data['reverted_at'] = now()->toIso8601String();
+        if ($revertedBy !== null) {
+            $data['reverted_by'] = $revertedBy;
+        }
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::markReverted failed — '.$e->getMessage());
+        }
+    }
+
+    /**
      * Compare a snapshot's pre-hashes with current entry hashes. Returns a
      * map of entry-id → status for every entry the bulk touched:
      *
