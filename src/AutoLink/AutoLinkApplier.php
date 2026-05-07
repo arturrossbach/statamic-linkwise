@@ -224,9 +224,23 @@ class AutoLinkApplier
      */
     protected function textContainsKeywordAtBoundary(string $text, string $keyword, bool $caseSensitive): bool
     {
+        $urlRanges = $this->markdownUrlRangesIn($text);
         $pos = $caseSensitive ? mb_strpos($text, $keyword) : mb_stripos($text, $keyword);
 
         while ($pos !== false) {
+            // Skip matches that sit inside an existing markdown link's URL
+            // portion. The text comes from EntryIndexer flattening which —
+            // for some content paths (Bard/Replicator) — exports `[X](url)`
+            // syntax verbatim. Without this filter, a rule like "statamic"
+            // matches inside `(statamic://entry::…)` and mis-marks the entry
+            // as "would_link" when in fact the URL is already a link target.
+            if ($this->positionInRanges($pos, $urlRanges)) {
+                $pos = $caseSensitive
+                    ? mb_strpos($text, $keyword, $pos + mb_strlen($keyword))
+                    : mb_stripos($text, $keyword, $pos + mb_strlen($keyword));
+
+                continue;
+            }
             $atBoundary = true;
             if ($pos > 0 && preg_match('/[\p{L}\p{N}]/u', mb_substr($text, $pos - 1, 1))) {
                 $atBoundary = false;
@@ -246,6 +260,44 @@ class AutoLinkApplier
         return false;
     }
 
+    /**
+     * Compute character-position ranges of every markdown link URL portion
+     * `[anchor](URL_HERE)` in the given text. Used to skip keyword matches
+     * that fall inside an existing link's URL — they would never produce
+     * an insertable link, but `findAllOccurrences` would otherwise report
+     * misleading sentence_context like "...[Modern web development](sta**mic**://...".
+     *
+     * @return list<array{0: int, 1: int}>
+     */
+    protected function markdownUrlRangesIn(string $text): array
+    {
+        $ranges = [];
+        if (preg_match_all('/\[[^\]]*\]\(([^\)]+)\)/u', $text, $matches, PREG_OFFSET_CAPTURE) === false) {
+            return $ranges;
+        }
+        foreach ($matches[1] as [$urlPortion, $byteOffset]) {
+            $charStart = mb_strlen(substr($text, 0, (int) $byteOffset));
+            $charEnd = $charStart + mb_strlen($urlPortion);
+            $ranges[] = [$charStart, $charEnd];
+        }
+
+        return $ranges;
+    }
+
+    /**
+     * @param  list<array{0: int, 1: int}>  $ranges
+     */
+    protected function positionInRanges(int $pos, array $ranges): bool
+    {
+        foreach ($ranges as [$start, $end]) {
+            if ($pos >= $start && $pos < $end) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     protected function findAllOccurrences(string $text, string $keyword, bool $caseSensitive): array
     {
         $contexts = [];
@@ -253,8 +305,20 @@ class AutoLinkApplier
         $keywordLen = mb_strlen($keyword);
         $textLen = mb_strlen($text);
         $maxChars = 120;
+        // Pre-compute URL-portion ranges of any markdown links in the text
+        // so we can skip matches that fall inside `(…)` of `[X](…)`. Same
+        // motivation as in textContainsKeywordAtBoundary above — `$record->text`
+        // sometimes carries raw markdown verbatim (Bard / Replicator export
+        // paths) and a rule like "statamic" matches `(statamic://entry::…)`,
+        // producing misleading sentence_context the user can't act on.
+        $urlRanges = $this->markdownUrlRangesIn($text);
 
         while (($pos = $caseSensitive ? mb_strpos($text, $keyword, $offset) : mb_stripos($text, $keyword, $offset)) !== false) {
+            if ($this->positionInRanges($pos, $urlRanges)) {
+                $offset = $pos + $keywordLen;
+
+                continue;
+            }
             // Word boundary check
             $atBoundary = true;
             if ($pos > 0 && preg_match('/[\p{L}\p{N}]/u', mb_substr($text, $pos - 1, 1))) {
