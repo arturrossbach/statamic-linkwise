@@ -1308,8 +1308,7 @@ export default {
         },
 
         async previewRule(rule) {
-            this.excludedEntryIds = [];
-            this.previewStatusFilter = '';
+            this.resetPreviewModalState();
             this.previewModal = {
                 title: `Preview: "${rule.keyword}"`,
                 keyword: rule.keyword,
@@ -1344,7 +1343,22 @@ export default {
 
         closePreviewModal() {
             this.previewModal = null;
+            this.resetPreviewModalState();
+        },
+
+        /**
+         * Centralized reset for preview-modal selection state. Both
+         * previewRule (open path) and closePreviewModal (close path) call
+         * this so every modal session starts clean — without it, selecting
+         * "Unlink (3)" in rule A and then opening rule B's preview would
+         * surface "Unlink (3)" in B's modal even though no row in B is
+         * checked. Mirrors DetailModal / SuggestionModal's watch-on-open
+         * reset pattern, just imperative since previewModal is not a prop.
+         */
+        resetPreviewModalState() {
             this.excludedEntryIds = [];
+            this.selectedUnlinkIds = [];
+            this.previewStatusFilter = '';
         },
 
         togglePreviewSort(field) {
