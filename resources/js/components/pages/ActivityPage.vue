@@ -146,32 +146,48 @@
                         <table data-size="sm" class="data-table w-full text-sm">
                             <thead>
                                 <tr>
-                                    <th scope="col" class="text-left">Title</th>
-                                    <th scope="col" class="text-left">Collection</th>
-                                    <th scope="col" class="text-left">What happened</th>
-                                    <th scope="col" class="text-left">Status since bulk</th>
-                                    <th scope="col" class="text-right"></th>
+                                    <th scope="col" class="text-left">
+                                        <div class="inline-flex items-center gap-1">
+                                            Title
+                                            <HelpIcon tooltip="The entry that this operation touched. Click the title to open it in Statamic." />
+                                        </div>
+                                    </th>
+                                    <th scope="col" class="text-left">
+                                        <div class="inline-flex items-center gap-1">
+                                            Collection
+                                            <HelpIcon tooltip="The Statamic collection this entry belongs to." />
+                                        </div>
+                                    </th>
+                                    <th scope="col" class="text-left">
+                                        <div class="inline-flex items-center gap-1">
+                                            What happened
+                                            <HelpIcon tooltip="Per-entry summary of the change Linkwise applied: the anchor text, target URL, or before/after URLs depending on the operation." />
+                                        </div>
+                                    </th>
+                                    <th scope="col" class="text-left">
+                                        <div class="inline-flex items-center gap-1">
+                                            Status since bulk
+                                            <HelpIcon tooltip="Compares the entry's current content to its state right after the bulk. 'Unchanged' means no edits since. 'Edited' means a user touched the entry — Revert would skip it. 'Deleted' means the entry no longer exists. '—' (legacy) means this snapshot was recorded before post-hash tracking shipped, so the comparison isn't possible." />
+                                        </div>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr v-for="e in detail.entries" :key="e.id">
-                                    <td>{{ e.title }}</td>
+                                    <td>
+                                        <a v-if="e.edit_url" :href="e.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ e.title }}</a>
+                                        <span v-else>{{ e.title }}</span>
+                                    </td>
                                     <td class="text-xs text-gray-500">{{ e.collection || '—' }}</td>
                                     <td class="text-xs text-gray-600 dark:text-gray-400">
-                                        <div v-if="e.items && e.items.length > 0" class="space-y-0.5">
-                                            <div v-for="(item, i) in e.items" :key="i" class="leading-snug">
-                                                <span v-if="item.anchor_text" class="font-mono text-xs">"{{ item.anchor_text }}"</span>
-                                                <span v-if="item.matched_url" class="text-gray-500"> → {{ truncateUrl(item.matched_url) }}</span>
-                                                <span v-if="item.new_url" class="text-gray-500"> → {{ truncateUrl(item.new_url) }}</span>
-                                            </div>
+                                        <div v-if="entryActionLines(e).length > 0" class="space-y-0.5">
+                                            <div v-for="(line, i) in entryActionLines(e)" :key="i" class="leading-snug" v-html="line"></div>
                                         </div>
                                         <span v-else class="text-gray-400">—</span>
                                     </td>
                                     <td class="text-xs">
-                                        <Badge :variant="statusVariant(e.status)" :text="statusLabel(e.status)" />
-                                    </td>
-                                    <td class="text-right">
-                                        <a v-if="e.edit_url" :href="e.edit_url" target="_blank" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">Open ↗</a>
+                                        <span v-if="e.status === 'unknown'" class="text-gray-400" v-tooltip="'This snapshot was recorded before per-entry post-hash tracking shipped — we can\\'t compare its post-bulk state with the current state.'">—</span>
+                                        <Badge v-else :variant="statusVariant(e.status)" :text="statusLabel(e.status)" />
                                     </td>
                                 </tr>
                             </tbody>
@@ -473,6 +489,50 @@ export default {
             } catch {
                 return iso;
             }
+        },
+
+        // Build human-readable "what happened" lines per entry, one per item.
+        // Each kind has different shape; the column shouldn't just dump the
+        // raw anchor text or URL — that's what triggered the "Laravel" complaint.
+        entryActionLines(e) {
+            const kind = this.detail?.snapshot?.kind || '';
+            const items = e.items || [];
+            return items.map(it => {
+                const anchor = it.anchor_text ? `<span class="font-mono">"${this.escape(it.anchor_text)}"</span>` : '';
+                const url = it.url ? this.truncateUrl(it.url) : '';
+                const matched = it.matched_url ? this.truncateUrl(it.matched_url) : '';
+                const newUrl = it.new_url ? this.truncateUrl(it.new_url) : '';
+                if (kind === 'applyrule') {
+                    return `Inserted ${anchor || 'link'} → <span class="text-gray-500">${this.escape(url)}</span>`;
+                }
+                if (kind === 'inboundinsert' || kind === 'outboundinsert') {
+                    const dir = kind === 'inboundinsert' ? 'inbound' : 'outbound';
+                    return `Inserted ${dir} link ${anchor || ''} → <span class="text-gray-500">entry ${it.target_entry_id ? it.target_entry_id.slice(0, 8) + '…' : '?'}</span>`;
+                }
+                if (kind === 'detailunlink') {
+                    return `Removed ${anchor || 'link'} → <span class="text-gray-500">${this.escape(matched)}</span>`;
+                }
+                if (kind === 'urlchanger') {
+                    return `Replaced <span class="text-gray-500">${this.escape(matched)}</span> → <span class="text-gray-500">${this.escape(newUrl)}</span>`;
+                }
+                if (kind === 'bulkunlink') {
+                    return `Removed broken link → <span class="text-gray-500">${this.escape(matched)}</span>`;
+                }
+                return '';
+            }).filter(Boolean);
+        },
+
+        // Tiny escape so v-html-rendered action lines can't bleed user content
+        // into HTML. Anchor text and URLs come from snapshot files which are
+        // technically trustable, but a stray < in an anchor would still mess
+        // up rendering — better safe.
+        escape(s) {
+            if (s == null) return '';
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
         },
 
         truncateUrl(url) {
