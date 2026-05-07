@@ -100,7 +100,7 @@ class UrlChangerApplyCommand extends Command
             'matched_url' => $r['matched_url'] ?? '',
             'new_url' => $r['new_url'] ?? '',
         ], $replacements);
-        app(BulkSnapshotStore::class)->record(
+        $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'urlchanger',
             entryIds: array_keys($byEntry),
             preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, $byEntry) : [],
@@ -233,6 +233,11 @@ class UrlChangerApplyCommand extends Command
         ], 600);
 
         $this->finalizeIndex(array_keys($affectedIds));
+
+        app(BulkSnapshotStore::class)->recordPostHashesForEntries(
+            $snapshotId,
+            array_keys($byEntry),
+        );
 
         Cache::put('linkwise:urlchanger:status', [
             'phase' => 'done',

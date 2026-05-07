@@ -73,7 +73,7 @@ class BulkUnlinkCommand extends Command
             'entry_id' => $r['entry_id'] ?? '',
             'matched_url' => $r['matched_url'] ?? '',
         ], $replacements);
-        app(BulkSnapshotStore::class)->record(
+        $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'bulkunlink',
             entryIds: $entryIds,
             preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, array_flip($entryIds)) : [],
@@ -151,6 +151,8 @@ class BulkUnlinkCommand extends Command
         ], 600);
 
         $this->finalizeIndex(array_keys($affectedIds));
+
+        app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $entryIds);
 
         Cache::put('linkwise:bulkunlink:status', [
             'phase' => 'done',

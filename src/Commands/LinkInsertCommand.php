@@ -96,7 +96,7 @@ class LinkInsertCommand extends Command
             'target_entry_id' => $i['target_entry_id'] ?? '',
             'anchor_text' => $i['anchor_text'] ?? '',
         ], array_filter($insertions, 'is_array'));
-        app(BulkSnapshotStore::class)->record(
+        $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: $kind,
             entryIds: $touchedSources,
             preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, array_flip($touchedSources)) : [],
@@ -209,6 +209,8 @@ class LinkInsertCommand extends Command
         ], 600);
 
         $this->finalizeIndex(array_keys($affectedIds));
+
+        app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $touchedSources);
 
         Cache::put($statusKey, [
             'phase' => 'done',

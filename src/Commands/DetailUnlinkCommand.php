@@ -90,7 +90,7 @@ class DetailUnlinkCommand extends Command
             'matched_url' => $r['matched_url'] ?? '',
             'anchor_text' => $r['anchor_text'] ?? '',
         ], $replacements);
-        app(BulkSnapshotStore::class)->record(
+        $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'detailunlink',
             entryIds: array_keys($byEntry),
             preHashes: array_intersect_key($entryHashes, $byEntry),
@@ -224,6 +224,13 @@ class DetailUnlinkCommand extends Command
         ], 600);
 
         $this->finalizeIndex(array_keys($affectedIds));
+
+        // Record post-bulk hashes so the activity-log can detect future user
+        // edits without false-positives on the bulk's own writes.
+        app(BulkSnapshotStore::class)->recordPostHashesForEntries(
+            $snapshotId,
+            array_keys($byEntry),
+        );
 
         Cache::put('linkwise:detailunlink:status', [
             'phase' => 'done',

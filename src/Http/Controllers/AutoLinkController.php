@@ -439,7 +439,7 @@ class AutoLinkController extends CpController
                 'anchor_text' => $rule->keyword,
                 'url' => $rule->url,
             ], $snapshotEntryIds);
-            app(BulkSnapshotStore::class)->record(
+            $snapshotId = app(BulkSnapshotStore::class)->record(
                 kind: 'applyrule',
                 entryIds: $snapshotEntryIds,
                 preHashes: is_array($hashes) ? array_intersect_key($hashes, array_flip($snapshotEntryIds)) : [],
@@ -450,9 +450,17 @@ class AutoLinkController extends CpController
                 ],
                 items: $snapshotItems,
             );
+        } else {
+            $snapshotId = null;
         }
 
         $result = $applier->applyRule($rule, $preview);
+
+        // Post-bulk hashes for the activity-log (apply path only — preview
+        // doesn't write). Skipped when no snapshot was taken.
+        if (! $preview && $snapshotId !== null && ! empty($snapshotEntryIds)) {
+            app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $snapshotEntryIds);
+        }
 
         if (! empty($conflictedEntries)) {
             $result['conflicts'] = array_values($conflictedEntries);

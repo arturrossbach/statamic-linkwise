@@ -112,7 +112,7 @@ class ApplyRuleCommand extends Command
             'anchor_text' => $rule->keyword,
             'url' => $rule->url,
         ], $previewEntryIds);
-        app(BulkSnapshotStore::class)->record(
+        $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'applyrule',
             entryIds: $previewEntryIds,
             preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, array_flip($previewEntryIds)) : [],
@@ -214,6 +214,8 @@ class ApplyRuleCommand extends Command
             Log::warning('[Linkwise] ApplyRuleCommand failed to stamp last-applied: '.$e->getMessage());
         }
 
+        app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $previewEntryIds);
+
         Cache::put('linkwise:applyrule:status', [
             'phase' => 'done',
             'rule_id' => $rule->id,
@@ -287,7 +289,7 @@ class ApplyRuleCommand extends Command
                 ];
             }
         }
-        app(BulkSnapshotStore::class)->record(
+        $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'applyrule',
             entryIds: $batchEntryIds,
             preHashes: $entryHashes,
@@ -425,6 +427,8 @@ class ApplyRuleCommand extends Command
         ], 600);
 
         $this->finalizeIndex(array_keys($allAffectedIds));
+
+        app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $batchEntryIds);
 
         Cache::put('linkwise:applyrule:status', [
             'phase' => 'done',

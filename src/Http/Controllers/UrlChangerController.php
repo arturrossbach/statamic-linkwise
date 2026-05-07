@@ -119,7 +119,7 @@ class UrlChangerController extends CpController
             'matched_url' => $r['matched_url'] ?? '',
             'new_url' => $r['new_url'] ?? '',
         ], $request->replacements);
-        app(BulkSnapshotStore::class)->record(
+        $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'urlchanger',
             entryIds: $snapshotEntryIds,
             preHashes: array_intersect_key($allHashes, array_flip($snapshotEntryIds)),
@@ -208,6 +208,11 @@ class UrlChangerController extends CpController
 
         // Compute live suggestion counts for affected entries
         $result['suggestion_counts'] = $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+
+        // Post-bulk hashes — same as in async commands. Without this, the
+        // activity-log compareToCurrent treats the bulk's own writes as
+        // "modified by user since the bulk".
+        app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $snapshotEntryIds);
 
         return response()->json($result);
     }

@@ -177,6 +177,65 @@ class BulkSnapshotStore
     }
 
     /**
+     * Collect current SafeEntrySaver hashes for the given entry IDs and
+     * persist them as post-bulk hashes on the snapshot. Convenience wrapper
+     * so each bulk command doesn't repeat the load+hash loop.
+     *
+     * Best-effort: missing entries (deleted, unfindable) are simply omitted
+     * — compareToCurrent will then mark them 'deleted' instead of 'modified'.
+     */
+    public function recordPostHashesForEntries(string $id, array $entryIds): void
+    {
+        $hashes = [];
+        foreach ($entryIds as $entryId) {
+            if (! is_string($entryId) || $entryId === '') {
+                continue;
+            }
+            try {
+                $entry = EntryFacade::find($entryId);
+                if ($entry) {
+                    $hashes[$entryId] = SafeEntrySaver::hash($entry);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] recordPostHashesForEntries: skipping '.$entryId.' — '.$e->getMessage());
+            }
+        }
+        $this->recordPostHashes($id, $hashes);
+    }
+
+    /**
+     * Record post-bulk hashes — captured by each bulk command AFTER its
+     * writes complete. This is what compareToCurrent() uses to decide
+     * whether an entry was modified BY THE USER since the bulk, vs
+     * modified by the bulk itself (which is expected).
+     *
+     * Without these, every snapshot's compareToCurrent would mark every
+     * touched entry as 'modified' — because the bulk legitimately changed
+     * their content, the pre-bulk hash never matches current. The activity
+     * log's "Edited since bulk" badge would be useless noise.
+     */
+    public function recordPostHashes(string $id, array $postHashes): void
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return;
+        }
+        $data = $this->readFile($path);
+        if ($data === null) {
+            return;
+        }
+        $data['post_hashes'] = $postHashes;
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::recordPostHashes failed — '.$e->getMessage());
+        }
+    }
+
+    /**
      * Mark a snapshot as reverted. Called by the activity-log Revert flow
      * once the inverse bulk has finished. The activity-log UI uses these
      * fields to show a "[Reverted]" badge and to disable the Revert button
@@ -222,21 +281,28 @@ class BulkSnapshotStore
     public function compareToCurrent(array $snapshot): array
     {
         $statuses = [];
-        $preHashes = $snapshot['pre_hashes'] ?? [];
+        // Post-bulk hashes (recorded after the bulk's writes finished) are
+        // the source of truth for "did the user touch this entry SINCE the
+        // bulk". Pre-bulk hashes are only useful as a fallback for legacy
+        // snapshots written before this addition — for those we report
+        // 'unknown' to be honest about the limitation.
+        $postHashes = $snapshot['post_hashes'] ?? null;
 
         foreach ($snapshot['entry_ids'] ?? [] as $entryId) {
-            $expected = $preHashes[$entryId] ?? null;
-            if ($expected === null) {
-                $statuses[$entryId] = 'unknown';
-                continue;
-            }
             $entry = EntryFacade::find($entryId);
             if (! $entry) {
                 $statuses[$entryId] = 'deleted';
                 continue;
             }
+            if (! is_array($postHashes) || ! isset($postHashes[$entryId])) {
+                // Legacy snapshot or partial-failure bulk that didn't reach
+                // the post-hash recording step — we can't tell if the entry
+                // was touched since.
+                $statuses[$entryId] = 'unknown';
+                continue;
+            }
             $current = SafeEntrySaver::hash($entry);
-            $statuses[$entryId] = ($current === $expected) ? 'unchanged' : 'modified';
+            $statuses[$entryId] = ($current === $postHashes[$entryId]) ? 'unchanged' : 'modified';
         }
 
         return $statuses;
