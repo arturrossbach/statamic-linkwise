@@ -74,6 +74,13 @@ class LinkInsertCommand extends Command
         $succeeded = 0;
         $skipped = 0;
         $errors = [];
+        // Entries whose link relationships actually changed (source +
+        // target of every successful insertion). Used by finalizeIndex
+        // to recompute their suggestion counts so the table doesn't
+        // keep showing stale "80 inbound suggestions" after the user
+        // just inserted those 80 links — the candidates have become
+        // actual links and need to drop out of the suggestion pool.
+        $affectedIds = [];
 
         Cache::put($statusKey, [
             'phase' => 'running',
@@ -102,7 +109,7 @@ class LinkInsertCommand extends Command
                     'started_by' => $startedBy,
                     'started_by_id' => $startedById,
                 ], 300);
-                $this->finalizeIndex();
+                $this->finalizeIndex(array_keys($affectedIds));
 
                 return self::SUCCESS;
             }
@@ -126,6 +133,10 @@ class LinkInsertCommand extends Command
 
                 if ($success) {
                     $succeeded++;
+                    // Both ends of the new edge are affected — source's
+                    // outbound counts shift, target's inbound counts shift.
+                    $affectedIds[$sourceEntryId] = true;
+                    $affectedIds[$targetEntryId] = true;
                 } else {
                     $msg = 'Anchor text not found in entry';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
@@ -180,7 +191,16 @@ class LinkInsertCommand extends Command
      * counts + outbound-link maps reflect the new edges. Same pattern as
      * DetailUnlinkCommand — fire-and-log; don't fail the bulk on this.
      */
-    protected function finalizeIndex(): void
+    /**
+     * @param  list<string>  $affectedEntryIds  Ids whose link relationships
+     *   actually changed during this run (source + target of every
+     *   successful insertion). Their suggestion counts get recomputed
+     *   AFTER the index rebuild — buildIndex's default preserveSuggestionCounts
+     *   path copies the OLD counts forward, so without this targeted
+     *   refresh the table keeps showing stale "80 inbound suggestions"
+     *   for the entry the user just added 80 inbound links to.
+     */
+    protected function finalizeIndex(array $affectedEntryIds = []): void
     {
         try {
             $previousCount = count($this->indexer->load());
@@ -203,6 +223,23 @@ class LinkInsertCommand extends Command
             $this->indexer->save($records);
         } catch (\Throwable $e) {
             Log::warning('[Linkwise] LinkInsertCommand finalizeIndex failed: '.$e->getMessage());
+
+            return;
+        }
+
+        // Targeted suggestion-count refresh for affected entries only.
+        // Recomputing for ALL entries would scale with corpus size; doing
+        // it just for the entries we touched keeps the cost proportional
+        // to the bulk size. computeSuggestionCountsForEntries persists
+        // its own changes to disk so callers don't need a second save().
+        if (! empty($affectedEntryIds)) {
+            try {
+                $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+            } catch (\Throwable $e) {
+                Log::warning(
+                    '[Linkwise] LinkInsertCommand suggestion-count refresh failed: '.$e->getMessage(),
+                );
+            }
         }
     }
 }

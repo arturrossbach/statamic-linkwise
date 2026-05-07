@@ -158,14 +158,14 @@ class ApplyRuleCommand extends Command
                 'rule_id' => $rule->id,
                 'links_added' => $result['links_added'] ?? 0,
             ], 300);
-            $this->finalizeIndex();
+            $this->finalizeIndex($this->affectedIdsFor($rule, $result));
 
             return self::SUCCESS;
         }
 
         // Reindex so outboundLinks reflect the inserted links — same as sync controller path.
         if (($result['links_added'] ?? 0) > 0) {
-            $this->finalizeIndex();
+            $this->finalizeIndex($this->affectedIdsFor($rule, $result));
         }
 
         // Stamp the rule with last-applied metadata so the table can render
@@ -235,6 +235,12 @@ class ApplyRuleCommand extends Command
         // boundary check below this gives ~one-record cancellation latency.
         $shouldCancel = fn () => (bool) Cache::get('linkwise:applyrule:cancel');
 
+        // Aggregated set of entry-IDs whose link relationships changed
+        // across ALL rules in this batch. Used by finalizeIndex to refresh
+        // their suggestion counts so the table stops showing stale
+        // pre-apply numbers.
+        $allAffectedIds = [];
+
         foreach ($ruleIds as $idx => $ruleId) {
             // Cancel mid-batch: stops cleanly, reports partial result.
             if (Cache::get('linkwise:applyrule:cancel')) {
@@ -246,7 +252,7 @@ class ApplyRuleCommand extends Command
                     'total_links_added' => $totalLinksAdded,
                     'rule_results' => $ruleResults,
                 ], 300);
-                $this->finalizeIndex();
+                $this->finalizeIndex(array_keys($allAffectedIds));
                 Cache::forget('linkwise:applyrule:payload');
 
                 return self::SUCCESS;
@@ -316,6 +322,11 @@ class ApplyRuleCommand extends Command
             $totalLinksAdded += $linksAdded;
             $ruleResults[$rule->id] = $linksAdded;
 
+            // Accumulate this rule's affected entries (sources + target).
+            foreach ($this->affectedIdsFor($rule, $result) as $id) {
+                $allAffectedIds[$id] = true;
+            }
+
             // Cancelled mid-rule: skip the per-rule stamp (rule didn't fully
             // apply) and let the next iteration's flag check write phase=cancelled.
             if (! empty($result['cancelled'])) {
@@ -333,7 +344,7 @@ class ApplyRuleCommand extends Command
             }
         }
 
-        $this->finalizeIndex();
+        $this->finalizeIndex(array_keys($allAffectedIds));
 
         Cache::put('linkwise:applyrule:status', [
             'phase' => 'done',
@@ -349,7 +360,40 @@ class ApplyRuleCommand extends Command
         return self::SUCCESS;
     }
 
-    protected function finalizeIndex(): void
+    /**
+     * Extract the entry-IDs whose link relationships changed when this
+     * rule was applied: every entry that received the link (from
+     * affected_entries) plus the rule's target if it's an internal
+     * statamic://entry::ID reference.
+     *
+     * @param  array  $result  Output of AutoLinkApplier::applyRule(false)
+     * @return list<string>
+     */
+    protected function affectedIdsFor($rule, array $result): array
+    {
+        $ids = [];
+        foreach ($result['affected_entries'] ?? [] as $entry) {
+            $id = $entry['id'] ?? null;
+            if (is_string($id) && $id !== '') {
+                $ids[$id] = true;
+            }
+        }
+        if ($rule->targetEntryId) {
+            $ids[$rule->targetEntryId] = true;
+        }
+
+        return array_keys($ids);
+    }
+
+    /**
+     * @param  list<string>  $affectedEntryIds  Entries whose link
+     *   relationships actually changed during this run. Their suggestion
+     *   counts get recomputed AFTER the index rebuild — buildIndex's
+     *   default preserveSuggestionCounts copies OLD counts forward, so
+     *   without targeted refresh the table keeps showing stale numbers
+     *   for entries the rule just linked.
+     */
+    protected function finalizeIndex(array $affectedEntryIds = []): void
     {
         try {
             $previousCount = count($this->indexer->load());
@@ -365,6 +409,18 @@ class ApplyRuleCommand extends Command
             $this->indexer->save($records);
         } catch (\Throwable $e) {
             Log::warning('[Linkwise] ApplyRuleCommand finalizeIndex failed: '.$e->getMessage());
+
+            return;
+        }
+
+        if (! empty($affectedEntryIds)) {
+            try {
+                $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+            } catch (\Throwable $e) {
+                Log::warning(
+                    '[Linkwise] ApplyRuleCommand suggestion-count refresh failed: '.$e->getMessage(),
+                );
+            }
         }
     }
 }

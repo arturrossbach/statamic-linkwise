@@ -56,6 +56,10 @@ class BulkUnlinkCommand extends Command
         $succeeded = 0;
         $skipped = 0;
         $errors = [];
+        // Source entries (entry_id) plus internal-link targets parsed from
+        // the matched_url. Refreshed by finalizeIndex so suggestion counts
+        // on both ends drop after the unlink.
+        $affectedIds = [];
 
         Cache::put('linkwise:bulkunlink:status', [
             'phase' => 'running',
@@ -74,7 +78,7 @@ class BulkUnlinkCommand extends Command
                     'skipped' => $skipped,
                     'errors' => $errors,
                 ], 300);
-                $this->finalizeIndex();
+                $this->finalizeIndex(array_keys($affectedIds));
 
                 return self::SUCCESS;
             }
@@ -99,6 +103,10 @@ class BulkUnlinkCommand extends Command
                     $skipped++;
                 } else {
                     $succeeded++;
+                    $affectedIds[$r['entry_id']] = true;
+                    if (preg_match('#^statamic://entry::([0-9a-f-]+)$#i', $r['matched_url'], $m)) {
+                        $affectedIds[$m[1]] = true;
+                    }
                 }
             } catch (EntryConflictException $e) {
                 $msg = 'Entry was modified — please reload';
@@ -111,7 +119,7 @@ class BulkUnlinkCommand extends Command
             }
         }
 
-        $this->finalizeIndex();
+        $this->finalizeIndex(array_keys($affectedIds));
 
         Cache::put('linkwise:bulkunlink:status', [
             'phase' => 'done',
@@ -129,8 +137,14 @@ class BulkUnlinkCommand extends Command
      * One-time index rebuild after all replacements complete.
      * Guards against wiping a valid index: if the rebuild yields zero records
      * while the previous index had records, something is wrong — skip the save.
+     *
+     * @param  list<string>  $affectedEntryIds  Entries whose link relationships
+     *   actually changed. Their suggestion counts get recomputed AFTER the
+     *   index rebuild — buildIndex's default preserveSuggestionCounts copies
+     *   the OLD counts forward, so without targeted refresh the table keeps
+     *   showing pre-unlink suggestion numbers.
      */
-    protected function finalizeIndex(): void
+    protected function finalizeIndex(array $affectedEntryIds = []): void
     {
         try {
             $previousCount = count($this->indexer->load());
@@ -151,6 +165,18 @@ class BulkUnlinkCommand extends Command
             $this->indexer->save($records);
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('[Linkwise] BulkUnlinkCommand finalizeIndex failed: '.$e->getMessage());
+
+            return;
+        }
+
+        if (! empty($affectedEntryIds)) {
+            try {
+                $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning(
+                    '[Linkwise] BulkUnlinkCommand suggestion-count refresh failed: '.$e->getMessage(),
+                );
+            }
         }
     }
 }

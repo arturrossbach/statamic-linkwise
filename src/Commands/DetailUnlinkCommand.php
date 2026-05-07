@@ -63,6 +63,12 @@ class DetailUnlinkCommand extends Command
         $succeeded = 0;
         $skipped = 0;
         $errors = [];
+        // Entries whose link relationships actually changed (the entry
+        // being modified + the target, if the removed URL is internal).
+        // Without targeted refresh, suggestion counts on those entries
+        // would stay frozen at the pre-unlink values — same stale-table
+        // class as LinkInsertCommand.
+        $affectedIds = [];
 
         // Use exact mode — DetailModal sends the full URL of each link, no
         // domain inference / fuzzy matching wanted.
@@ -103,7 +109,7 @@ class DetailUnlinkCommand extends Command
                     'started_by' => $startedBy,
                     'started_by_id' => $startedById,
                 ], 300);
-                $this->finalizeIndex();
+                $this->finalizeIndex(array_keys($affectedIds));
 
                 return self::SUCCESS;
             }
@@ -146,6 +152,12 @@ class DetailUnlinkCommand extends Command
                     // Update broken-link report — remove old URLs.
                     foreach ($entryReps as $r) {
                         $this->brokenReport->removeLink($r['entry_id'], $r['matched_url']);
+                        $affectedIds[$r['entry_id']] = true;
+                        // Internal links (statamic://entry::ID) → the
+                        // target's inbound counts also shift; record it.
+                        if (preg_match('#^statamic://entry::([0-9a-f-]+)$#i', $r['matched_url'], $m)) {
+                            $affectedIds[$m[1]] = true;
+                        }
                     }
                 }
             } catch (EntryConflictException $e) {
@@ -174,7 +186,7 @@ class DetailUnlinkCommand extends Command
             ], 600);
         }
 
-        $this->finalizeIndex();
+        $this->finalizeIndex(array_keys($affectedIds));
 
         Cache::put('linkwise:detailunlink:status', [
             'phase' => 'done',
@@ -193,7 +205,16 @@ class DetailUnlinkCommand extends Command
         return self::SUCCESS;
     }
 
-    protected function finalizeIndex(): void
+    /**
+     * @param  list<string>  $affectedEntryIds  Entries whose link relationships
+     *   actually changed during this run. Their suggestion counts are
+     *   recomputed AFTER the index rebuild — buildIndex's default
+     *   preserveSuggestionCounts copies the OLD counts forward, so without
+     *   targeted refresh the table keeps showing pre-unlink suggestion
+     *   numbers (e.g., "80 inbound" right after the user removed those
+     *   80 inbound links).
+     */
+    protected function finalizeIndex(array $affectedEntryIds = []): void
     {
         try {
             $previousCount = count($this->indexer->load());
@@ -211,6 +232,18 @@ class DetailUnlinkCommand extends Command
             $this->indexer->save($records);
         } catch (\Throwable $e) {
             Log::warning('[Linkwise] DetailUnlinkCommand finalizeIndex failed: '.$e->getMessage());
+
+            return;
+        }
+
+        if (! empty($affectedEntryIds)) {
+            try {
+                $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+            } catch (\Throwable $e) {
+                Log::warning(
+                    '[Linkwise] DetailUnlinkCommand suggestion-count refresh failed: '.$e->getMessage(),
+                );
+            }
         }
     }
 }

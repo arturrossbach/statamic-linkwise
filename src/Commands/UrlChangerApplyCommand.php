@@ -74,6 +74,12 @@ class UrlChangerApplyCommand extends Command
         $succeeded = 0;
         $skipped = 0;
         $errors = [];
+        // Source entry plus any internal targets parsed out of matched_url
+        // (old) and new_url (replacement). Keeping both ends ensures
+        // suggestion counts on every affected entry get refreshed by
+        // finalizeIndex — old target loses an inbound, new target gains
+        // one (or none for unlink).
+        $affectedIds = [];
 
         $this->replacer->setMode($mode);
 
@@ -113,7 +119,7 @@ class UrlChangerApplyCommand extends Command
                     'search' => $search,
                     'started_by' => $startedBy,
                 ], 300);
-                $this->finalizeIndex();
+                $this->finalizeIndex(array_keys($affectedIds));
 
                 return self::SUCCESS;
             }
@@ -153,6 +159,16 @@ class UrlChangerApplyCommand extends Command
                     // replaced or unlinked.
                     foreach ($entryReps as $r) {
                         $this->brokenReport->removeLink($r['entry_id'], $r['matched_url']);
+                        $affectedIds[$r['entry_id']] = true;
+                        // Old target loses an inbound (if internal).
+                        if (preg_match('#^statamic://entry::([0-9a-f-]+)$#i', $r['matched_url'], $m)) {
+                            $affectedIds[$m[1]] = true;
+                        }
+                        // New target gains an inbound (if internal — unlink
+                        // sentinel is non-statamic so naturally won't match).
+                        if (! empty($r['new_url']) && preg_match('#^statamic://entry::([0-9a-f-]+)$#i', $r['new_url'], $m)) {
+                            $affectedIds[$m[1]] = true;
+                        }
                     }
                 }
             } catch (EntryConflictException $e) {
@@ -180,7 +196,7 @@ class UrlChangerApplyCommand extends Command
             ], 600);
         }
 
-        $this->finalizeIndex();
+        $this->finalizeIndex(array_keys($affectedIds));
 
         Cache::put('linkwise:urlchanger:status', [
             'phase' => 'done',
@@ -204,8 +220,14 @@ class UrlChangerApplyCommand extends Command
      * Mirrors BulkUnlinkCommand::finalizeIndex — refuses to overwrite a
      * non-empty index with an empty one (detached process context can fail
      * to read Statamic content; better stale than wiped).
+     *
+     * @param  list<string>  $affectedEntryIds  Entries whose link relationships
+     *   actually changed. Their suggestion counts get recomputed AFTER the
+     *   index rebuild — buildIndex's default preserveSuggestionCounts copies
+     *   OLD counts forward, so without targeted refresh the table keeps
+     *   showing stale numbers for entries the URL change affected.
      */
-    protected function finalizeIndex(): void
+    protected function finalizeIndex(array $affectedEntryIds = []): void
     {
         try {
             $previousCount = count($this->indexer->load());
@@ -223,6 +245,18 @@ class UrlChangerApplyCommand extends Command
             $this->indexer->save($records);
         } catch (\Throwable $e) {
             Log::warning('[Linkwise] UrlChangerApplyCommand finalizeIndex failed: '.$e->getMessage());
+
+            return;
+        }
+
+        if (! empty($affectedEntryIds)) {
+            try {
+                $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+            } catch (\Throwable $e) {
+                Log::warning(
+                    '[Linkwise] UrlChangerApplyCommand suggestion-count refresh failed: '.$e->getMessage(),
+                );
+            }
         }
     }
 }
