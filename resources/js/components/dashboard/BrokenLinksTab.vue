@@ -1,16 +1,12 @@
 <template>
     <div>
         <!-- Top Bar: Last checked + Check Links -->
+        <!-- Per-tab check-progress was removed — the global LinkwiseLayout
+             banner already shows the running 'check' job on every tab, so
+             repeating it here was redundant. The Button below carries
+             :loading=checking as the in-tab affordance. -->
         <div class="flex items-center justify-between mb-3 gap-3">
-            <div v-if="checking" class="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2 flex-1 min-w-0" role="status" aria-live="polite">
-                <Icon name="loading" class="size-4 text-blue-500 shrink-0" />
-                <template v-if="checkProgress">
-                    <span class="font-medium whitespace-nowrap">{{ checkProgress.current }} / {{ checkProgress.total }}</span>
-                    <span class="truncate text-gray-400">{{ checkProgress.url }}</span>
-                </template>
-                <span v-else>Preparing...</span>
-            </div>
-            <span v-else-if="metadata" class="text-xs text-gray-400">
+            <span v-if="metadata" class="text-xs text-gray-400">
                 Last checked: {{ formatDate(metadata.last_checked) }}
             </span>
             <span v-else></span>

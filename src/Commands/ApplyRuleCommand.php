@@ -165,6 +165,17 @@ class ApplyRuleCommand extends Command
 
         // Reindex so outboundLinks reflect the inserted links — same as sync controller path.
         if (($result['links_added'] ?? 0) > 0) {
+            // Flip to 'indexing' so the banner shows "Finalizing index…"
+            // during the rebuild instead of looking stuck at the rule's
+            // links_added count.
+            Cache::put('linkwise:applyrule:status', [
+                'phase' => 'indexing',
+                'rule_id' => $rule->id,
+                'rule_keyword' => $rule->keyword,
+                'current' => $result['links_added'] ?? 0,
+                'total' => $totalEstimate,
+                'heartbeat' => time(),
+            ], 600);
             $this->finalizeIndex($this->affectedIdsFor($rule, $result));
         }
 
@@ -343,6 +354,17 @@ class ApplyRuleCommand extends Command
                 Log::warning('[Linkwise] ApplyRuleCommand multi stamp failed: '.$e->getMessage());
             }
         }
+
+        // Flip to 'indexing' before finalizeIndex so the multi-rule banner
+        // shows "Finalizing index…" during the rebuild — without this it
+        // sat stuck at "Applied N of N rules" for 1-3min on large sites.
+        Cache::put('linkwise:applyrule:status', [
+            'phase' => 'indexing',
+            'total_rules' => $totalRules,
+            'total_links_added' => $totalLinksAdded,
+            'current_rule_index' => $totalRules,
+            'heartbeat' => time(),
+        ], 600);
 
         $this->finalizeIndex(array_keys($allAffectedIds));
 

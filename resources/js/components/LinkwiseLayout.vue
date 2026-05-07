@@ -157,7 +157,15 @@
                     <div class="flex items-center gap-2">
                         <span v-if="bulkStuck" class="font-medium">Operation may be stuck —</span>
                         <span>{{ bulkBannerLabel }}</span>
-                        <span v-if="activeBulk.total > 0" class="font-mono text-xs text-gray-500 dark:text-gray-400">
+                        <!-- Indexing/finalizing phase: the visible counter has
+                             hit N/N but the command is still rebuilding the
+                             index + recomputing suggestion counts (can take
+                             1-3min on large sites). Show "Finalizing…" so
+                             the user doesn't think the job hung at N/N. -->
+                        <span v-if="activeBulk.phase === 'indexing'" class="text-xs text-gray-500 dark:text-gray-400 italic">
+                            Finalizing index…
+                        </span>
+                        <span v-else-if="activeBulk.total > 0" class="font-mono text-xs text-gray-500 dark:text-gray-400">
                             {{ activeBulk.current }} / {{ activeBulk.total }}
                         </span>
                         <span v-else-if="activeBulk.message" class="text-xs text-gray-500 dark:text-gray-400">
@@ -172,6 +180,13 @@
                         <Button v-if="activeBulk.canCancel && !bulkStuck" @click="cancelBulk" :loading="cancelling" text="Cancel" variant="default" size="xs" />
                     </div>
                 </div>
+                <!-- Heavy bulks survive navigation/reload — they run in a detached
+                     artisan process, the banner re-attaches via a global state
+                     poll on every Linkwise tab. Telling the user means they
+                     don't have to babysit the tab during a 10-minute scan. -->
+                <p v-if="activeBulk.source === 'heavy' && !bulkStuck" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    You can safely navigate to other Linkwise tabs or away from this page — the operation continues in the background and the banner will reappear when you come back.
+                </p>
             </Alert>
 
             <slot />
@@ -938,6 +953,13 @@ export default {
                     setHeavyState({
                         kind: status.kind,
                         label: status.label,
+                        // Pass through the raw phase ('starting' / 'running' /
+                        // 'indexing' / 'checking' / ...) so the banner can
+                        // distinguish "still doing main work" from "finalizing
+                        // the index" (which can take a couple of minutes after
+                        // the visible counter hits N/N — without this, the
+                        // banner sits stuck at 80/80 looking dead).
+                        phase,
                         current: status.current || 0,
                         total: status.total || 0,
                         message: status.message || null,

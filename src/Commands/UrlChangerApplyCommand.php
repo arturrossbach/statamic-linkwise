@@ -196,6 +196,21 @@ class UrlChangerApplyCommand extends Command
             ], 600);
         }
 
+        // Flip to 'indexing' before finalizeIndex so the banner shows
+        // "Finalizing index…" instead of stuck-looking N/N.
+        Cache::put('linkwise:urlchanger:status', [
+            'phase' => 'indexing',
+            'current' => $total,
+            'total' => $total,
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+            'action' => $action,
+            'search' => $search,
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+            'heartbeat' => time(),
+        ], 600);
+
         $this->finalizeIndex(array_keys($affectedIds));
 
         Cache::put('linkwise:urlchanger:status', [

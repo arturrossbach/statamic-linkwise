@@ -16,7 +16,7 @@
         </Card>
 
         <!-- Stale-index warning (age-based) -->
-        <Alert v-if="showStaleBanner" variant="warning" class="mb-4">
+        <Alert v-if="showStaleBanner && !scanInProgress" variant="warning" class="mb-4">
             <div class="flex items-start justify-between gap-3">
                 <div class="flex-1 min-w-0">
                     <p class="font-medium text-sm">Content index is {{ indexAgeDays }} days old</p>
@@ -41,7 +41,7 @@
              we just observed the divergence on a real entry the user looked
              at, not a guess based on time. Hide once the user has dismissed
              OR once a re-scan completes (page reloads, flag resets). -->
-        <Alert v-if="divergenceDetected && !showStaleBanner" variant="warning" class="mb-4">
+        <Alert v-if="divergenceDetected && !showStaleBanner && !scanInProgress" variant="warning" class="mb-4">
             <div class="flex items-start justify-between gap-3">
                 <div class="flex-1 min-w-0">
                     <p class="font-medium text-sm">Suggestion counts in this table are out of date</p>
@@ -277,7 +277,7 @@ import SortableHeader from '../shared/SortableHeader.vue';
 import { sortableMixin } from '../shared/sortable.js';
 import { buildPaginationMeta } from '../shared/pagination.js';
 import { router as inertiaRouter } from '@statamic/cms/inertia';
-import { setHeavyState, recordCompletion } from '../../services/bulkOperationService.js';
+import { setHeavyState, recordCompletion, bulkState } from '../../services/bulkOperationService.js';
 
 export default {
     components: { Card, Panel, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Pagination, Icon, Input, Alert, Button, HelpIcon, SuggestionModal, DetailModal, SortableHeader },
@@ -366,6 +366,13 @@ export default {
         // Show the stale-index banner after 7 days — matches Overview's threshold.
         showStaleBanner() {
             return this.indexAgeDays !== null && this.indexAgeDays > 7;
+        },
+
+        // Hide the "out of date" banners while a content scan is running:
+        // both banners' call-to-action IS "rescan" — showing them during the
+        // very rescan they're asking for would be a contradiction.
+        scanInProgress() {
+            return bulkState.active?.kind === 'scan';
         },
 
         filteredEntries() {

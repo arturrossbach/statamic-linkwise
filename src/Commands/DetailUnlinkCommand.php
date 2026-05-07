@@ -186,6 +186,22 @@ class DetailUnlinkCommand extends Command
             ], 600);
         }
 
+        // Flip phase to 'indexing' BEFORE finalizeIndex so the banner
+        // shows "Finalizing index…" instead of sitting stuck at N/N for
+        // the 1-3min the rebuild can take on large sites.
+        Cache::put('linkwise:detailunlink:status', [
+            'phase' => 'indexing',
+            'current' => $total,
+            'total' => $total,
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+            'source_mode' => $sourceMode,
+            'entry_title' => $entryTitle,
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+            'heartbeat' => time(),
+        ], 600);
+
         $this->finalizeIndex(array_keys($affectedIds));
 
         Cache::put('linkwise:detailunlink:status', [

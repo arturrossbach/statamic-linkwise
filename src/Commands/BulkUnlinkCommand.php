@@ -119,6 +119,17 @@ class BulkUnlinkCommand extends Command
             }
         }
 
+        // Flip to 'indexing' before finalizeIndex so the banner shows
+        // "Finalizing index…" instead of N/N during the rebuild.
+        Cache::put('linkwise:bulkunlink:status', [
+            'phase' => 'indexing',
+            'current' => $total,
+            'total' => $total,
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+            'heartbeat' => time(),
+        ], 600);
+
         $this->finalizeIndex(array_keys($affectedIds));
 
         Cache::put('linkwise:bulkunlink:status', [

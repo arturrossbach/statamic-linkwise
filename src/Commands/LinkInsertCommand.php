@@ -167,7 +167,22 @@ class LinkInsertCommand extends Command
             ], 600);
         }
 
-        $this->finalizeIndex();
+        // Flip to 'indexing' before finalizeIndex so the banner shows
+        // "Finalizing index…" instead of stuck N/N during the rebuild.
+        Cache::put($statusKey, [
+            'phase' => 'indexing',
+            'current' => $total,
+            'total' => $total,
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+            'source_mode' => $sourceMode,
+            'entry_title' => $entryTitle,
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+            'heartbeat' => time(),
+        ], 600);
+
+        $this->finalizeIndex(array_keys($affectedIds));
 
         Cache::put($statusKey, [
             'phase' => 'done',
