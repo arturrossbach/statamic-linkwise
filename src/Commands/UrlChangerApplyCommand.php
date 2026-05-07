@@ -152,6 +152,34 @@ class UrlChangerApplyCommand extends Command
                 ? [$entryId => $entryHashes[$entryId]]
                 : [];
 
+            // Pre-flight hash check — see DetailUnlinkCommand for rationale.
+            // Without this, a user who edited an entry since the request was
+            // built would see their edits silently merged with our URL change
+            // (we'd replace the URL but keep their other edits). The activity-
+            // log "modified entries are skipped" promise relies on this check.
+            if (! empty($entryHashesForCall)) {
+                $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($entryHashesForCall);
+                if (! empty($conflicts)) {
+                    $msg = 'Entry was modified by another editor';
+                    $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
+                    $skipped += count($entryReps);
+                    $processedReplacements += count($entryReps);
+                    Cache::put('linkwise:urlchanger:status', [
+                        'phase' => 'running',
+                        'current' => $processedReplacements,
+                        'total' => $total,
+                        'succeeded' => $succeeded,
+                        'skipped' => $skipped,
+                        'action' => $action,
+                        'search' => $search,
+                        'started_by' => $startedBy,
+                        'started_by_id' => $startedById,
+                        'heartbeat' => time(),
+                    ], 600);
+                    continue;
+                }
+            }
+
             try {
                 // applySelected handles per-entry hash check, atomic write.
                 // We run it WITHOUT a per-call rebuild — we batch the rebuild

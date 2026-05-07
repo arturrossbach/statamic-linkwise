@@ -142,6 +142,37 @@ class DetailUnlinkCommand extends Command
                 ? [$entryId => $entryHashes[$entryId]]
                 : [];
 
+            // Pre-flight hash check: if the entry has been modified since
+            // the bulk that produced the snapshot we're reverting from
+            // (or since the request payload was built), skip with a clear
+            // "modified by editor" reason instead of letting applySelected
+            // silently overwrite the user's edits. Without this check, a
+            // user who edits an entry and leaves the link in place would
+            // see the link removed AND their text edits kept — a silent
+            // partial overwrite that the activity-log UI promised not to do.
+            if (! empty($entryHashesForCall)) {
+                $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($entryHashesForCall);
+                if (! empty($conflicts)) {
+                    $msg = 'Entry was modified by another editor';
+                    $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
+                    $skipped += count($entryReps);
+                    $processedReplacements += count($entryReps);
+                    Cache::put('linkwise:detailunlink:status', [
+                        'phase' => 'running',
+                        'current' => $processedReplacements,
+                        'total' => $total,
+                        'succeeded' => $succeeded,
+                        'skipped' => $skipped,
+                        'source_mode' => $sourceMode,
+                        'entry_title' => $entryTitle,
+                        'started_by' => $startedBy,
+                        'started_by_id' => $startedById,
+                        'heartbeat' => time(),
+                    ], 600);
+                    continue;
+                }
+            }
+
             try {
                 // applySelected handles per-entry hash check and atomic save.
                 // Search arg is empty — we use exact match per replacement
