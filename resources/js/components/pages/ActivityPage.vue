@@ -186,7 +186,7 @@
                                         <span v-else class="text-gray-400">—</span>
                                     </td>
                                     <td class="text-xs">
-                                        <span v-if="e.status === 'unknown'" class="text-gray-400" v-tooltip="'This snapshot was recorded before per-entry post-hash tracking shipped — we can\\'t compare its post-bulk state with the current state.'">—</span>
+                                        <span v-if="e.status === 'unknown'" class="text-gray-400" v-tooltip="'This snapshot was recorded before per-entry post-hash tracking shipped — comparison with the current state is not possible.'">—</span>
                                         <Badge v-else :variant="statusVariant(e.status)" :text="statusLabel(e.status)" />
                                     </td>
                                 </tr>
