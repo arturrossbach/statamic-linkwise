@@ -144,6 +144,14 @@ class InboundEngine
             }
         }));
 
+        // Overwrite lastTotalCount with the POST-filter count: this is what
+        // the user-facing "X of Y" header should report. If a keyword matches
+        // but the dry-run inserter rejects it (e.g. anchor not literally in
+        // the source entry's text), the suggestion is invisible to the user
+        // — counting it as "available" produces the confusing "4 of 5" with
+        // no 5th row in sight that started this fix.
+        $this->lastTotalCount = count($filtered);
+
         return $limit > 0 ? array_slice($filtered, 0, $limit) : $filtered;
     }
 
