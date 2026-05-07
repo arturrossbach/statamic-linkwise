@@ -249,7 +249,8 @@ class UrlChangerApplyCommand extends Command
             return;
         }
 
-        if (! empty($affectedEntryIds)) {
+        $cap = 20;
+        if (! empty($affectedEntryIds) && count($affectedEntryIds) <= $cap) {
             try {
                 $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
             } catch (\Throwable $e) {
@@ -257,6 +258,12 @@ class UrlChangerApplyCommand extends Command
                     '[Linkwise] UrlChangerApplyCommand suggestion-count refresh failed: '.$e->getMessage(),
                 );
             }
+        } elseif (! empty($affectedEntryIds)) {
+            Log::info(
+                '[Linkwise] UrlChangerApplyCommand skipped suggestion-count refresh — '
+                .count($affectedEntryIds).' affected entries exceeds cap of '.$cap
+                .'. Counts will refresh at the next Scan Content.',
+            );
         }
     }
 }

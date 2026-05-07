@@ -227,12 +227,16 @@ class LinkInsertCommand extends Command
             return;
         }
 
-        // Targeted suggestion-count refresh for affected entries only.
-        // Recomputing for ALL entries would scale with corpus size; doing
-        // it just for the entries we touched keeps the cost proportional
-        // to the bulk size. computeSuggestionCountsForEntries persists
-        // its own changes to disk so callers don't need a second save().
-        if (! empty($affectedEntryIds)) {
+        // Targeted suggestion-count refresh for affected entries.
+        // Each entry's recompute iterates the full corpus + dry-runs every
+        // candidate, so cost scales linearly per affected entry. At ~80
+        // entries the user observed the bulk hanging at "80/80" for
+        // minutes — the loop runs but nothing user-visible advances.
+        // Cap to a small batch so the typical workflow (1–20 inserts)
+        // still gets immediate count updates while large bulks finish
+        // quickly with counts that catch up at the next scan.
+        $cap = 20;
+        if (! empty($affectedEntryIds) && count($affectedEntryIds) <= $cap) {
             try {
                 $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
             } catch (\Throwable $e) {
@@ -240,6 +244,12 @@ class LinkInsertCommand extends Command
                     '[Linkwise] LinkInsertCommand suggestion-count refresh failed: '.$e->getMessage(),
                 );
             }
+        } elseif (! empty($affectedEntryIds)) {
+            Log::info(
+                '[Linkwise] LinkInsertCommand skipped suggestion-count refresh — '
+                .count($affectedEntryIds).' affected entries exceeds cap of '.$cap
+                .'. Counts will refresh at the next Scan Content.',
+            );
         }
     }
 }
