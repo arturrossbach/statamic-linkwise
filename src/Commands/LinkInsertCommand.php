@@ -213,6 +213,11 @@ class LinkInsertCommand extends Command
         $this->finalizeIndex(array_keys($affectedIds));
 
         app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $touchedSources);
+        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+            'phase' => 'done',
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+        ]);
 
         Cache::put($statusKey, [
             'phase' => 'done',

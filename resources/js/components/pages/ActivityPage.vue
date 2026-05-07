@@ -49,6 +49,7 @@
                             </td>
                             <td class="whitespace-nowrap">
                                 <Badge :variant="kindVariant(snap.kind)" :text="kindLabel(snap)" />
+                                <Badge v-if="snap.completed_at === null" variant="warning" text="In progress" class="ml-1" v-tooltip="'This bulk is still running. The entry is shown for transparency, but Revert is disabled until the bulk completes.'" />
                                 <Badge v-if="snap.reverted_at" variant="default" text="↶ Reverted" class="ml-1" v-tooltip="'Reverted at ' + formatAbsolute(snap.reverted_at)" />
                             </td>
                             <td class="whitespace-nowrap text-xs">
@@ -104,6 +105,14 @@
                         />
                     </div>
                 </div>
+                <!-- Still-running state: clear "wait" message, no Revert. -->
+                <Alert v-else-if="detail.snapshot.completed_at === null" variant="warning" class="mb-3">
+                    <p class="text-sm">
+                        <strong>This bulk is still running.</strong>
+                        Wait for it to complete — the entry will become revertable as soon as the run finishes.
+                        Watch the progress banner at the top of the screen, or refresh this page.
+                    </p>
+                </Alert>
                 <!-- Already-reverted state: a one-liner is enough; the recovery
                      instructions only matter when no auto-revert is possible. -->
                 <Alert v-else-if="detail.snapshot.reverted_at" variant="default" class="mb-3">

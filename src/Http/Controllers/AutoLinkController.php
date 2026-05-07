@@ -460,6 +460,10 @@ class AutoLinkController extends CpController
         // doesn't write). Skipped when no snapshot was taken.
         if (! $preview && $snapshotId !== null && ! empty($snapshotEntryIds)) {
             app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $snapshotEntryIds);
+            app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+                'phase' => 'done',
+                'links_added' => $result['links_added'] ?? 0,
+            ]);
         }
 
         if (! empty($conflictedEntries)) {

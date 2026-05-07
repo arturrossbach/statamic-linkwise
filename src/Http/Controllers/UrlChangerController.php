@@ -213,6 +213,10 @@ class UrlChangerController extends CpController
         // activity-log compareToCurrent treats the bulk's own writes as
         // "modified by user since the bulk".
         app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $snapshotEntryIds);
+        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+            'phase' => 'done',
+            'total_replacements' => $result['total_replacements'] ?? 0,
+        ]);
 
         return response()->json($result);
     }

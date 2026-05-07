@@ -116,6 +116,12 @@ class BulkSnapshotStore
             'started_by' => $startedBy ?? $this->currentUserName(),
             'started_by_id' => $startedById ?? $this->currentUserId(),
             'started_at' => now()->toIso8601String(),
+            // Initial state: still running. Each bulk command flips this to
+            // an ISO timestamp via markCompleted() once the run terminates
+            // (success / partial / cancelled / error). The activity-log UI
+            // hides the Revert button for snapshots without a completed_at
+            // — reverting an in-flight bulk would race against the live writes.
+            'completed_at' => null,
             'entry_ids' => $entryIds,
             'pre_hashes' => $preHashes,
             'summary' => $summary,
@@ -238,6 +244,39 @@ class BulkSnapshotStore
             );
         } catch (\Throwable $e) {
             Log::warning('[Linkwise] BulkSnapshotStore::recordPostHashes failed — '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Mark a snapshot as completed (the bulk run reached a terminal phase —
+     * done, partial, cancelled, or error). The activity-log UI uses this to
+     * gate the Revert button: an in-flight bulk's snapshot stays "in progress"
+     * and reverting is disabled so the user can't race against live writes.
+     *
+     * Idempotent — calling twice is harmless. The fields are best-effort, never
+     * throw upward; bulk completion shouldn't fail because logging did.
+     */
+    public function markCompleted(string $id, array $stats = []): void
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return;
+        }
+        $data = $this->readFile($path);
+        if ($data === null) {
+            return;
+        }
+        $data['completed_at'] = now()->toIso8601String();
+        if (! empty($stats)) {
+            $data['completion_stats'] = $stats;
+        }
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::markCompleted failed — '.$e->getMessage());
         }
     }
 

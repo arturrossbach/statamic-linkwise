@@ -265,6 +265,16 @@ class DetailUnlinkCommand extends Command
             array_keys($byEntry),
         );
 
+        // Mark as completed so the activity-log Revert button enables. A
+        // snapshot stuck on completed_at=null is shown as "may have been
+        // interrupted" — happens only when the process dies between writes
+        // and this line (covered by the crash-guard's status='error' path).
+        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+            'phase' => 'done',
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+        ]);
+
         Cache::put('linkwise:detailunlink:status', [
             'phase' => 'done',
             'total' => $total,

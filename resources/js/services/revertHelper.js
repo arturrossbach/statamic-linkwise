@@ -38,6 +38,15 @@ export function isReversible(snapshot) {
     if (!snapshot || !snapshot.kind) return false;
     if (snapshot.reverted_at) return false; // already reverted
 
+    // The original bulk must have actually finished. A null completed_at
+    // means it's still in flight (or crashed mid-run before reaching the
+    // markCompleted() call). Reverting an in-flight bulk would race against
+    // its writes — never safe. Legacy snapshots from before this field
+    // shipped don't have completed_at at all → we treat absent as completed
+    // for backwards compatibility (those are the ones the user already saw
+    // working pre-change).
+    if (snapshot.completed_at === null) return false;
+
     const kind = snapshot.kind;
     if (kind === 'bulkunlink') return false;
     if (kind === 'applyrule' && snapshot.summary?.mode === 'multi-rule') return false;
@@ -69,6 +78,9 @@ export function isReversible(snapshot) {
 export function nonReversibleReason(snapshot) {
     if (!snapshot) return 'Snapshot not loaded';
     if (snapshot.reverted_at) return 'This operation was already reverted.';
+    if (snapshot.completed_at === null) {
+        return 'This operation is still in progress. Wait for the bulk to finish before reverting — the activity-log entry will become revertable as soon as the run completes.';
+    }
     if (snapshot.kind === 'bulkunlink') {
         return 'Bulk-unlink of broken links is not reversible — the URLs were broken at the time of removal. Re-linking them would re-introduce broken references.';
     }

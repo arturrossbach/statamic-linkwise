@@ -268,6 +268,11 @@ class UrlChangerApplyCommand extends Command
             $snapshotId,
             array_keys($byEntry),
         );
+        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+            'phase' => 'done',
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+        ]);
 
         Cache::put('linkwise:urlchanger:status', [
             'phase' => 'done',

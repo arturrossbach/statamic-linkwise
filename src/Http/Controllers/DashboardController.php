@@ -428,6 +428,14 @@ class DashboardController extends CpController
                 'kind' => $snap['kind'] ?? 'unknown',
                 'started_by' => $snap['started_by'] ?? null,
                 'started_at' => $snap['started_at'] ?? null,
+                // null = still in flight (or crashed before markCompleted).
+                // Frontend shows an "In progress" badge and hides Revert.
+                // Legacy snapshots from before this field shipped don't have
+                // the key at all — fall back to started_at so they're treated
+                // as completed (which they are, by definition: they're old).
+                'completed_at' => array_key_exists('completed_at', $snap)
+                    ? $snap['completed_at']
+                    : ($snap['started_at'] ?? null),
                 'entry_count_total' => $snap['entry_count_total'] ?? count($snap['entry_ids'] ?? []),
                 'preview_titles' => $previewTitles,
                 'summary' => $snap['summary'] ?? [],
@@ -547,8 +555,25 @@ class DashboardController extends CpController
         $request->validate([
             'reverted_by' => 'nullable|string|max:128',
         ]);
-        app(\Arturrossbach\Linkwise\Support\BulkSnapshotStore::class)
-            ->markReverted($id, $request->input('reverted_by'));
+        $store = app(\Arturrossbach\Linkwise\Support\BulkSnapshotStore::class);
+
+        // Defense-in-depth — the frontend already disables Revert for in-flight
+        // snapshots, but a malicious / racing client could still POST here.
+        // Refuse if the original isn't done.
+        $snap = $store->get($id);
+        if (! $snap) {
+            return response()->json(['error' => 'snapshot_not_found'], 404);
+        }
+        // Legacy snapshots without completed_at are treated as completed
+        // (they're old). Explicit null = still running.
+        if (array_key_exists('completed_at', $snap) && $snap['completed_at'] === null) {
+            return response()->json([
+                'error' => 'in_progress',
+                'message' => 'Cannot revert: the original bulk is still running.',
+            ], 409);
+        }
+
+        $store->markReverted($id, $request->input('reverted_by'));
 
         return response()->json(['success' => true]);
     }

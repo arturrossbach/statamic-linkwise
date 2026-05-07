@@ -153,6 +153,11 @@ class BulkUnlinkCommand extends Command
         $this->finalizeIndex(array_keys($affectedIds));
 
         app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $entryIds);
+        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+            'phase' => 'done',
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+        ]);
 
         Cache::put('linkwise:bulkunlink:status', [
             'phase' => 'done',

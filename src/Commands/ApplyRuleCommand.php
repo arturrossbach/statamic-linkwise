@@ -215,6 +215,10 @@ class ApplyRuleCommand extends Command
         }
 
         app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $previewEntryIds);
+        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+            'phase' => 'done',
+            'links_added' => $result['links_added'] ?? 0,
+        ]);
 
         Cache::put('linkwise:applyrule:status', [
             'phase' => 'done',
@@ -429,6 +433,11 @@ class ApplyRuleCommand extends Command
         $this->finalizeIndex(array_keys($allAffectedIds));
 
         app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $batchEntryIds);
+        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+            'phase' => 'done',
+            'total_rules' => $totalRules,
+            'total_links_added' => $totalLinksAdded,
+        ]);
 
         Cache::put('linkwise:applyrule:status', [
             'phase' => 'done',
