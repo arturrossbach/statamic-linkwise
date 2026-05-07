@@ -1172,3 +1172,17 @@ export default {
     },
 };
 </script>
+
+<!-- Unscoped on purpose: Statamic's tooltip directive renders the popper to
+     a teleport target outside the component tree, so a scoped style wouldn't
+     reach it. The selector is global, so it'll affect every tooltip in the
+     CP — but only while a Linkwise page is mounted (the rule is shipped via
+     this layout component's <style>). The change is conservative: max-width
+     + word-wrap; short tooltips look identical, only long ones wrap. -->
+<style>
+.v-popper--theme-tooltip .v-popper__inner {
+    max-width: 28rem;
+    white-space: normal;
+    line-height: 1.4;
+}
+</style>
