@@ -38,8 +38,21 @@ class JobLock
 
     /**
      * Phases that count as "still running" (mutually exclusive).
+     *
+     * Adding a new phase to a command? Add it here too — without this
+     * registration, activeJob() returns null while the command is mid-
+     * flight, snapshot() sees no active work, and other endpoints think
+     * they can start in parallel. That was exactly the
+     * `'checking'`-not-listed bug: while the broken-link check ran, the
+     * global progress banner stayed empty AND bulk-unlink could be
+     * dispatched alongside it.
+     *
+     * Keep aligned with the literal `'phase' => '...'` strings used in
+     * each Command class.
      */
-    protected const ACTIVE_PHASES = ['starting', 'running', 'indexing', 'suggestions', 'saving'];
+    protected const ACTIVE_PHASES = [
+        'starting', 'running', 'indexing', 'suggestions', 'saving', 'checking',
+    ];
 
     /**
      * Return the currently-active job (if any).
