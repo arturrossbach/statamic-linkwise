@@ -79,11 +79,15 @@
                         size="sm"
                         icon="magnifying-glass"
                         clearable
-                        placeholder="Search title or anchor..."
-                        v-tooltip="'Matches entry title OR any anchor text on its internal/external outbound links'"
+                        :placeholder="anchorOnly ? 'Search anchor only...' : 'Search title or anchor...'"
+                        v-tooltip="anchorOnly ? 'Matches anchor text only — title matches are excluded' : 'Matches entry title OR any anchor text on its internal/external outbound links'"
                         aria-label="Search title or anchor text"
                     />
                 </div>
+                <label v-if="searchQuery.trim()" class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer whitespace-nowrap" v-tooltip="'Restrict the search to anchor-text hits only — useful when the title shares words with the search term but the entries you actually want are the ones containing the keyword as a link anchor.'">
+                    <input type="checkbox" v-model="anchorOnly" class="rounded">
+                    Anchor only
+                </label>
                 <label class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer whitespace-nowrap" v-tooltip="'Show only entries with zero inbound links (not linked from any other page)'">
                     <input type="checkbox" v-model="showOrphanedOnly" class="rounded">
                     Orphaned only
@@ -305,6 +309,13 @@ export default {
             sortDirection: 'desc',
             collectionFilter: '',
             searchQuery: '',
+            // When true and searchQuery is set, the filter ignores title hits
+            // and only matches entries whose internal/external outbound links
+            // contain the search term as anchor text. The Anchor-only checkbox
+            // shows up next to Search whenever the user types something —
+            // hidden otherwise so the filter bar stays clean for the default
+            // browse case.
+            anchorOnly: false,
             showOrphanedOnly: this.initialOrphaned,
             showSelfLinksOnly: false,
             showTitleMatchesOnly: false,
@@ -384,8 +395,13 @@ export default {
 
             if (this.searchQuery.trim()) {
                 const q = this.searchQuery.toLowerCase();
+                const skipTitle = this.anchorOnly;
                 entries = entries.filter(e => {
-                    if (e.title.toLowerCase().includes(q)) return true;
+                    // Anchor-only mode: skip title-match path entirely so the
+                    // result is purely entries that USE this term as a link
+                    // anchor — solves "I searched 'statamic' and got back
+                    // 80 entries because every other title contains it".
+                    if (! skipTitle && e.title.toLowerCase().includes(q)) return true;
                     // Anchor-text search across the entry's outbound links
                     // (both internal entry-references and external URLs).
                     // Per-row data is already loaded for the modal, so this
@@ -458,7 +474,14 @@ export default {
 
     watch: {
         collectionFilter() { this.currentPage = 1; },
-        searchQuery() { this.currentPage = 1; },
+        searchQuery(val) {
+            this.currentPage = 1;
+            // Auto-disable Anchor-only when the search is cleared — the
+            // checkbox would otherwise be hidden but its state would persist
+            // and surprise the user when they type a new query.
+            if (! val.trim()) this.anchorOnly = false;
+        },
+        anchorOnly() { this.currentPage = 1; },
         showOrphanedOnly() { this.currentPage = 1; },
         showSelfLinksOnly() { this.currentPage = 1; },
         showTitleMatchesOnly() { this.currentPage = 1; },
