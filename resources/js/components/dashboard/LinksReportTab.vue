@@ -79,8 +79,9 @@
                         size="sm"
                         icon="magnifying-glass"
                         clearable
-                        placeholder="Search entries..."
-                        aria-label="Search entries"
+                        placeholder="Search title or anchor..."
+                        v-tooltip="'Matches entry title OR any anchor text on its internal/external outbound links'"
+                        aria-label="Search title or anchor text"
                     />
                 </div>
                 <label class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer whitespace-nowrap" v-tooltip="'Show only entries with zero inbound links (not linked from any other page)'">
@@ -376,7 +377,22 @@ export default {
 
             if (this.searchQuery.trim()) {
                 const q = this.searchQuery.toLowerCase();
-                entries = entries.filter(e => e.title.toLowerCase().includes(q));
+                entries = entries.filter(e => {
+                    if (e.title.toLowerCase().includes(q)) return true;
+                    // Anchor-text search across the entry's outbound links
+                    // (both internal entry-references and external URLs).
+                    // Per-row data is already loaded for the modal, so this
+                    // costs nothing extra — no extra fetches, all in-memory.
+                    const internalAnchors = e.internal_links_detail || [];
+                    for (const l of internalAnchors) {
+                        if ((l.anchor_text || '').toLowerCase().includes(q)) return true;
+                    }
+                    const externalAnchors = e.external_links || [];
+                    for (const l of externalAnchors) {
+                        if ((l.anchor_text || '').toLowerCase().includes(q)) return true;
+                    }
+                    return false;
+                });
             }
 
             if (this.showOrphanedOnly) {
