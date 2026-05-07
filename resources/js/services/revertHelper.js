@@ -40,11 +40,21 @@ export function isReversible(snapshot) {
 
     const kind = snapshot.kind;
     if (kind === 'bulkunlink') return false;
-    if (kind === 'detailunlink') return false; // V1 doesn't re-link
     if (kind === 'applyrule' && snapshot.summary?.mode === 'multi-rule') return false;
 
     // Need items to build the inverse payload
     if (!Array.isArray(snapshot.items) || snapshot.items.length === 0) return false;
+
+    // detailunlink-revert is only meaningful for items whose matched_url is
+    // an internal entry reference — external URLs (https://…) need a target
+    // entry to re-link through inbound/outbound-insert, which we don't have.
+    // If at least one item is a statamic:// link we still surface the button
+    // (filtered to those at apply-time); the UI clarifies the partial scope.
+    if (kind === 'detailunlink') {
+        return snapshot.items.some(i =>
+            typeof i?.matched_url === 'string' && i.matched_url.startsWith('statamic://entry::')
+        );
+    }
 
     return true;
 }
@@ -63,7 +73,8 @@ export function nonReversibleReason(snapshot) {
         return 'Bulk-unlink of broken links is not reversible — the URLs were broken at the time of removal. Re-linking them would re-introduce broken references.';
     }
     if (snapshot.kind === 'detailunlink') {
-        return 'Re-linking after a Detail-modal unlink is not yet supported in V1 — the anchor text needs to still exist in the entry, which can no longer be guaranteed once the entry has been edited.';
+        // Reachable only when no items are internal entry-refs at all.
+        return 'This unlink only removed external (https://…) links. Linkwise can\'t auto-re-link external URLs — they\'d need a target Statamic entry to point to. Use Statamic Revisions or a backup to restore.';
     }
     if (snapshot.kind === 'applyrule' && snapshot.summary?.mode === 'multi-rule') {
         return 'Multi-rule applies are not yet revertable in V1 — use the "Find these in URL Changer" link or revert each rule individually from a single-rule activity entry.';
@@ -132,6 +143,45 @@ export function buildRevertRequest(snapshot, endpoints) {
                 entry_title: 'Revert: ' + (summary.entry_title || 'bulk insert'),
             },
             kindLabel: 'unlink',
+        };
+    }
+
+    if (snapshot.kind === 'detailunlink') {
+        // Items = {entry_id, matched_url, anchor_text}.
+        // Re-insert each via inbound/outbound-insert. Only internal entry
+        // references survive the filter — external URLs need a target_entry_id
+        // we don't have. The UI already surfaces this in the explanation.
+        const internalItems = items.filter(i =>
+            typeof i?.matched_url === 'string' && i.matched_url.startsWith('statamic://entry::')
+        );
+        const insertions = internalItems.map(i => {
+            const targetId = i.matched_url.replace('statamic://entry::', '');
+            const sourceMode = summary.source_mode || 'inbound';
+            // For inbound-mode unlinks: we removed inbound links pointing TO
+            // a target → original entry was the SOURCE → re-insert via inbound
+            // logic with that source. For outbound-mode: entry_id was the
+            // source itself → re-insert via outbound logic.
+            return sourceMode === 'inbound'
+                ? {
+                      source_entry_id: i.entry_id,   // the entry that had the link
+                      target_entry_id: targetId,     // the entry being linked to
+                      anchor_text: i.anchor_text || '',
+                  }
+                : {
+                      source_entry_id: i.entry_id,
+                      target_entry_id: targetId,
+                      anchor_text: i.anchor_text || '',
+                  };
+        });
+        const isInbound = (summary.source_mode || 'inbound') === 'inbound';
+        return {
+            url: isInbound ? endpoints.inboundInsert : endpoints.outboundInsert,
+            payload: {
+                insertions,
+                source_mode: summary.source_mode || 'inbound',
+                entry_title: 'Revert: ' + (summary.entry_title || 'detail unlink'),
+            },
+            kindLabel: 're-link',
         };
     }
 

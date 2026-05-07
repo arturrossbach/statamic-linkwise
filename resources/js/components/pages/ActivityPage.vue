@@ -232,18 +232,37 @@ export default {
         revertExplanation() {
             if (!this.detail) return '';
             const snap = this.detail.snapshot;
-            const itemCount = (snap.items || []).length;
+            const items = snap.items || [];
             const modifiedCount = (this.detail.entries || []).filter(e => e.status === 'modified').length;
             const deletedCount = (this.detail.entries || []).filter(e => e.status === 'deleted').length;
             const skippable = modifiedCount + deletedCount;
-            const willRevert = Math.max(0, itemCount - skippable);
 
-            const verb = snap.kind === 'urlchanger' ? 're-replace URLs' : 'unlink the inserted links';
-
-            if (skippable === 0) {
-                return `Linkwise will ${verb} for ${willRevert} item${willRevert === 1 ? '' : 's'} via the same heavy-bulk pipeline. Progress shows in the global banner.`;
+            // For detailunlink, only internal-link items are reversible.
+            // Show the user how many of their N items will actually re-link.
+            let revertableItems = items.length;
+            let externalSkipped = 0;
+            if (snap.kind === 'detailunlink') {
+                const internal = items.filter(i =>
+                    typeof i.matched_url === 'string' && i.matched_url.startsWith('statamic://entry::')
+                ).length;
+                externalSkipped = items.length - internal;
+                revertableItems = internal;
             }
-            return `Linkwise will ${verb} for ${willRevert} item${willRevert === 1 ? '' : 's'}. ${skippable} entr${skippable === 1 ? 'y was' : 'ies were'} edited or deleted since this bulk and will be skipped.`;
+
+            const willRevert = Math.max(0, revertableItems - skippable);
+            const verb =
+                snap.kind === 'urlchanger' ? 're-replace URLs' :
+                snap.kind === 'detailunlink' ? 're-link' :
+                'unlink the inserted links';
+
+            const parts = [`Linkwise will ${verb} for ${willRevert} item${willRevert === 1 ? '' : 's'} via the same heavy-bulk pipeline. Progress shows in the global banner.`];
+            if (skippable > 0) {
+                parts.push(`${skippable} entr${skippable === 1 ? 'y was' : 'ies were'} edited or deleted since this bulk and will be skipped.`);
+            }
+            if (externalSkipped > 0) {
+                parts.push(`${externalSkipped} external link${externalSkipped === 1 ? '' : 's'} can't be auto-re-linked (no target entry to point to) and will be skipped.`);
+            }
+            return parts.join(' ');
         },
 
         ageWarning() {
