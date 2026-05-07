@@ -28,7 +28,13 @@
                         <span v-else-if="selected.length > 0 && globalBulkRunning" class="text-xs text-gray-500 dark:text-gray-400" role="status" aria-live="polite">
                             Another bulk operation is running — wait for it to finish.
                         </span>
-                        <Button v-if="applyUrl && modifiedSelected.length > 0" @click="executeRelink" :loading="relinking" :text="'Re-link ' + modifiedSelected.length + ' modified'" variant="primary" size="sm" />
+                        <!-- Re-link mirrors Unlink's gating: blocked while ANY bulk is
+                             running (server would 409 on hash mismatch / JobLock collision
+                             anyway, but a UI-side block spares the user the failure toast). -->
+                        <Button v-if="applyUrl && modifiedSelected.length > 0 && !relinking && !unlinking && !globalBulkRunning" @click="executeRelink" :loading="relinking" :text="'Re-link ' + modifiedSelected.length + ' modified'" variant="primary" size="sm" />
+                        <span v-else-if="modifiedSelected.length > 0 && globalBulkRunning && !relinking" class="text-xs text-gray-500 dark:text-gray-400" role="status" aria-live="polite">
+                            Wait for the running bulk to finish before re-linking.
+                        </span>
                     </div>
                     <label v-if="modal.mode === 'outbound' && modal.items.some(i => i.warning)" class="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer">
                         <input type="checkbox" v-model="selfLinkOnly" class="rounded">
