@@ -617,7 +617,11 @@ export default {
                 { name: 'autolink', label: 'Auto-Linking', url: this.route('linkwise.autolink') },
                 { name: 'keywords', label: 'Target Keywords', url: this.route('linkwise.keywords') },
                 { name: 'urlchanger', label: 'URL Changer', url: this.route('linkwise.urlchanger') },
-                { name: 'activity', label: 'Activity Log', url: this.route('linkwise.activity') },
+                // Hard-coded URL — `this.route('linkwise.activity')` returned
+                // an empty/dashboard fallback when the named route wasn't yet
+                // in Statamic's client-side route map (route was added after
+                // the CP's last boot). String is the durable workaround.
+                { name: 'activity', label: 'Activity Log', url: '/cp/linkwise/activity' },
             ],
         };
     },
