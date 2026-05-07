@@ -605,26 +605,45 @@ class AuditCommand extends Command
         $report = new LinkReport($records);
         $summary = $report->toArray()['summary'] ?? [];
 
+        // Mirror LinkReport's aggregation semantics so the comparison is
+        // meaningful — it counts only links whose target is in the index
+        // (excluding links to non-indexed collections / unpublished /
+        // deleted entries). Counting raw outboundLinks would make this
+        // path "off-by-one" against the report whenever the index has
+        // dangling references — those aren't bugs, they're filtered.
         $directTotalEntries = count($records);
         $directTotalLinks = 0;
-        $directOrphaned = 0;
         $directWithOutbound = 0;
         foreach ($records as $r) {
-            $directTotalLinks += count($r->outboundLinks);
-            if (! empty($r->outboundLinks)) {
+            $linkedToIndexed = array_filter(
+                $r->outboundLinks,
+                fn ($id) => isset($records[$id])
+            );
+            $directTotalLinks += count($linkedToIndexed);
+            if (! empty($linkedToIndexed)) {
                 $directWithOutbound++;
             }
         }
-        // Orphaned = entries no one links to AND that don't link out either.
-        // Build inbound-set first.
+        // Orphaned = entries that NO ONE links to (no inbound). Whether
+        // they link OUT or not doesn't matter — LinkReport's orphan
+        // definition is unidirectional. Plus a config-driven ignore-list
+        // (`linkwise.orphaned_ignore`) for entries the site owner has
+        // explicitly told us to exclude (e.g. landing-page-of-record
+        // entries that are linked-from-nav-only).
         $hasInbound = [];
         foreach ($records as $r) {
             foreach ($r->outboundLinks as $target) {
-                $hasInbound[$target] = true;
+                if (isset($records[$target])) {
+                    $hasInbound[$target] = true;
+                }
             }
         }
+        $orphanedIgnore = is_array(config('linkwise.orphaned_ignore', []))
+            ? config('linkwise.orphaned_ignore', [])
+            : [];
+        $directOrphaned = 0;
         foreach ($records as $r) {
-            if (empty($r->outboundLinks) && empty($hasInbound[$r->id])) {
+            if (empty($hasInbound[$r->id]) && ! in_array($r->id, $orphanedIgnore, true)) {
                 $directOrphaned++;
             }
         }
