@@ -9,6 +9,7 @@ import DomainsPage from './components/pages/DomainsPage.vue';
 import AutoLinkPage from './components/pages/AutoLinkPage.vue';
 import KeywordsPage from './components/pages/KeywordsPage.vue';
 import UrlChangerPage from './components/pages/UrlChangerPage.vue';
+import ActivityPage from './components/pages/ActivityPage.vue';
 
 Statamic.booting(() => {
     Statamic.$components.register('linkwise-fieldtype', LinkwiseFieldtype);
@@ -21,6 +22,7 @@ Statamic.booting(() => {
     Statamic.$inertia.register('linkwise::AutoLink', AutoLinkPage);
     Statamic.$inertia.register('linkwise::Keywords', KeywordsPage);
     Statamic.$inertia.register('linkwise::UrlChanger', UrlChangerPage);
+    Statamic.$inertia.register('linkwise::Activity', ActivityPage);
 
     // Frontend error reporter — pipes Vue render errors, runtime JS errors,
     // and unhandled-promise-rejections to storage/linkwise/frontend-errors.log

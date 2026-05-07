@@ -393,6 +393,97 @@ class DashboardController extends CpController
 
     // ─── Page: URL Changer ─────────────────────────────────────────────
 
+    /**
+     * Activity-Log page — read-only forensic record of every write-bulk
+     * Linkwise has performed in the last 30 days. The user-facing answer
+     * to "what did Linkwise just do, and how do I roll it back?".
+     *
+     * No restore action is offered (would clash with concurrent edits and
+     * with non-Stache storage drivers). The page lists what happened and
+     * which entries were touched; recovery itself is the user's job via
+     * git / Statamic Revisions / hosting backup. See FAQ for guidance.
+     */
+    public function activity(Request $request): \Inertia\Response
+    {
+        $store = app(\Arturrossbach\Linkwise\Support\BulkSnapshotStore::class);
+        $snapshots = $store->list(50);
+
+        // Resolve entry titles + edit URLs for the listing — entry IDs alone
+        // aren't useful in a UI. Cap title resolution to the first 5 entries
+        // per snapshot so a 1000-entry batch doesn't hammer Entry::find().
+        $listing = array_map(function ($snap) {
+            $previewIds = array_slice($snap['entry_ids'] ?? [], 0, 5);
+            $previewTitles = [];
+            foreach ($previewIds as $id) {
+                try {
+                    $entry = \Statamic\Facades\Entry::find($id);
+                    $previewTitles[] = $entry ? ($entry->get('title') ?? $id) : $id.' (deleted)';
+                } catch (\Throwable) {
+                    $previewTitles[] = $id;
+                }
+            }
+
+            return [
+                'id' => $snap['id'] ?? '',
+                'kind' => $snap['kind'] ?? 'unknown',
+                'started_by' => $snap['started_by'] ?? null,
+                'started_at' => $snap['started_at'] ?? null,
+                'entry_count_total' => $snap['entry_count_total'] ?? count($snap['entry_ids'] ?? []),
+                'preview_titles' => $previewTitles,
+                'summary' => $snap['summary'] ?? [],
+            ];
+        }, $snapshots);
+
+        return Inertia::render('linkwise::Activity', [
+            'snapshots' => $listing,
+            'detailUrl' => cp_route('linkwise.activity.detail', '__ID__'),
+        ] + $this->staleCheckProps());
+    }
+
+    /**
+     * JSON detail for a single snapshot — entry list + per-entry status
+     * (unchanged / modified / deleted / unknown). Used by the activity-log
+     * detail drawer to render "5 of 80 entries were edited since the bulk".
+     */
+    public function activityDetail(Request $request, string $id): JsonResponse
+    {
+        $store = app(\Arturrossbach\Linkwise\Support\BulkSnapshotStore::class);
+        $snap = $store->get($id);
+        if (! $snap) {
+            return response()->json(['error' => 'Snapshot not found'], 404);
+        }
+
+        $statuses = $store->compareToCurrent($snap);
+        $entries = [];
+        foreach ($snap['entry_ids'] ?? [] as $entryId) {
+            $title = $entryId;
+            $editUrl = null;
+            $collection = null;
+            try {
+                $entry = \Statamic\Facades\Entry::find($entryId);
+                if ($entry) {
+                    $title = $entry->get('title') ?? $entryId;
+                    $collection = $entry->collectionHandle();
+                    $editUrl = cp_route('collections.entries.edit', [$collection, $entryId]);
+                }
+            } catch (\Throwable) {
+                // Best-effort — fall back to ID-only display.
+            }
+            $entries[] = [
+                'id' => $entryId,
+                'title' => $title,
+                'collection' => $collection,
+                'edit_url' => $editUrl,
+                'status' => $statuses[$entryId] ?? 'unknown',
+            ];
+        }
+
+        return response()->json([
+            'snapshot' => $snap,
+            'entries' => $entries,
+        ]);
+    }
+
     public function urlChanger(Request $request): \Inertia\Response
     {
         $domainReport = new DomainReport($this->indexer);

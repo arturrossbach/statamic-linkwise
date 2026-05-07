@@ -617,6 +617,7 @@ export default {
                 { name: 'autolink', label: 'Auto-Linking', url: this.route('linkwise.autolink') },
                 { name: 'keywords', label: 'Target Keywords', url: this.route('linkwise.keywords') },
                 { name: 'urlchanger', label: 'URL Changer', url: this.route('linkwise.urlchanger') },
+                { name: 'activity', label: 'Activity Log', url: this.route('linkwise.activity') },
             ],
         };
     },

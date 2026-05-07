@@ -34,6 +34,11 @@ Route::middleware('can:manage linkwise')->group(function () {
     Route::get('linkwise/url-changer', [DashboardController::class, 'urlChanger'])
         ->name('linkwise.urlchanger');
 
+    Route::get('linkwise/activity', [DashboardController::class, 'activity'])
+        ->name('linkwise.activity');
+    Route::get('linkwise/activity/{id}', [DashboardController::class, 'activityDetail'])
+        ->name('linkwise.activity.detail');
+
     // ─── Suggestion Insert ───────────────────────────────────────────
 
     Route::post('linkwise/outbound/insert', [OutboundController::class, 'insert'])
