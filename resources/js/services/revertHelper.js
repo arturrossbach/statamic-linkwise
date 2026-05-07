@@ -97,6 +97,12 @@ export function buildRevertRequest(snapshot, endpoints) {
     const items = snapshot.items;
     const summary = snapshot.summary || {};
 
+    // Reuse the post-bulk hashes from the original snapshot as expected
+    // pre-revert state. SafeEntrySaver will 409-skip any entry whose live
+    // hash no longer matches — meaning the user edited it since the bulk
+    // and we'd otherwise silently overwrite their changes.
+    const entryHashes = snapshot.post_hashes || {};
+
     if (snapshot.kind === 'applyrule') {
         // Single-rule apply: each item = {entry_id, anchor_text, url}.
         // Revert = remove that specific link from each entry.
@@ -113,6 +119,7 @@ export function buildRevertRequest(snapshot, endpoints) {
             url: endpoints.detailUnlink,
             payload: {
                 replacements,
+                entry_hashes: entryHashes,
                 source_mode: 'outbound', // we're removing outbound links from each affected entry
                 entry_title: 'Revert: rule "' + (summary.rule_keyword || '?') + '"',
             },
@@ -136,6 +143,7 @@ export function buildRevertRequest(snapshot, endpoints) {
             url: endpoints.detailUnlink,
             payload: {
                 replacements,
+                entry_hashes: entryHashes,
                 // The source-mode reflects what the original op did, mirrored:
                 // inbound-insert added inbound links to a target → revert removes
                 // those inbound links. Banner reflects this.
@@ -178,6 +186,7 @@ export function buildRevertRequest(snapshot, endpoints) {
             url: isInbound ? endpoints.inboundInsert : endpoints.outboundInsert,
             payload: {
                 insertions,
+                entry_hashes: entryHashes,
                 source_mode: summary.source_mode || 'inbound',
                 entry_title: 'Revert: ' + (summary.entry_title || 'detail unlink'),
             },
@@ -202,6 +211,7 @@ export function buildRevertRequest(snapshot, endpoints) {
             url: endpoints.urlChangerApply,
             payload: {
                 replacements,
+                entry_hashes: entryHashes,
                 mode: 'exact', // we know the exact URLs — no domain inference
                 action: 'apply',
                 search: '', // not needed when we send exact matched_url per item
