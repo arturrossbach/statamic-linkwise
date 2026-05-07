@@ -667,6 +667,25 @@ export default {
         async runStaleCheck() {
             const url = this.staleCheck?.check_url;
             if (!url) return;
+
+            // Persist user-intent: clicking "Run check now" implies "I've
+            // acknowledged the staleness and am acting on it — don't show
+            // me this banner again for this index version". Without this,
+            // multiple paths can re-surface the banner after the check
+            // (server-side timing edges, index-rebuilding subscribers,
+            // browser-side prop caching). The dismiss is keyed to the
+            // CURRENT index_built_at, so a future scan that produces a new
+            // index version will correctly resurface the banner.
+            const indexAt = this.staleCheck?.index_built_at || '';
+            if (indexAt) {
+                this.staleCheckDismissedFor = indexAt;
+                try {
+                    sessionStorage.setItem('linkwise:staleCheck:dismissedFor', indexAt);
+                } catch {
+                    // Quota / private mode — non-critical.
+                }
+            }
+
             this.checkingFromBanner = true;
             try {
                 const response = await fetch(url, {
