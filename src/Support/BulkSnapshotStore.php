@@ -73,6 +73,8 @@ class BulkSnapshotStore
         array $preHashes = [],
         array $summary = [],
         array $items = [],
+        ?string $startedBy = null,
+        ?string $startedById = null,
     ): string {
         $this->cleanupStale();
         $this->ensureDirectory();
@@ -104,11 +106,15 @@ class BulkSnapshotStore
         // Filter out non-array items defensively (caller should send arrays).
         $items = array_values(array_filter($items, 'is_array'));
 
+        // Detached artisan commands have no auth()->user() — they need to
+        // forward the user info from the HTTP request payload via these
+        // parameters. Sync controllers can pass null and we'll grab it
+        // from auth() ourselves.
         $data = [
             'id' => $id,
             'kind' => $kind,
-            'started_by' => $this->currentUserName(),
-            'started_by_id' => $this->currentUserId(),
+            'started_by' => $startedBy ?? $this->currentUserName(),
+            'started_by_id' => $startedById ?? $this->currentUserId(),
             'started_at' => now()->toIso8601String(),
             'entry_ids' => $entryIds,
             'pre_hashes' => $preHashes,

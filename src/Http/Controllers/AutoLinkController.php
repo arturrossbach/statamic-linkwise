@@ -532,10 +532,13 @@ class AutoLinkController extends CpController
             return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
         }
 
+        $user = auth()->user();
         \Illuminate\Support\Facades\Cache::put('linkwise:applyrule:payload', [
             'rule_id' => $id,
             'entry_hashes' => $request->input('entry_hashes', []),
             'excluded_entry_ids' => $request->input('excluded_entry_ids', []),
+            'started_by' => $user?->name() ?? $user?->email() ?? null,
+            'started_by_id' => $user?->id() ?? null,
         ], 600);
         \Illuminate\Support\Facades\Cache::put('linkwise:applyrule:status', [
             'phase' => 'starting',
@@ -581,10 +584,13 @@ class AutoLinkController extends CpController
         \Illuminate\Support\Facades\Cache::forget('linkwise:applyrule:status');
         \Illuminate\Support\Facades\Cache::forget('linkwise:applyrule:cancel');
 
+        $user = auth()->user();
         \Illuminate\Support\Facades\Cache::put('linkwise:applyrule:payload', [
             'rule_ids' => $validated['rule_ids'],
             'entry_hashes' => $validated['entry_hashes'] ?? [],
             'excluded_entry_ids' => $validated['excluded_entry_ids'] ?? [],
+            'started_by' => $user?->name() ?? $user?->email() ?? null,
+            'started_by_id' => $user?->id() ?? null,
         ], 600);
         \Illuminate\Support\Facades\Cache::put('linkwise:applyrule:status', [
             'phase' => 'starting',

@@ -106,6 +106,8 @@ class LinkInsertCommand extends Command
                 'insertion_count' => $total,
             ],
             items: $snapshotItems,
+            startedBy: $startedBy,
+            startedById: $startedById,
         );
 
         Cache::put($statusKey, [

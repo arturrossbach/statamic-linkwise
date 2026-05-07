@@ -111,6 +111,8 @@ class UrlChangerApplyCommand extends Command
                 'replacement_count' => $total,
             ],
             items: $snapshotItems,
+            startedBy: $startedBy,
+            startedById: $startedById,
         );
 
         Cache::put('linkwise:urlchanger:status', [

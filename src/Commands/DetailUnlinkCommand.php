@@ -100,6 +100,8 @@ class DetailUnlinkCommand extends Command
                 'replacement_count' => $total,
             ],
             items: $snapshotItems,
+            startedBy: $startedBy,
+            startedById: $startedById,
         );
 
         Cache::put('linkwise:detailunlink:status', [

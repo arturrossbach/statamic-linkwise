@@ -48,7 +48,7 @@
                                 {{ formatRelative(snap.started_at) }}
                             </td>
                             <td class="whitespace-nowrap">
-                                <Badge :variant="kindVariant(snap.kind)" :text="kindLabel(snap.kind)" />
+                                <Badge :variant="kindVariant(snap.kind)" :text="kindLabel(snap)" />
                                 <Badge v-if="snap.reverted_at" variant="default" text="↶ Reverted" class="ml-1" v-tooltip="'Reverted at ' + formatAbsolute(snap.reverted_at)" />
                             </td>
                             <td class="whitespace-nowrap text-xs">
@@ -76,7 +76,7 @@
             <div v-if="detail">
                 <div class="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-relaxed">
                     <p>
-                        Operation: <strong>{{ kindLabel(detail.snapshot.kind) }}</strong>
+                        Operation: <strong>{{ kindLabel(detail.snapshot) }}</strong>
                         — started <strong>{{ formatAbsolute(detail.snapshot.started_at) }}</strong>
                         <template v-if="detail.snapshot.started_by"> by <strong>{{ detail.snapshot.started_by }}</strong></template>
                     </p>
@@ -104,6 +104,16 @@
                         />
                     </div>
                 </div>
+                <!-- Already-reverted state: a one-liner is enough; the recovery
+                     instructions only matter when no auto-revert is possible. -->
+                <Alert v-else-if="detail.snapshot.reverted_at" variant="default" class="mb-3">
+                    <p class="text-sm">
+                        <strong>↶ Already reverted</strong> on
+                        <span>{{ formatAbsolute(detail.snapshot.reverted_at) }}</span><template v-if="detail.reverted_by_user">
+                        by <strong>{{ detail.reverted_by_user }}</strong></template>.
+                        Look for the matching reverse-bulk further up in this list.
+                    </p>
+                </Alert>
                 <Alert v-else variant="default" class="mb-3">
                     <p class="text-sm">
                         <strong>How to undo this:</strong>
@@ -218,7 +228,7 @@ export default {
     computed: {
         detailTitle() {
             if (!this.detail) return '';
-            return this.kindLabel(this.detail.snapshot.kind) + ' details';
+            return this.kindLabel(this.detail.snapshot) + ' details';
         },
 
         canRevert() {
@@ -377,11 +387,22 @@ export default {
             }
         },
 
-        kindLabel(kind) {
+        kindLabel(snapOrKind) {
+            // Accepts either a snapshot (preferred — can sharpen the label
+            // with kind-specific context like inbound vs outbound) or a raw
+            // kind string (legacy callers).
+            const snap = typeof snapOrKind === 'string' ? { kind: snapOrKind } : snapOrKind;
+            const kind = snap?.kind || '';
+            const mode = snap?.summary?.source_mode || '';
+
+            if (kind === 'detailunlink') {
+                if (mode === 'inbound') return 'Bulk unlink inbound links';
+                if (mode === 'outbound') return 'Bulk unlink outbound links';
+                return 'Bulk unlink links';
+            }
             return ({
                 applyrule: 'Apply auto-link rule',
-                bulkunlink: 'Bulk-unlink broken links',
-                detailunlink: 'Detail-modal bulk unlink',
+                bulkunlink: 'Bulk unlink broken links',
                 inboundinsert: 'Bulk insert inbound links',
                 outboundinsert: 'Bulk insert outbound links',
                 urlchanger: 'URL Changer apply',

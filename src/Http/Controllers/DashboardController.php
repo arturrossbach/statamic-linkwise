@@ -516,12 +516,22 @@ class DashboardController extends CpController
         // search term. Used by the drawer's "Find these in URL Changer" button.
         $deepLinkSearch = $this->deepLinkSearchFor($snap);
 
+        // Resolve the reverted_by snapshot id → its started_by user name, so
+        // the drawer can show "Already reverted on DATE by NAME" instead of
+        // an opaque "snap-id-XYZ".
+        $revertedByUser = null;
+        if (! empty($snap['reverted_by'])) {
+            $revertedSnap = $store->get($snap['reverted_by']);
+            $revertedByUser = $revertedSnap['started_by'] ?? null;
+        }
+
         return response()->json([
             'snapshot' => $snap,
             'entries' => $entries,
             'deep_link_url_changer' => $deepLinkSearch
                 ? cp_route('linkwise.urlchanger').'?search='.urlencode($deepLinkSearch)
                 : null,
+            'reverted_by_user' => $revertedByUser,
         ]);
     }
 
@@ -756,6 +766,9 @@ class DashboardController extends CpController
             'replacements.*.search' => 'nullable|string|max:2048',
         ]);
 
+        $user = auth()->user();
+        $validated['started_by'] = $user?->name() ?? $user?->email() ?? null;
+        $validated['started_by_id'] = $user?->id() ?? null;
         \Illuminate\Support\Facades\Cache::put('linkwise:bulkunlink:payload', $validated, 600);
         \Illuminate\Support\Facades\Cache::put('linkwise:bulkunlink:status', [
             'phase' => 'starting',
