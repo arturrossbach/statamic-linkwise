@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\JobLock;
 use Statamic\Events\EntrySaved;
 
 /**
@@ -44,6 +45,23 @@ class AutoLinkOnEntrySaveSubscriber
         // BardLinkInserter's $entry->save() doesn't recurse back into us.
         $loopFlag = "linkwise:autoapply:processing:{$entryId}";
         if (Cache::get($loopFlag)) {
+            return;
+        }
+
+        // Concurrency guard: skip auto-apply when ANY heavy bulk is in flight.
+        // Without this, an editor saving an unrelated entry mid-bulk would fire
+        // the subscriber, which would then write that entry while a Scan / URL
+        // Changer / Bulk-Unlink / Apply-Rule batch is also writing entries on
+        // its own schedule. SafeEntrySaver still prevents per-entry corruption
+        // (hash mismatch → silent skip below in the BardLinkInserter try/catch),
+        // but the user's manual save would silently NOT get auto-linked, and
+        // they'd never know — there's no UI surface for "save was OK but auto-
+        // apply was skipped". Better: skip explicitly + log so the operator can
+        // see it; the user can re-trigger Apply Selected after the bulk done.
+        if (JobLock::activeJob() !== null) {
+            Log::info(
+                "[Linkwise] AutoLinkOnEntrySaveSubscriber skipped auto-apply on entry {$entryId} — bulk in progress. User can re-run Apply Selected after the bulk completes.",
+            );
             return;
         }
 
