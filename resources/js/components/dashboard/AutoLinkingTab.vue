@@ -377,14 +377,24 @@
                                 {{ notInsertableCount }} cannot insert</template>
                             </p>
                         </div>
-                        <Button
-                            v-if="wouldLinkCount > 0 && previewModal.ruleId"
-                            :text="`Apply (${applyablePreviewCount})`"
-                            variant="primary"
-                            :disabled="applyablePreviewCount === 0 || applyingPreview"
-                            :loading="applyingPreview"
-                            @click="applyFromPreview"
-                        />
+                        <div class="flex items-center gap-2">
+                            <Button
+                                v-if="linkedToTargetCount > 0 && previewModal.ruleId"
+                                :text="`Unlink (${selectedUnlinkIds.length})`"
+                                :disabled="selectedUnlinkIds.length === 0 || unlinkingFromPreview"
+                                :loading="unlinkingFromPreview"
+                                v-tooltip="'Remove the rule\'s link from selected entries (uses the same atomic, conflict-safe save path as DetailModal Bulk Unlink)'"
+                                @click="unlinkSelectedFromPreview"
+                            />
+                            <Button
+                                v-if="wouldLinkCount > 0 && previewModal.ruleId"
+                                :text="`Apply (${applyablePreviewCount})`"
+                                variant="primary"
+                                :disabled="applyablePreviewCount === 0 || applyingPreview"
+                                :loading="applyingPreview"
+                                @click="applyFromPreview"
+                            />
+                        </div>
                     </div>
 
                     <Panel>
@@ -412,6 +422,15 @@
                                             class="rounded"
                                             :aria-label="`Include '${item.title}' when applying`"
                                             v-tooltip="'Uncheck to skip this entry when applying'"
+                                        />
+                                        <input
+                                            v-else-if="item.link_status === 'linked_to_target'"
+                                            type="checkbox"
+                                            :checked="selectedUnlinkIds.includes(item.id)"
+                                            @change="toggleUnlinkSelection(item.id)"
+                                            class="rounded"
+                                            :aria-label="`Select '${item.title}' for unlink`"
+                                            v-tooltip="'Check to include this entry when removing the rule\'s links'"
                                         />
                                     </td>
                                     <td>
@@ -520,6 +539,13 @@ export default {
             previewModal: null,
             // IDs of entries the user unchecked in the Preview modal — Apply skips these.
             excludedEntryIds: [],
+            // IDs of entries the user CHECKED for bulk-unlink. Separate from
+            // excludedEntryIds because the two actions operate on disjoint
+            // status pools (would_link vs linked_to_target) and a single
+            // selection set with overlapping semantics confused users in
+            // testing.
+            selectedUnlinkIds: [],
+            unlinkingFromPreview: false,
             applyingPreview: false,
             // Async apply progress — survives tab switch / reload via cache-backed polling.
             applyAsyncProgress: null, // null | { rule_keyword, current, total }
@@ -1334,6 +1360,115 @@ export default {
             const idx = this.excludedEntryIds.indexOf(entryId);
             if (idx > -1) this.excludedEntryIds.splice(idx, 1);
             else this.excludedEntryIds.push(entryId);
+        },
+
+        toggleUnlinkSelection(entryId) {
+            const idx = this.selectedUnlinkIds.indexOf(entryId);
+            if (idx > -1) this.selectedUnlinkIds.splice(idx, 1);
+            else this.selectedUnlinkIds.push(entryId);
+        },
+
+        /**
+         * Bulk-remove the rule's link from selected `linked_to_target` entries.
+         * Reuses the DetailModal Bulk-Unlink heavy-bulk path 1:1 — same
+         * endpoint, same payload contract, same banner. Differences:
+         *   - source_mode is 'outbound' (we're removing each entry's
+         *     outbound link to the rule's target)
+         *   - matched_url is the rule's href (statamic://entry::ID for
+         *     internal rules, rule.url for external)
+         *   - occurrence_index = 0 because AutoLink enforces once_per_post,
+         *     so the rule's own insertion is always the first match
+         */
+        async unlinkSelectedFromPreview() {
+            if (!this.previewModal?.ruleId || this.unlinkingFromPreview) return;
+            if (this.selectedUnlinkIds.length === 0) return;
+
+            const rule = this.rules.find(r => r.id === this.previewModal.ruleId);
+            if (!rule) return;
+
+            // Build the rule's href the same way the engine does (mirrors
+            // AutoLinkRule::isExternal): statamic://entry::ID for internal
+            // refs, otherwise the literal external URL.
+            const matchedUrl = rule.target_entry_id
+                ? `statamic://entry::${rule.target_entry_id}`
+                : rule.url;
+
+            const ids = [...this.selectedUnlinkIds];
+            const total = ids.length;
+            const replacements = ids.map(entryId => ({
+                entry_id: entryId,
+                matched_url: matchedUrl,
+                occurrence_index: 0,
+                search: matchedUrl,
+            }));
+
+            // Hash check covers only the entries we're modifying — reusing
+            // the existing entryHashes computed (filtered by relevant ids).
+            const allHashes = this.entryHashes;
+            const relevantHashes = {};
+            for (const id of ids) {
+                if (allHashes[id]) relevantHashes[id] = allHashes[id];
+            }
+
+            this.unlinkingFromPreview = true;
+            const ruleKeyword = rule.keyword || 'rule';
+            this.closePreviewModal();
+
+            try {
+                const response = await fetch('/cp/linkwise/detail-unlink-async', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': Statamic.$config.get('csrfToken'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify({
+                        replacements,
+                        entry_hashes: relevantHashes,
+                        source_mode: 'outbound',
+                        entry_title: `Auto-Link rule "${ruleKeyword}"`,
+                    }),
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    const reason = data?.error || data?.message || `HTTP ${response.status}`;
+                    Statamic.$toast.error(`Could not start: ${reason}`);
+                    this.unlinkingFromPreview = false;
+
+                    return;
+                }
+            } catch (e) {
+                Statamic.$toast.error(`Could not start: ${e.message || 'network error'}`);
+                this.unlinkingFromPreview = false;
+
+                return;
+            }
+
+            Statamic.$toast.success(`Started — removing ${total} link${total === 1 ? '' : 's'} in the background.`);
+
+            setHeavyState({
+                kind: 'detailunlink',
+                label: 'remove links',
+                current: 0,
+                total,
+                canCancel: true,
+                cancelUrl: '/cp/linkwise/detail-unlink-async/cancel',
+                heartbeat: Math.floor(Date.now() / 1000),
+                context: { entryTitle: `Auto-Link rule "${ruleKeyword}"`, sourceMode: 'outbound' },
+            });
+
+            const stop = this.$watch(
+                () => bulkState.active,
+                (current, previous) => {
+                    if (previous?.kind === 'detailunlink' && current === null) {
+                        stop();
+                        this.unlinkingFromPreview = false;
+                        this.selectedUnlinkIds = [];
+                    }
+                },
+            );
+            // Safety: stop watcher after 30 min in case the bulk dies silently.
+            setTimeout(() => stop(), 30 * 60 * 1000);
         },
 
         async applyFromPreview() {
