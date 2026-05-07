@@ -50,11 +50,26 @@ class UrlChangerController extends CpController
     }
 
     /**
-     * Apply replacements for selected occurrences.
+     * Apply replacements for selected occurrences (sync, per-row).
      * Accepts an array of replacements: [{entry_id, matched_url, new_url}]
+     *
+     * Live caller: BrokenLinksTab "Unlink" per row. The async batch endpoint
+     * (applyAsync) is for multi-replacement runs — this one is a fast,
+     * UI-feedback-driven single op.
+     *
+     * Concurrency: refuse when ANY other heavy job is running. Without this
+     * guard, an editor could click per-row Unlink while a Scan / Apply Rule /
+     * URL-Changer batch is in flight — both writers race on the same entry
+     * file and on the index. SafeEntrySaver still defends each entry, but
+     * the user-facing failure is a confusing 409 toast for an action they
+     * shouldn't have been allowed to trigger in the first place.
      */
     public function apply(Request $request): JsonResponse
     {
+        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('urlchanger')) {
+            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
+        }
+
         $request->validate([
             'search' => 'nullable|string|max:2048',
             'entry_hashes' => 'sometimes|array|max:50000',

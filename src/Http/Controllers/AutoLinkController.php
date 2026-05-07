@@ -395,6 +395,16 @@ class AutoLinkController extends CpController
         }
 
         $preview = $request->boolean('preview', false);
+
+        // Concurrency guard: refuse non-preview apply when ANY other heavy job
+        // is running. Preview is read-only (no entry writes) so it's exempt.
+        // Without this, the sync per-rule apply could race with a Scan / URL-
+        // Changer / Bulk-Unlink writer on the same entry file + index.
+        if (! $preview) {
+            if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('applyrule')) {
+                return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
+            }
+        }
         $conflictedEntries = ! $preview
             ? SafeEntrySaver::verifyHashes($request->input('entry_hashes', []))
             : [];
