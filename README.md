@@ -113,6 +113,12 @@ php artisan cache:clear
 
 Each bulk writes per-entry atomically with a SHA hash check (`SafeEntrySaver`). If another editor modifies an entry mid-bulk, that entry is skipped (counted as "skipped" in the toast) — concurrent edits never get overwritten.
 
+### Recovery
+
+Every bulk leaves a forensic snapshot in the **Activity Log** tab — kind, who started it, when, which entries were touched, and the per-item operation data. For most bulk kinds (Apply Rule, Inbound/Outbound Insert, internal Detail-Unlink, URL Changer) Linkwise can dispatch a one-click reverse via the same heavy-bulk pipeline. Entries you've edited since the original bulk are skipped automatically.
+
+When the auto-revert isn't applicable, three manual paths cover every Statamic setup: **Statamic Revisions** (Pro feature, per-collection), **Git** (Stache + content/ in version control), or your **hosting provider's backup**. See the [FAQ](./docs/guide/faq.md) for the full recovery playbook.
+
 ---
 
 ## Privacy & GDPR

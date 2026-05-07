@@ -37,6 +37,7 @@ export default defineConfig({
                         { text: 'What is Linkwise?', link: '/guide/' },
                         { text: 'Installation', link: '/guide/installation' },
                         { text: 'Configuration', link: '/guide/configuration' },
+                        { text: 'FAQ', link: '/guide/faq' },
                     ],
                 },
             ],
