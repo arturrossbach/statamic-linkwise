@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\JobLock;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 
@@ -99,6 +100,23 @@ class ApplyRuleCommand extends Command
 
         $preview = $applier->applyRule($rule, true);
         $totalEstimate = count($preview['affected_entries'] ?? []);
+
+        // Forensic snapshot before any writes — entry IDs from the preview's
+        // would-link list, hashes from the verified entry_hashes payload.
+        $previewEntryIds = array_values(array_filter(array_map(
+            fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
+            $preview['affected_entries'] ?? [],
+        )));
+        app(BulkSnapshotStore::class)->record(
+            kind: 'applyrule',
+            entryIds: $previewEntryIds,
+            preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, array_flip($previewEntryIds)) : [],
+            summary: [
+                'rule_id' => $rule->id,
+                'rule_keyword' => $rule->keyword,
+                'estimated_links' => $totalEstimate,
+            ],
+        );
 
         Cache::put('linkwise:applyrule:status', [
             'phase' => 'running',
@@ -240,6 +258,23 @@ class ApplyRuleCommand extends Command
         $excludedAll = array_values(array_unique(
             array_merge(array_keys($conflictedEntries), $userExcluded)
         ));
+
+        // Forensic snapshot for the multi-rule batch. We don't have per-entry
+        // pre-hashes here (the hash map covers the union of all rule scopes,
+        // which we use as best-effort); entry IDs are the union from the
+        // payload's entry_hashes (the frontend captures hashes for every entry
+        // visible in the rule-preview tables).
+        $batchEntryIds = is_array($entryHashes) ? array_keys($entryHashes) : [];
+        app(BulkSnapshotStore::class)->record(
+            kind: 'applyrule',
+            entryIds: $batchEntryIds,
+            preHashes: $entryHashes,
+            summary: [
+                'mode' => 'multi-rule',
+                'rule_ids' => $ruleIds,
+                'total_rules' => $totalRules,
+            ],
+        );
 
         // Polled inside applyRule's record loop so a Cancel click takes effect
         // mid-rule (not just at rule boundaries). Combined with the per-rule

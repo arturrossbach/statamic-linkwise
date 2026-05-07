@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\JobLock;
 use Arturrossbach\Linkwise\Support\UrlHelper;
 use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
@@ -80,6 +81,20 @@ class DetailUnlinkCommand extends Command
             $byEntry[$r['entry_id']][] = $r;
         }
         $entryGroups = array_values($byEntry);
+
+        // Forensic snapshot — see BulkSnapshotStore. Recorded BEFORE writes
+        // so the activity-log can show "this bulk affected entries X, Y, Z"
+        // even if the bulk later crashes or is cancelled mid-flight.
+        app(BulkSnapshotStore::class)->record(
+            kind: 'detailunlink',
+            entryIds: array_keys($byEntry),
+            preHashes: array_intersect_key($entryHashes, $byEntry),
+            summary: [
+                'source_mode' => $sourceMode,
+                'entry_title' => $entryTitle,
+                'replacement_count' => $total,
+            ],
+        );
 
         Cache::put('linkwise:detailunlink:status', [
             'phase' => 'running',

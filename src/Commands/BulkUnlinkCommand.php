@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Cache;
 use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\JobLock;
 use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
 
@@ -52,6 +53,7 @@ class BulkUnlinkCommand extends Command
         }
 
         $replacements = $payload['replacements'] ?? [];
+        $entryHashes = $payload['entry_hashes'] ?? [];
         $total = count($replacements);
         $succeeded = 0;
         $skipped = 0;
@@ -60,6 +62,19 @@ class BulkUnlinkCommand extends Command
         // the matched_url. Refreshed by finalizeIndex so suggestion counts
         // on both ends drop after the unlink.
         $affectedIds = [];
+
+        // Forensic snapshot before any writes — recorded entry IDs are the
+        // unique sources the bulk plans to touch.
+        $entryIds = array_values(array_unique(array_filter(
+            array_column($replacements, 'entry_id'),
+            'is_string',
+        )));
+        app(BulkSnapshotStore::class)->record(
+            kind: 'bulkunlink',
+            entryIds: $entryIds,
+            preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, array_flip($entryIds)) : [],
+            summary: ['replacement_count' => $total],
+        );
 
         Cache::put('linkwise:bulkunlink:status', [
             'phase' => 'running',

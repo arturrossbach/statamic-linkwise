@@ -8,6 +8,7 @@ use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
 use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Statamic\Http\Controllers\CP\CpController;
 
@@ -417,6 +418,34 @@ class AutoLinkController extends CpController
         $applier->setExcludedEntries(array_values(array_unique(
             array_merge(array_keys($conflictedEntries), $userExcluded)
         )));
+
+        // Forensic snapshot for non-preview applies. We dry-run a preview first
+        // to learn which entries the apply would touch — costs a bit, but the
+        // alternative (snapshotting AFTER the apply) misses entries on partial
+        // failures, defeating the purpose of pre-write forensics.
+        if (! $preview) {
+            $previewApplier = new AutoLinkApplier($this->indexer, $this->manager);
+            $previewApplier->setExcludedEntries(array_values(array_unique(
+                array_merge(array_keys($conflictedEntries), $userExcluded)
+            )));
+            $previewForSnapshot = $previewApplier->applyRule($rule, true);
+            $snapshotEntryIds = array_values(array_filter(array_map(
+                fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
+                $previewForSnapshot['affected_entries'] ?? [],
+            )));
+            $hashes = $request->input('entry_hashes', []);
+            app(BulkSnapshotStore::class)->record(
+                kind: 'applyrule',
+                entryIds: $snapshotEntryIds,
+                preHashes: is_array($hashes) ? array_intersect_key($hashes, array_flip($snapshotEntryIds)) : [],
+                summary: [
+                    'rule_id' => $rule->id,
+                    'rule_keyword' => $rule->keyword,
+                    'caller' => 'sync',
+                ],
+            );
+        }
+
         $result = $applier->applyRule($rule, $preview);
 
         if (! empty($conflictedEntries)) {

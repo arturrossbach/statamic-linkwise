@@ -10,6 +10,7 @@ use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Links\BrokenLinkChecker;
 use Arturrossbach\Linkwise\Links\BrokenLinkRecord;
 use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\JobLock;
 use Arturrossbach\Linkwise\Support\UrlHelper;
 use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
@@ -91,6 +92,20 @@ class UrlChangerApplyCommand extends Command
         }
         $entryGroups = array_values($byEntry);
         $totalEntries = count($entryGroups);
+
+        // Forensic snapshot before any writes — entry IDs from the grouped
+        // replacements, hashes from the payload's entry_hashes map.
+        app(BulkSnapshotStore::class)->record(
+            kind: 'urlchanger',
+            entryIds: array_keys($byEntry),
+            preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, $byEntry) : [],
+            summary: [
+                'action' => $action,
+                'search' => $search,
+                'mode' => $mode,
+                'replacement_count' => $total,
+            ],
+        );
 
         Cache::put('linkwise:urlchanger:status', [
             'phase' => 'running',

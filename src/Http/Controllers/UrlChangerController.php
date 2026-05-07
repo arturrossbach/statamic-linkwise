@@ -8,6 +8,7 @@ use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Links\BrokenLinkChecker;
 use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
 use Statamic\Http\Controllers\CP\CpController;
@@ -106,6 +107,24 @@ class UrlChangerController extends CpController
                 'entry_id' => array_key_first($conflicts),
             ], 409);
         }
+
+        // Forensic snapshot — recorded BEFORE the write so the activity-log
+        // captures the operation even if applySelected throws mid-flight.
+        $snapshotEntryIds = array_values(array_unique(array_filter(
+            array_column($request->replacements, 'entry_id'),
+            'is_string',
+        )));
+        app(BulkSnapshotStore::class)->record(
+            kind: 'urlchanger',
+            entryIds: $snapshotEntryIds,
+            preHashes: array_intersect_key($allHashes, array_flip($snapshotEntryIds)),
+            summary: [
+                'mode' => $request->input('mode', 'smart'),
+                'search' => $request->input('search') ?? '',
+                'replacement_count' => count($request->replacements),
+                'caller' => 'sync', // distinguishes per-row Broken-Links unlink from the async batch
+            ],
+        );
 
         try {
             // Coalesce — see preview() comment about ConvertEmptyStringsToNull.

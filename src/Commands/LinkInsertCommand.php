@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\JobLock;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 
@@ -81,6 +82,25 @@ class LinkInsertCommand extends Command
         // just inserted those 80 links — the candidates have become
         // actual links and need to drop out of the suggestion pool.
         $affectedIds = [];
+
+        // Forensic snapshot before any writes. The set of touched entries is
+        // the union of source_entry_ids in the insertions list — for inbound
+        // mode each insertion targets a different SOURCE; for outbound mode
+        // they all share the same source (the modal's entry).
+        $touchedSources = array_values(array_unique(array_filter(array_map(
+            fn ($i) => is_array($i) ? ($i['source_entry_id'] ?? null) : null,
+            $insertions,
+        ))));
+        app(BulkSnapshotStore::class)->record(
+            kind: $kind,
+            entryIds: $touchedSources,
+            preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, array_flip($touchedSources)) : [],
+            summary: [
+                'source_mode' => $sourceMode,
+                'entry_title' => $entryTitle,
+                'insertion_count' => $total,
+            ],
+        );
 
         Cache::put($statusKey, [
             'phase' => 'running',
