@@ -401,7 +401,18 @@
                         <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                             <thead>
                                 <tr>
-                                    <SortableHeader label="" :sortable="false" />
+                                    <SortableHeader :sortable="false">
+                                        <input
+                                            type="checkbox"
+                                            class="rounded"
+                                            :checked="allPreviewRowsSelected"
+                                            :indeterminate.prop="somePreviewRowsSelected && !allPreviewRowsSelected"
+                                            :disabled="togglablePreviewRowCount === 0"
+                                            @change="togglePreviewSelectAll"
+                                            v-tooltip="'Toggle every selectable row in this preview (would-link rows for Apply, linked-to-target rows for Unlink)'"
+                                            aria-label="Select all selectable rows"
+                                        />
+                                    </SortableHeader>
                                     <SortableHeader label="Target Entry" :active="previewSortField === 'title'" :direction="previewSortDirection" @sort="togglePreviewSort('title')" />
                                     <SortableHeader label="Context" :sortable="false" />
                                     <SortableHeader label="Status" align="center" :active="previewSortField === 'link_status'" :direction="previewSortDirection" @sort="togglePreviewSort('link_status')" />
@@ -708,6 +719,55 @@ export default {
 
         wouldLinkCount() {
             return this.groupedPreview.filter(g => g.hasWouldLink).length;
+        },
+
+        /**
+         * Header-checkbox state for the preview table. Selection lives in
+         * two pools (excludedEntryIds for would_link, selectedUnlinkIds for
+         * linked_to_target) — these computeds collapse both into the
+         * canonical select-all semantics: are all toggleable rows ON?
+         *
+         * Toggleable = a row whose status has a checkbox (would_link or
+         * linked_to_target). Sentence_status rows (linked_elsewhere,
+         * not_insertable) are skipped — no checkbox, nothing to toggle.
+         *
+         * Filter-aware: when previewStatusFilter is set the count covers
+         * only visible rows, matching the BrokenLinks "select all visible"
+         * convention.
+         */
+        togglablePreviewRows() {
+            return this.sortedPreviewItems.filter(
+                i => i.link_status === 'would_link' || i.link_status === 'linked_to_target',
+            );
+        },
+
+        togglablePreviewRowCount() {
+            return this.togglablePreviewRows.length;
+        },
+
+        somePreviewRowsSelected() {
+            for (const item of this.togglablePreviewRows) {
+                if (item.link_status === 'would_link' && ! this.excludedEntryIds.includes(item.id)) {
+                    return true;
+                }
+                if (item.link_status === 'linked_to_target' && this.selectedUnlinkIds.includes(item.id)) {
+                    return true;
+                }
+            }
+            return false;
+        },
+
+        allPreviewRowsSelected() {
+            if (this.togglablePreviewRows.length === 0) return false;
+            for (const item of this.togglablePreviewRows) {
+                if (item.link_status === 'would_link' && this.excludedEntryIds.includes(item.id)) {
+                    return false;
+                }
+                if (item.link_status === 'linked_to_target' && ! this.selectedUnlinkIds.includes(item.id)) {
+                    return false;
+                }
+            }
+            return true;
         },
 
         linkedToTargetCount() {
@@ -1380,6 +1440,55 @@ export default {
             const idx = this.selectedUnlinkIds.indexOf(entryId);
             if (idx > -1) this.selectedUnlinkIds.splice(idx, 1);
             else this.selectedUnlinkIds.push(entryId);
+        },
+
+        /**
+         * Header-checkbox handler. Toggles every togglable row's selection
+         * state in one shot, across both action pools:
+         *   - would_link rows  → in/out of excludedEntryIds (apply scope)
+         *   - linked_to_target → in/out of selectedUnlinkIds (unlink scope)
+         *
+         * The single click updates BOTH the "Apply (X)" and "Unlink (Y)"
+         * counters consistently. User then clicks whichever action button
+         * matches their intent.
+         */
+        togglePreviewSelectAll() {
+            const togglable = this.togglablePreviewRows;
+            if (togglable.length === 0) return;
+
+            if (this.allPreviewRowsSelected) {
+                // De-select all: exclude every would_link, clear unlink set.
+                const wouldLinkIds = togglable
+                    .filter(i => i.link_status === 'would_link')
+                    .map(i => i.id);
+                // Merge with any pre-existing exclusions outside the visible
+                // togglable set (filter-aware behaviour) so we don't
+                // accidentally re-include rows the user excluded earlier.
+                this.excludedEntryIds = Array.from(
+                    new Set([...this.excludedEntryIds, ...wouldLinkIds]),
+                );
+                const linkedTargetIds = new Set(
+                    togglable.filter(i => i.link_status === 'linked_to_target').map(i => i.id),
+                );
+                this.selectedUnlinkIds = this.selectedUnlinkIds.filter(
+                    id => ! linkedTargetIds.has(id),
+                );
+            } else {
+                // Select all: clear exclusions of visible would_link rows,
+                // add visible linked_to_target rows to the unlink set.
+                const wouldLinkIds = new Set(
+                    togglable.filter(i => i.link_status === 'would_link').map(i => i.id),
+                );
+                this.excludedEntryIds = this.excludedEntryIds.filter(
+                    id => ! wouldLinkIds.has(id),
+                );
+                const newUnlinkIds = togglable
+                    .filter(i => i.link_status === 'linked_to_target')
+                    .map(i => i.id);
+                this.selectedUnlinkIds = Array.from(
+                    new Set([...this.selectedUnlinkIds, ...newUnlinkIds]),
+                );
+            }
         },
 
         /**
