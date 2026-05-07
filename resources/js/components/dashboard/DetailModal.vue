@@ -229,10 +229,19 @@ export default {
 
     methods: {
         close() {
-            // Block close while a destructive operation is running. Otherwise the
-            // background loop keeps mutating items the user can't see anymore, and
-            // its progress state bleeds into the next modal open.
-            if (this.unlinking || this.relinking) {
+            // Only block close for LIGHT bulks — those run as a frontend loop
+            // that dies the moment the modal unmounts, leaving the user without
+            // a path back to a half-finished operation.
+            //
+            // HEAVY bulks (detail-unlink-async, etc.) live in a detached artisan
+            // process. The status banner is rendered globally by LinkwiseLayout
+            // and reattaches on every Linkwise tab — closing the modal here is
+            // safe AND necessary: keeping it open leaves the Statamic Stack's
+            // fixed-inset overlay over the table dahinter, swallowing clicks
+            // on the count badges (#49). The watcher in executeUnlink resets
+            // local state when the bulk completes, even if the modal is closed.
+            const isHeavy = bulkState.active?.source === 'heavy';
+            if ((this.unlinking || this.relinking) && ! isHeavy) {
                 Statamic.$toast.info('Wait for the operation to finish before closing.');
                 return;
             }
