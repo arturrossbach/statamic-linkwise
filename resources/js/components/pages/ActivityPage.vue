@@ -774,17 +774,44 @@ export default {
             }[status] || 'default');
         },
 
+        // Listing's "Details" column. Each kind has a primary label (rule
+        // keyword / search term / entry title) and a count fallback when
+        // the primary is missing (per-row applies, anonymous bulks, etc.).
+        // The dash-only state should NEVER happen — that means we've added
+        // a new kind without a label. The trailing fallback covers it.
         summaryLabel(snap) {
-            if (!snap.summary) return '';
-            const s = snap.summary;
-            if (snap.kind === 'applyrule') return s.rule_keyword ? `Rule: "${s.rule_keyword}"` : (s.mode === 'multi-rule' ? `${s.total_rules} rules` : '');
-            if (snap.kind === 'urlchanger') return s.search ? `Search: "${s.search}" — ${s.action || 'apply'}` : '';
-            if (snap.kind === 'detailunlink') return s.entry_title ? `${s.source_mode || ''} unlink on "${s.entry_title}"` : '';
-            if (snap.kind === 'inboundinsert' || snap.kind === 'outboundinsert') {
-                return s.entry_title ? `${snap.kind === 'inboundinsert' ? 'into' : 'from'} "${s.entry_title}"` : '';
+            const s = snap?.summary || {};
+            const itemsLen = Array.isArray(snap?.items) ? snap.items.length : 0;
+
+            if (snap?.kind === 'applyrule') {
+                if (s.rule_keyword) return `Rule: "${s.rule_keyword}"`;
+                if (s.mode === 'multi-rule') return `${s.total_rules || '?'} rules`;
+                return itemsLen > 0 ? `${itemsLen} link${itemsLen === 1 ? '' : 's'} inserted` : 'Apply rule';
             }
-            if (snap.kind === 'bulkunlink') return `${s.replacement_count || ''} broken links`;
-            return '';
+            if (snap?.kind === 'urlchanger') {
+                if (s.search) return `Search: "${s.search}" — ${s.action || 'apply'}`;
+                const n = s.replacement_count || itemsLen;
+                if (n > 0) {
+                    const verb = s.action === 'unlink' ? 'unlinked' : 'replaced';
+                    return `${n} URL${n === 1 ? '' : 's'} ${verb}`;
+                }
+                return s.action === 'unlink' ? 'URL Changer — unlink' : 'URL Changer — replace';
+            }
+            if (snap?.kind === 'detailunlink') {
+                const mode = s.source_mode || '';
+                if (s.entry_title) return `${mode} unlink on "${s.entry_title}"`;
+                return itemsLen > 0 ? `${itemsLen} ${mode} link${itemsLen === 1 ? '' : 's'} removed` : 'Detail unlink';
+            }
+            if (snap?.kind === 'inboundinsert' || snap?.kind === 'outboundinsert') {
+                const dir = snap.kind === 'inboundinsert' ? 'into' : 'from';
+                if (s.entry_title) return `${dir} "${s.entry_title}"`;
+                return itemsLen > 0 ? `${itemsLen} link${itemsLen === 1 ? '' : 's'} inserted` : `Bulk insert (${dir})`;
+            }
+            if (snap?.kind === 'bulkunlink') {
+                const n = s.replacement_count || itemsLen;
+                return n > 0 ? `${n} broken link${n === 1 ? '' : 's'} removed` : 'Bulk unlink';
+            }
+            return snap?.kind || '';
         },
 
         formatRelative(iso) {
