@@ -74,16 +74,17 @@ class AuditCommand extends Command
         $only = $this->option('path');
 
         $paths = [
-            'auto-link'       => fn () => $this->auditAutoLinkPreview(),
-            'index-parity'    => fn () => $this->auditIndexParity(),
-            'inbound'         => fn () => $this->auditInboundInsertability(),
-            'outbound'        => fn () => $this->auditOutboundInsertability(),
-            'domains'         => fn () => $this->auditDomainParity(),
-            'broken-links'    => fn () => $this->auditBrokenLinks(),
-            'url-changer'     => fn () => $this->auditUrlChanger(),
-            'target-keywords' => fn () => $this->auditTargetKeywords(),
-            'links-report'    => fn () => $this->auditLinksReport(),
-            'overview'        => fn () => $this->auditOverview(),
+            'auto-link'           => fn () => $this->auditAutoLinkPreview(),
+            'index-parity'        => fn () => $this->auditIndexParity(),
+            'inbound'             => fn () => $this->auditInboundInsertability(),
+            'outbound'            => fn () => $this->auditOutboundInsertability(),
+            'suggestions-safety'  => fn () => $this->auditSuggestionsSafety(),
+            'domains'             => fn () => $this->auditDomainParity(),
+            'broken-links'        => fn () => $this->auditBrokenLinks(),
+            'url-changer'         => fn () => $this->auditUrlChanger(),
+            'target-keywords'     => fn () => $this->auditTargetKeywords(),
+            'links-report'        => fn () => $this->auditLinksReport(),
+            'overview'            => fn () => $this->auditOverview(),
         ];
 
         if ($only && ! isset($paths[$only])) {
@@ -729,6 +730,200 @@ class AuditCommand extends Command
             return;
         }
         $this->pass($path);
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Suggestions safety. The 2026-05-08 lesson — green
+    // BardLinkInserterTest was not enough because it tested synthetic
+    // patterns. This check runs against ECHTDATEN: for each surfaced
+    // outbound suggestion, walk the source entry's actual Bard tree
+    // and find positions where the anchor sits as a strict substring
+    // of an existing differently-targeted link span. Such positions
+    // are the partial-overlap pattern that Bug B exploited.
+    //
+    // The check is intentionally independent of BardLinkInserter's
+    // current safety logic — it asks "would this configuration TEMPT
+    // a corruption?" not "does today's walker get it right?". Even
+    // if the walker is later regressed, this audit catches the
+    // dangerous suggestion before any save attempt.
+    //
+    // Symmetric to auditOutboundInsertability (sample size 20) so the
+    // run cost stays bounded on large corpora. Raise via
+    // --max-failures to see all flagged cases.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditSuggestionsSafety(): void
+    {
+        $this->line('<fg=yellow>suggestions-safety</> — surfaced suggestions never overlap an existing link');
+
+        $records = $this->indexer->load();
+        // Walk EVERY record that has at least one outbound suggestion —
+        // not the symbolic 20-entry sample used by other paths. The
+        // 2026-05-08 lesson: a 20-sample is fine for "is this insertable
+        // at all" parity checks, but corruption-class bugs hide in long
+        // tails. The cost is bounded by suggestion fan-out, not corpus
+        // size.
+        $sample = array_filter($records, fn ($r) => ($r->outboundSuggestionCount ?? 0) > 0);
+
+        foreach ($sample as $record) {
+            $entry = Entry::find($record->id);
+            if (! $entry) continue;
+
+            try {
+                $raw = $this->suggestionEngine->suggest(
+                    $record->text, $records, $record->id, $record->outboundLinks
+                );
+                $grouped = OutboundSuggestionGrouper::groupAndFilter($raw, $record->id);
+            } catch (\Throwable $e) {
+                $this->recordFailure('suggestions-safety', "grouping for '{$record->title}' threw: ".$e->getMessage());
+                continue;
+            }
+
+            // OutboundSuggestionGrouper returns groups → targets (not flat).
+            // Each target carries an anchor_text + target_entry_id.
+            foreach ($grouped['groups'] ?? [] as $group) {
+                foreach ($group['targets'] ?? [] as $target) {
+                    $anchor = (string) ($target['anchor_text'] ?? '');
+                    $targetId = (string) ($target['target_entry_id'] ?? '');
+                    if ($anchor === '' || $targetId === '') continue;
+
+                    $newHref = 'statamic://entry::'.$targetId;
+                    $hits = $this->findAnchorPartialOverlapsInBard($entry, $anchor, $newHref);
+
+                    if (empty($hits)) {
+                        $this->pass('suggestions-safety');
+                        continue;
+                    }
+
+                    $first = $hits[0];
+                    $detail = sprintf(
+                        "'%s' on '%s' → entry %s: anchor sits inside existing link '%s' (linked text \"%s\") — partial overlap, would split",
+                        $anchor,
+                        $record->title,
+                        $targetId,
+                        $first['existing_href'],
+                        mb_strimwidth($first['linked_text'], 0, 60, '…'),
+                    );
+                    $this->recordFailure('suggestions-safety', $detail);
+                }
+            }
+        }
+    }
+
+    /**
+     * Walk an entry's Bard / Replicator-nested-Bard fields. Return any
+     * position where $anchor appears as a strict substring of a text
+     * node carrying a link mark whose href differs from $newHref.
+     *
+     * "Strict substring" = anchor matches inside the linked text but
+     * doesn't fully cover it. Full coverage of a different-href link
+     * is the URL-upgrade case that BardLinkInserter intentionally
+     * supports — not flagged.
+     *
+     * @return list<array{existing_href: string, linked_text: string, position: int}>
+     */
+    protected function findAnchorPartialOverlapsInBard($entry, string $anchor, string $newHref): array
+    {
+        $hits = [];
+        try {
+            $fields = $entry->blueprint()->fields()->all();
+        } catch (\Throwable) {
+            return $hits;
+        }
+
+        foreach ($fields as $handle => $field) {
+            $type = $field->type();
+            $value = $entry->get($handle);
+            if (! is_array($value) || empty($value)) continue;
+
+            if ($type === 'bard') {
+                $this->walkBardForOverlap($value, $anchor, $newHref, $hits);
+            } elseif ($type === 'replicator') {
+                $this->walkReplicatorForOverlap($value, $anchor, $newHref, $hits);
+            }
+        }
+
+        return $hits;
+    }
+
+    /**
+     * @param  list<array{existing_href: string, linked_text: string, position: int}>  $hits
+     */
+    protected function walkBardForOverlap(array $content, string $anchor, string $newHref, array &$hits): void
+    {
+        $anchorLen = mb_strlen($anchor);
+        if ($anchorLen === 0) return;
+
+        foreach ($content as $node) {
+            if (! is_array($node)) continue;
+
+            if (($node['type'] ?? '') === 'text') {
+                $text = (string) ($node['text'] ?? '');
+                if ($text === '') {
+                    if (isset($node['content']) && is_array($node['content'])) {
+                        $this->walkBardForOverlap($node['content'], $anchor, $newHref, $hits);
+                    }
+                    continue;
+                }
+
+                $existingHref = null;
+                foreach ($node['marks'] ?? [] as $m) {
+                    if (! is_array($m) || ($m['type'] ?? '') !== 'link') continue;
+                    $existingHref = (string) ($m['attrs']['href'] ?? '');
+                    break;
+                }
+
+                // Only linked text nodes with a different href are at risk
+                // of partial-destruction. Same-href is BardLinkInserter's
+                // idempotent noop. Plain text is the legitimate target.
+                if ($existingHref === null || $existingHref === '' || $existingHref === $newHref) {
+                    if (isset($node['content']) && is_array($node['content'])) {
+                        $this->walkBardForOverlap($node['content'], $anchor, $newHref, $hits);
+                    }
+                    continue;
+                }
+
+                $pos = mb_stripos($text, $anchor);
+                if ($pos === false) {
+                    if (isset($node['content']) && is_array($node['content'])) {
+                        $this->walkBardForOverlap($node['content'], $anchor, $newHref, $hits);
+                    }
+                    continue;
+                }
+
+                $textLen = mb_strlen($text);
+                $fullyCovers = ($pos === 0 && $anchorLen === $textLen);
+                if (! $fullyCovers) {
+                    $hits[] = [
+                        'existing_href' => $existingHref,
+                        'linked_text' => $text,
+                        'position' => $pos,
+                    ];
+                }
+            }
+
+            if (isset($node['content']) && is_array($node['content'])) {
+                $this->walkBardForOverlap($node['content'], $anchor, $newHref, $hits);
+            }
+        }
+    }
+
+    /**
+     * @param  list<array{existing_href: string, linked_text: string, position: int}>  $hits
+     */
+    protected function walkReplicatorForOverlap(array $sets, string $anchor, string $newHref, array &$hits): void
+    {
+        foreach ($sets as $set) {
+            if (! is_array($set)) continue;
+            foreach ($set as $key => $value) {
+                if (! is_array($value) || empty($value)) continue;
+                if (in_array($key, \Arturrossbach\Linkwise\Support\UrlHelper::REPLICATOR_META_KEYS, true)) continue;
+                if (\Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($value)) {
+                    $this->walkBardForOverlap($value, $anchor, $newHref, $hits);
+                } elseif (isset($value[0]['type'], $value[0]['id'])) {
+                    $this->walkReplicatorForOverlap($value, $anchor, $newHref, $hits);
+                }
+            }
+        }
     }
 
     protected function checkSuggestionInsertable(string $path, string $sourceId, string $anchor, string $targetId, string $label): void
