@@ -100,7 +100,8 @@
                             text="Revert…"
                             variant="primary"
                             size="sm"
-                            :disabled="reverting"
+                            :disabled="reverting || revertCount === 0"
+                            v-tooltip="revertCount === 0 ? 'No items to revert — every entry was either modified since the bulk or recorded before anchor capture shipped.' : ''"
                             @click="confirmRevert = true"
                         />
                     </div>
@@ -384,18 +385,7 @@ export default {
             const deletedCount = (this.detail.entries || []).filter(e => e.status === 'deleted').length;
             const skippable = modifiedCount + deletedCount;
 
-            // For detailunlink, only internal-link items are reversible.
-            // Show the user how many of their N items will actually re-link.
-            let revertableItems = items.length;
-            let externalSkipped = 0;
-            if (snap.kind === 'detailunlink') {
-                const internal = items.filter(i =>
-                    typeof i.matched_url === 'string' && i.matched_url.startsWith('statamic://entry::')
-                ).length;
-                externalSkipped = items.length - internal;
-                revertableItems = internal;
-            }
-
+            const { revertableItems, legacySkipped } = this.revertableSummary;
             const willRevert = Math.max(0, revertableItems - skippable);
             const verb =
                 snap.kind === 'urlchanger' ? 're-replace URLs' :
@@ -406,13 +396,10 @@ export default {
             if (skippable > 0) {
                 parts.push(`${skippable} entr${skippable === 1 ? 'y was' : 'ies were'} edited or deleted since this bulk and will be skipped.`);
             } else {
-                // Always surface the safety guarantee, even when there's
-                // currently nothing to skip — users have asked us to repeat
-                // this clearly so they know their concurrent edits are safe.
                 parts.push(`Any entries edited by users since this bulk will be detected via content-hash and automatically skipped — your edits are never overwritten.`);
             }
-            if (externalSkipped > 0) {
-                parts.push(`${externalSkipped} external link${externalSkipped === 1 ? '' : 's'} can't be auto-re-linked (no target entry to point to) and will be skipped.`);
+            if (legacySkipped > 0) {
+                parts.push(`${legacySkipped} item${legacySkipped === 1 ? ' was' : 's were'} recorded before anchor capture shipped — re-link can't reconstruct which text to wrap, so they will be skipped.`);
             }
             return parts.join(' ');
         },
@@ -558,6 +545,42 @@ export default {
             return rf.kind || 'previous operation';
         },
 
+        /** Counts how many of the snapshot's items are actually revertable
+         *  (have the data we need to build the inverse payload) plus how
+         *  many were dropped due to legacy data shape. Used by both the
+         *  pre-revert preview text AND the Revert button gating — keeps
+         *  them in sync so the button doesn't claim 81 items will revert
+         *  when the preview says 0. */
+        revertableSummary() {
+            const snap = this.detail?.snapshot;
+            if (! snap) return { revertableItems: 0, legacySkipped: 0 };
+            const items = Array.isArray(snap.items) ? snap.items : [];
+            if (snap.kind === 'detailunlink') {
+                const ok = items.filter(i => i?.anchor_text && i?.matched_url).length;
+                return { revertableItems: ok, legacySkipped: items.length - ok };
+            }
+            if (snap.kind === 'urlchanger') {
+                const ok = items.filter(i => {
+                    if (i?.new_url && i.new_url !== '__LINKWISE_UNLINK__') return true; // swap path
+                    return i?.matched_url && i?.anchor_text;
+                }).length;
+                return { revertableItems: ok, legacySkipped: items.length - ok };
+            }
+            // applyrule, inboundinsert, outboundinsert: every item is
+            // structurally revertable (no per-item shape gates).
+            return { revertableItems: items.length, legacySkipped: 0 };
+        },
+
+        /** Effective count of items that will land in the revert payload
+         *  AFTER applying skippable (modified/deleted) deductions. The
+         *  Revert button is disabled when this is 0 — clicking would
+         *  ship a payload that does nothing. */
+        revertCount() {
+            const entries = this.detail?.entries || [];
+            const skippable = entries.filter(e => e.status === 'modified' || e.status === 'deleted').length;
+            return Math.max(0, this.revertableSummary.revertableItems - skippable);
+        },
+
         /** True when this snapshot has been reverted AND the revert
          *  recorded per-entry skip records. The skipped table only
          *  makes sense post-revert — pre-revert nothing has been skipped. */
@@ -644,7 +667,15 @@ export default {
                 });
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
-                    const reason = data?.error || data?.message || `HTTP ${response.status}`;
+                    // Laravel 422 returns {message, errors:{field:[msg]}}. Extracting
+                    // the first field error is far more useful than "given data was
+                    // invalid" — surfaces the actual broken field for the user.
+                    let reason = data?.error || data?.message || `HTTP ${response.status}`;
+                    if (response.status === 422 && data?.errors && typeof data.errors === 'object') {
+                        const firstKey = Object.keys(data.errors)[0];
+                        const firstMsg = firstKey ? (Array.isArray(data.errors[firstKey]) ? data.errors[firstKey][0] : data.errors[firstKey]) : null;
+                        if (firstKey && firstMsg) reason = `${firstKey}: ${firstMsg}`;
+                    }
                     Statamic.$toast.error(`Could not start revert: ${reason}`);
                     this.reverting = false;
                     return;
