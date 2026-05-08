@@ -72,6 +72,7 @@ class BulkUnlinkCommand extends Command
         $snapshotItems = array_map(fn (array $r) => [
             'entry_id' => $r['entry_id'] ?? '',
             'matched_url' => $r['matched_url'] ?? '',
+            'sentence_context' => $r['sentence_context'] ?? '',
         ], $replacements);
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'bulkunlink',

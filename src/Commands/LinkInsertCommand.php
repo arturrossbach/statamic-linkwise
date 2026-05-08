@@ -70,6 +70,7 @@ class LinkInsertCommand extends Command
         $entryTitle = $payload['entry_title'] ?? '';
         $startedBy = $payload['started_by'] ?? null;
         $startedById = $payload['started_by_id'] ?? null;
+        $reverts = $payload['reverts'] ?? null;
 
         $total = count($insertions);
         $succeeded = 0;
@@ -95,16 +96,18 @@ class LinkInsertCommand extends Command
             'source_entry_id' => $i['source_entry_id'] ?? '',
             'target_entry_id' => $i['target_entry_id'] ?? '',
             'anchor_text' => $i['anchor_text'] ?? '',
+            'sentence_context' => $i['sentence_context'] ?? '',
         ], array_filter($insertions, 'is_array'));
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: $kind,
             entryIds: $touchedSources,
             preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, array_flip($touchedSources)) : [],
-            summary: [
+            summary: array_filter([
                 'source_mode' => $sourceMode,
                 'entry_title' => $entryTitle,
                 'insertion_count' => $total,
-            ],
+                'reverts' => $reverts,
+            ], fn ($v) => $v !== null),
             items: $snapshotItems,
             startedBy: $startedBy,
             startedById: $startedById,

@@ -80,6 +80,8 @@ class InboundController extends CpController
             'insertions.*.target_entry_id' => ['required', 'string', 'max:64'],
             'insertions.*.anchor_text' => ['required', 'string', 'max:500'],
             'entry_title' => ['sometimes', 'nullable', 'string', 'max:300'],
+            // Activity-log Revert flow — marks the new snapshot as a reverse-of-X.
+            'reverts' => ['sometimes', 'nullable', 'string', 'max:64'],
         ]);
 
         // Pre-flight hash check — fail-fast 409 before dispatch instead of
@@ -110,6 +112,7 @@ class InboundController extends CpController
             'entry_title' => $validated['entry_title'] ?? '',
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
+            'reverts' => $validated['reverts'] ?? null,
         ], 600);
         \Illuminate\Support\Facades\Cache::put('linkwise:inboundinsert:status', [
             'phase' => 'starting',

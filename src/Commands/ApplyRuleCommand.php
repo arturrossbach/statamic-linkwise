@@ -103,15 +103,18 @@ class ApplyRuleCommand extends Command
 
         // Forensic snapshot before any writes — entry IDs from the preview's
         // would-link list, hashes from the verified entry_hashes payload.
-        $previewEntryIds = array_values(array_filter(array_map(
-            fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
-            $preview['affected_entries'] ?? [],
-        )));
-        $snapshotItems = array_map(fn (string $id) => [
-            'entry_id' => $id,
-            'anchor_text' => $rule->keyword,
-            'url' => $rule->url,
-        ], $previewEntryIds);
+        $previewEntryIds = [];
+        $snapshotItems = [];
+        foreach ($preview['affected_entries'] ?? [] as $affected) {
+            if (! is_array($affected) || empty($affected['id'])) continue;
+            $previewEntryIds[] = $affected['id'];
+            $snapshotItems[] = [
+                'entry_id' => $affected['id'],
+                'anchor_text' => $rule->keyword,
+                'url' => $rule->url,
+                'sentence_context' => $affected['sentence_context'] ?? '',
+            ];
+        }
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'applyrule',
             entryIds: $previewEntryIds,

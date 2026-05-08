@@ -59,6 +59,7 @@ class DetailUnlinkCommand extends Command
         $entryTitle = $payload['entry_title'] ?? '';
         $startedBy = $payload['started_by'] ?? null;
         $startedById = $payload['started_by_id'] ?? null;
+        $reverts = $payload['reverts'] ?? null;
 
         $total = count($replacements);
         $succeeded = 0;
@@ -89,16 +90,18 @@ class DetailUnlinkCommand extends Command
             'entry_id' => $r['entry_id'] ?? '',
             'matched_url' => $r['matched_url'] ?? '',
             'anchor_text' => $r['anchor_text'] ?? '',
+            'sentence_context' => $r['sentence_context'] ?? '',
         ], $replacements);
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'detailunlink',
             entryIds: array_keys($byEntry),
             preHashes: array_intersect_key($entryHashes, $byEntry),
-            summary: [
+            summary: array_filter([
                 'source_mode' => $sourceMode,
                 'entry_title' => $entryTitle,
                 'replacement_count' => $total,
-            ],
+                'reverts' => $reverts,
+            ], fn ($v) => $v !== null),
             items: $snapshotItems,
             startedBy: $startedBy,
             startedById: $startedById,

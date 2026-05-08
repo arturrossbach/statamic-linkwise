@@ -429,16 +429,19 @@ class AutoLinkController extends CpController
                 array_merge(array_keys($conflictedEntries), $userExcluded)
             )));
             $previewForSnapshot = $previewApplier->applyRule($rule, true);
-            $snapshotEntryIds = array_values(array_filter(array_map(
-                fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
-                $previewForSnapshot['affected_entries'] ?? [],
-            )));
+            $snapshotEntryIds = [];
+            $snapshotItems = [];
+            foreach ($previewForSnapshot['affected_entries'] ?? [] as $affected) {
+                if (! is_array($affected) || empty($affected['id'])) continue;
+                $snapshotEntryIds[] = $affected['id'];
+                $snapshotItems[] = [
+                    'entry_id' => $affected['id'],
+                    'anchor_text' => $rule->keyword,
+                    'url' => $rule->url,
+                    'sentence_context' => $affected['sentence_context'] ?? '',
+                ];
+            }
             $hashes = $request->input('entry_hashes', []);
-            $snapshotItems = array_map(fn (string $id) => [
-                'entry_id' => $id,
-                'anchor_text' => $rule->keyword,
-                'url' => $rule->url,
-            ], $snapshotEntryIds);
             $snapshotId = app(BulkSnapshotStore::class)->record(
                 kind: 'applyrule',
                 entryIds: $snapshotEntryIds,

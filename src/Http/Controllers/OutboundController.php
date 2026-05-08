@@ -85,6 +85,8 @@ class OutboundController extends CpController
             'insertions.*.target_entry_id' => ['required', 'string', 'max:64'],
             'insertions.*.anchor_text' => ['required', 'string', 'max:500'],
             'entry_title' => ['sometimes', 'nullable', 'string', 'max:300'],
+            // Activity-log Revert flow — marks the new snapshot as a reverse-of-X.
+            'reverts' => ['sometimes', 'nullable', 'string', 'max:64'],
         ]);
 
         $entryId = $validated['entry_id'];
@@ -128,6 +130,7 @@ class OutboundController extends CpController
             'entry_title' => $validated['entry_title'] ?? '',
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
+            'reverts' => $validated['reverts'] ?? null,
         ], 600);
         \Illuminate\Support\Facades\Cache::put('linkwise:outboundinsert:status', [
             'phase' => 'starting',

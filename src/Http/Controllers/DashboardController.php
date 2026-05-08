@@ -556,6 +556,45 @@ class DashboardController extends CpController
             ];
         }
 
+        // Enrich the top-level snapshot.items too — the drawer's summary
+        // header (operationSummary) reads them directly to show a uniform
+        // "Inserted 'X' → <target>" line. Without this, that line would
+        // dump the raw 'entry: abc12345…' UUID string. Same enrichment as
+        // we do per-entry above; transient, doesn't touch the snapshot file.
+        if (! empty($snap['items']) && is_array($snap['items'])) {
+            $snap['items'] = array_map(function ($item) {
+                if (! is_array($item)) {
+                    return $item;
+                }
+                $resolved = $item;
+                foreach (['url', 'matched_url', 'new_url', 'target_entry_id'] as $field) {
+                    if (empty($item[$field])) continue;
+                    $value = (string) $item[$field];
+                    $targetId = null;
+                    if ($field === 'target_entry_id') {
+                        $targetId = $value;
+                    } elseif (preg_match('#^statamic://entry::([0-9a-f-]+)$#i', $value, $m)) {
+                        $targetId = $m[1];
+                    }
+                    if ($targetId !== null) {
+                        try {
+                            $targetEntry = \Statamic\Facades\Entry::find($targetId);
+                            if ($targetEntry) {
+                                $resolved[$field.'_title'] = $targetEntry->get('title') ?? $targetId;
+                                $resolved[$field.'_edit_url'] = cp_route(
+                                    'collections.entries.edit',
+                                    [$targetEntry->collectionHandle(), $targetId],
+                                );
+                            }
+                        } catch (\Throwable) {
+                            // Best-effort.
+                        }
+                    }
+                }
+                return $resolved;
+            }, $snap['items']);
+        }
+
         // Compute a deep-link to URL Changer search if we have a meaningful
         // search term. Used by the drawer's "Find these in URL Changer" button.
         $deepLinkSearch = $this->deepLinkSearchFor($snap);
@@ -569,6 +608,24 @@ class DashboardController extends CpController
             $revertedByUser = $revertedSnap['started_by'] ?? null;
         }
 
+        // Resolve the reverts pointer in this snapshot's summary → return a
+        // compact "what we reverted" descriptor so the drawer can render
+        // "↶ Reverts Apply Rule 'X' from <date> by <user>" up top.
+        $revertedFrom = null;
+        $revertsId = $snap['summary']['reverts'] ?? null;
+        if (! empty($revertsId)) {
+            $original = $store->get($revertsId);
+            if ($original) {
+                $revertedFrom = [
+                    'id' => $original['id'] ?? $revertsId,
+                    'kind' => $original['kind'] ?? 'unknown',
+                    'started_at' => $original['started_at'] ?? null,
+                    'started_by' => $original['started_by'] ?? null,
+                    'summary' => $original['summary'] ?? [],
+                ];
+            }
+        }
+
         return response()->json([
             'snapshot' => $snap,
             'entries' => $entries,
@@ -576,6 +633,7 @@ class DashboardController extends CpController
                 ? cp_route('linkwise.urlchanger').'?search='.urlencode($deepLinkSearch)
                 : null,
             'reverted_by_user' => $revertedByUser,
+            'reverted_from' => $revertedFrom,
         ]);
     }
 
@@ -990,6 +1048,9 @@ class DashboardController extends CpController
             'entry_hashes' => 'sometimes|array|max:50000',
             'source_mode' => 'sometimes|in:inbound,outbound',
             'entry_title' => 'sometimes|nullable|string|max:300',
+            // Activity-log Revert flow sends this to mark the new snapshot
+            // as a reverse-of-X. Ignored otherwise.
+            'reverts' => 'sometimes|nullable|string|max:64',
         ]);
 
         // Pre-flight hash check — fail-fast 409 before dispatch instead of
@@ -1023,6 +1084,7 @@ class DashboardController extends CpController
             'entry_title' => $validated['entry_title'] ?? '',
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
+            'reverts' => $validated['reverts'] ?? null,
         ], 600);
         \Illuminate\Support\Facades\Cache::put('linkwise:detailunlink:status', [
             'phase' => 'starting',

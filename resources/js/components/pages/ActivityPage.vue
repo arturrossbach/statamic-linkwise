@@ -136,6 +136,20 @@
                     </ul>
                 </Alert>
 
+                <!-- Revert lineage banner — when this snapshot is itself the
+                     inverse of a previous bulk, surface that link upfront so
+                     users understand "this entry exists because operation X
+                     was reverted". Drives the kind-aware framing for the
+                     summary header below as well. -->
+                <div v-if="detail.reverted_from" class="mb-3 rounded-md border border-amber-200 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10 p-3 text-sm">
+                    <p class="text-amber-900 dark:text-amber-200">
+                        <strong>↶ Reverts</strong>
+                        <span v-html="revertedFromLabel"></span>
+                        from <strong>{{ formatAbsolute(detail.reverted_from.started_at) }}</strong><template v-if="detail.reverted_from.started_by">
+                        by <strong>{{ detail.reverted_from.started_by }}</strong></template>.
+                    </p>
+                </div>
+
                 <!-- Operation summary header — surfaces the uniform parts of
                      the operation (anchor, target, search term) once at the
                      top, so the table doesn't have to repeat them per row.
@@ -183,6 +197,12 @@
                                             <HelpIcon :tooltip="extraColumnTooltip" />
                                         </div>
                                     </th>
+                                    <th v-if="hasContextColumn" scope="col" class="text-left">
+                                        <div class="inline-flex items-center gap-1">
+                                            Context
+                                            <HelpIcon tooltip="The sentence around the link as it was when the bulk ran — anchor text highlighted. Captures what the editor saw, not the current state of the entry." />
+                                        </div>
+                                    </th>
                                     <th scope="col" class="text-left">
                                         <div class="inline-flex items-center gap-1">
                                             Status since bulk
@@ -200,6 +220,10 @@
                                     </td>
                                     <td v-if="extraColumnLabel" class="text-xs text-gray-600 dark:text-gray-400">
                                         <div v-if="entryExtraCell(e)" class="space-y-0.5" v-html="entryExtraCell(e)"></div>
+                                        <span v-else class="text-gray-400">—</span>
+                                    </td>
+                                    <td v-if="hasContextColumn" class="text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                                        <div v-if="entryContextCell(e)" class="space-y-1 leading-relaxed" v-html="entryContextCell(e)"></div>
                                         <span v-else class="text-gray-400">—</span>
                                     </td>
                                     <td class="text-xs">
@@ -298,9 +322,14 @@ export default {
                 snap.kind === 'detailunlink' ? 're-link' :
                 'unlink the inserted links';
 
-            const parts = [`Linkwise will ${verb} for ${willRevert} item${willRevert === 1 ? '' : 's'} via the same heavy-bulk pipeline. Progress shows in the global banner.`];
+            const parts = [`Linkwise will ${verb} for ${willRevert} item${willRevert === 1 ? '' : 's'}. You'll see progress in the banner at the top of the screen — you can navigate away and come back, the operation continues in the background.`];
             if (skippable > 0) {
                 parts.push(`${skippable} entr${skippable === 1 ? 'y was' : 'ies were'} edited or deleted since this bulk and will be skipped.`);
+            } else {
+                // Always surface the safety guarantee, even when there's
+                // currently nothing to skip — users have asked us to repeat
+                // this clearly so they know their concurrent edits are safe.
+                parts.push(`Any entries edited by users since this bulk will be detected via content-hash and automatically skipped — your edits are never overwritten.`);
             }
             if (externalSkipped > 0) {
                 parts.push(`${externalSkipped} external link${externalSkipped === 1 ? '' : 's'} can't be auto-re-linked (no target entry to point to) and will be skipped.`);
@@ -345,7 +374,7 @@ export default {
                 }
                 const anchor = sum.rule_keyword ? `<span class="font-mono">"${this.escape(sum.rule_keyword)}"</span>` : 'rule';
                 const target = this.targetLabel(firstItem, 'url');
-                return `Inserted ${anchor} → ${target} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+                return `Linked ${anchor} with target ${target} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
             }
             if (snap.kind === 'detailunlink') {
                 const mode = sum.source_mode || 'inbound';
@@ -414,6 +443,35 @@ export default {
 
         extraColumnLabel() { return this.extraColumnConfig?.label || null; },
         extraColumnTooltip() { return this.extraColumnConfig?.tooltip || ''; },
+
+        /** Short kind-label for the revert lineage banner. */
+        revertedFromLabel() {
+            if (!this.detail?.reverted_from) return '';
+            const rf = this.detail.reverted_from;
+            const sum = rf.summary || {};
+            if (rf.kind === 'applyrule') {
+                if (sum.mode === 'multi-rule') return `Apply Rule (${sum.total_rules || '?'} rules)`;
+                return sum.rule_keyword
+                    ? `Apply Rule "<span class="font-mono">${this.escape(sum.rule_keyword)}</span>"`
+                    : 'Apply Rule';
+            }
+            if (rf.kind === 'inboundinsert') return sum.entry_title ? `Bulk insert inbound links to "${this.escape(sum.entry_title)}"` : 'Bulk insert inbound links';
+            if (rf.kind === 'outboundinsert') return sum.entry_title ? `Bulk insert outbound links from "${this.escape(sum.entry_title)}"` : 'Bulk insert outbound links';
+            if (rf.kind === 'detailunlink') {
+                const dir = sum.source_mode === 'outbound' ? 'outbound' : 'inbound';
+                return sum.entry_title ? `Bulk unlink ${dir} links on "${this.escape(sum.entry_title)}"` : `Bulk unlink ${dir} links`;
+            }
+            if (rf.kind === 'urlchanger') return sum.search ? `URL Changer "${this.escape(sum.search)}"` : 'URL Changer apply';
+            return rf.kind || 'previous operation';
+        },
+
+        /** True when at least one item has a sentence_context — drives the
+         *  optional Context column. Snapshots from before the context-write
+         *  expansion don't have it; we just hide the column then. */
+        hasContextColumn() {
+            const items = this.detail?.snapshot?.items || [];
+            return items.some(i => typeof i?.sentence_context === 'string' && i.sentence_context.length > 0);
+        },
     },
 
     methods: {
@@ -625,6 +683,35 @@ export default {
                 }
                 return '';
             }).filter(Boolean);
+        },
+
+        // Per-row sentence context with the anchor text highlighted.
+        // Mirrors SuggestedPhrase.vue's reading: the link in its sentence,
+        // bolded, so the user can see what the editor was looking at when
+        // the bulk ran. Falls back to '' when this item didn't carry one
+        // (legacy snapshots, broken-link items where context is "the URL
+        // was 404 anyway", etc.).
+        entryContextCell(e) {
+            const items = e.items || [];
+            const lines = items.map(it => {
+                const ctx = it.sentence_context || '';
+                if (!ctx) return '';
+                const anchor = it.anchor_text || '';
+                const escaped = this.escape(ctx);
+                if (!anchor) return `<div class="text-gray-500">${escaped}</div>`;
+                // Highlight the anchor inside the (already-escaped) sentence
+                // — escape the anchor too so the regex finds the same
+                // representation. First-occurrence only (matches how the
+                // bulk targeted it: occurrence_index 0 is the typical default).
+                const anchorEsc = this.escape(anchor);
+                const idx = escaped.toLowerCase().indexOf(anchorEsc.toLowerCase());
+                if (idx === -1) return `<div class="text-gray-500">${escaped}</div>`;
+                const before = escaped.slice(0, idx);
+                const match = escaped.slice(idx, idx + anchorEsc.length);
+                const after = escaped.slice(idx + anchorEsc.length);
+                return `<div class="text-gray-500">${before}<strong class="text-blue-600 dark:text-blue-400">${match}</strong>${after}</div>`;
+            }).filter(Boolean);
+            return lines.join('');
         },
 
         // Per-row content for the kind-aware extra column (the middle one

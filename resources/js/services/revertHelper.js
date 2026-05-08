@@ -134,6 +134,7 @@ export function buildRevertRequest(snapshot, endpoints) {
                 entry_hashes: entryHashes,
                 source_mode: 'outbound', // we're removing outbound links from each affected entry
                 entry_title: 'Revert: rule "' + (summary.rule_keyword || '?') + '"',
+                reverts: snapshot.id,
             },
             kindLabel: 'unlink',
         };
@@ -161,6 +162,7 @@ export function buildRevertRequest(snapshot, endpoints) {
                 // those inbound links. Banner reflects this.
                 source_mode: snapshot.kind === 'inboundinsert' ? 'inbound' : 'outbound',
                 entry_title: 'Revert: ' + (summary.entry_title || 'bulk insert'),
+                reverts: snapshot.id,
             },
             kindLabel: 'unlink',
         };
@@ -201,6 +203,7 @@ export function buildRevertRequest(snapshot, endpoints) {
                 entry_hashes: entryHashes,
                 source_mode: summary.source_mode || 'inbound',
                 entry_title: 'Revert: ' + (summary.entry_title || 'detail unlink'),
+                reverts: snapshot.id,
             },
             kindLabel: 're-link',
         };
@@ -227,6 +230,7 @@ export function buildRevertRequest(snapshot, endpoints) {
                 mode: 'exact', // we know the exact URLs — no domain inference
                 action: 'apply',
                 search: '', // not needed when we send exact matched_url per item
+                reverts: snapshot.id,
             },
             kindLabel: 'replace',
         };

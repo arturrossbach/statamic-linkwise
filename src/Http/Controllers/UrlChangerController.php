@@ -118,6 +118,7 @@ class UrlChangerController extends CpController
             'entry_id' => $r['entry_id'] ?? '',
             'matched_url' => $r['matched_url'] ?? '',
             'new_url' => $r['new_url'] ?? '',
+            'sentence_context' => $r['sentence_context'] ?? '',
         ], $request->replacements);
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'urlchanger',
@@ -252,6 +253,8 @@ class UrlChangerController extends CpController
             'replacements.*.occurrence_index' => 'required|numeric|min:0',
             'replacements.*.new_url' => 'required|string|min:3|max:2048',
             'replacements.*.search' => 'nullable|string|max:2048',
+            // Activity-log Revert flow — marks the new snapshot as a reverse-of-X.
+            'reverts' => 'sometimes|nullable|string|max:64',
         ]);
 
         // Verify hashes upfront — fail-fast 409 if any conflict before we
@@ -287,6 +290,7 @@ class UrlChangerController extends CpController
             'entry_hashes' => $allHashes,
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
+            'reverts' => $validated['reverts'] ?? null,
         ], 600);
 
         \Illuminate\Support\Facades\Cache::put('linkwise:urlchanger:status', [
