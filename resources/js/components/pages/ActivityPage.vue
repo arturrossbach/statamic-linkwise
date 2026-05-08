@@ -136,9 +136,18 @@
                     </ul>
                 </Alert>
 
+                <!-- Operation summary header — surfaces the uniform parts of
+                     the operation (anchor, target, search term) once at the
+                     top, so the table doesn't have to repeat them per row.
+                     Mirrors how the DetailModal / SuggestionModal show the
+                     intro paragraph above the items table — same convention. -->
+                <div class="mb-3 rounded-md bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/60 p-3 text-sm leading-relaxed">
+                    <p class="text-gray-700 dark:text-gray-300" v-html="operationSummary"></p>
+                </div>
+
                 <div class="flex items-center justify-between mb-2 gap-3">
                     <p class="text-xs text-gray-500 dark:text-gray-400">
-                        <strong>{{ detail.entries.length }}</strong> {{ detail.entries.length === 1 ? 'entry' : 'entries' }} were affected:
+                        <strong>{{ detail.entries.length }}</strong> {{ detail.entries.length === 1 ? 'entry' : 'entries' }} affected:
                     </p>
                     <a
                         v-if="detail.deep_link_url_changer"
@@ -150,6 +159,13 @@
                     </a>
                 </div>
 
+                <!-- Kind-aware columns — each operation has a different
+                     "interesting middle column" the way the DetailModal /
+                     SuggestionModal pick different middle columns by mode.
+                     applyrule + bulkunlink omit it (uniform via the header);
+                     detailunlink shows the anchor+url removed; urlchanger
+                     shows the URL swap; inbound/outbound-insert show the
+                     anchor + target entry. -->
                 <Panel>
                     <div class="overflow-x-auto">
                         <table data-size="sm" class="data-table w-full text-sm">
@@ -157,20 +173,14 @@
                                 <tr>
                                     <th scope="col" class="text-left">
                                         <div class="inline-flex items-center gap-1">
-                                            Affected entry
-                                            <HelpIcon tooltip="The entry where Linkwise wrote — i.e. for an Apply-Rule run, the entry whose content received the new link; for a Detail-modal Bulk Unlink, the entry whose links were removed; for a URL Changer batch, the entry whose URLs were swapped. Click the title to open it in Statamic. The 'What happened' column shows the target / counterpart of each change." />
+                                            {{ entryColumnLabel }}
+                                            <HelpIcon :tooltip="entryColumnTooltip" />
                                         </div>
                                     </th>
-                                    <th scope="col" class="text-left">
+                                    <th v-if="extraColumnLabel" scope="col" class="text-left">
                                         <div class="inline-flex items-center gap-1">
-                                            Collection
-                                            <HelpIcon tooltip="The Statamic collection this entry belongs to." />
-                                        </div>
-                                    </th>
-                                    <th scope="col" class="text-left">
-                                        <div class="inline-flex items-center gap-1">
-                                            What happened
-                                            <HelpIcon tooltip="Per-entry summary of the change Linkwise applied: the anchor text, target URL, or before/after URLs depending on the operation." />
+                                            {{ extraColumnLabel }}
+                                            <HelpIcon :tooltip="extraColumnTooltip" />
                                         </div>
                                     </th>
                                     <th scope="col" class="text-left">
@@ -186,12 +196,10 @@
                                     <td>
                                         <a v-if="e.edit_url" :href="e.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ e.title }}</a>
                                         <span v-else>{{ e.title }}</span>
+                                        <span v-if="e.collection" class="ml-2 text-xs text-gray-400">{{ e.collection }}</span>
                                     </td>
-                                    <td class="text-xs text-gray-500">{{ e.collection || '—' }}</td>
-                                    <td class="text-xs text-gray-600 dark:text-gray-400">
-                                        <div v-if="entryActionLines(e).length > 0" class="space-y-0.5">
-                                            <div v-for="(line, i) in entryActionLines(e)" :key="i" class="leading-snug" v-html="line"></div>
-                                        </div>
+                                    <td v-if="extraColumnLabel" class="text-xs text-gray-600 dark:text-gray-400">
+                                        <div v-if="entryExtraCell(e)" class="space-y-0.5" v-html="entryExtraCell(e)"></div>
                                         <span v-else class="text-gray-400">—</span>
                                     </td>
                                     <td class="text-xs">
@@ -315,6 +323,97 @@ export default {
             if (!this.detail) return '';
             return this.revertExplanation;
         },
+
+        // ─── Kind-aware drawer chrome ─────────────────────────────────
+        // The summary block + the table columns vary by snapshot kind so
+        // the activity-log feels like the original DetailModal / Suggestion-
+        // Modal, where every mode shows the columns that matter for that op.
+
+        /** One-paragraph summary of what the operation did. Anchor + target
+         *  for uniform ops (single-rule apply), counts for non-uniform ones. */
+        operationSummary() {
+            if (!this.detail) return '';
+            const snap = this.detail.snapshot;
+            const sum = snap.summary || {};
+            const items = snap.items || [];
+            const n = (snap.entry_count_total ?? snap.entry_ids?.length ?? 0);
+            const firstItem = items[0] || {};
+
+            if (snap.kind === 'applyrule') {
+                if (sum.mode === 'multi-rule') {
+                    return `Applied <strong>${sum.total_rules || items.length}</strong> auto-link rules — <strong>${sum.total_links_added || 0}</strong> link${(sum.total_links_added || 0) === 1 ? '' : 's'} inserted across <strong>${n}</strong> entries.`;
+                }
+                const anchor = sum.rule_keyword ? `<span class="font-mono">"${this.escape(sum.rule_keyword)}"</span>` : 'rule';
+                const target = this.targetLabel(firstItem, 'url');
+                return `Inserted ${anchor} → ${target} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+            }
+            if (snap.kind === 'detailunlink') {
+                const mode = sum.source_mode || 'inbound';
+                const titleHtml = sum.entry_title ? `<strong>"${this.escape(sum.entry_title)}"</strong>` : '<em>this entry</em>';
+                if (mode === 'inbound') {
+                    return `Removed <strong>${items.length}</strong> inbound link${items.length === 1 ? '' : 's'} pointing to ${titleHtml} — across ${n} source ${n === 1 ? 'entry' : 'entries'}.`;
+                }
+                return `Removed <strong>${items.length}</strong> outbound link${items.length === 1 ? '' : 's'} from ${titleHtml}.`;
+            }
+            if (snap.kind === 'inboundinsert') {
+                const titleHtml = sum.entry_title ? `<strong>"${this.escape(sum.entry_title)}"</strong>` : '<em>the target entry</em>';
+                return `Inserted <strong>${items.length}</strong> inbound link${items.length === 1 ? '' : 's'} pointing to ${titleHtml} — across ${n} source ${n === 1 ? 'entry' : 'entries'}.`;
+            }
+            if (snap.kind === 'outboundinsert') {
+                const titleHtml = sum.entry_title ? `<strong>"${this.escape(sum.entry_title)}"</strong>` : '<em>the source entry</em>';
+                return `Inserted <strong>${items.length}</strong> outbound link${items.length === 1 ? '' : 's'} from ${titleHtml}.`;
+            }
+            if (snap.kind === 'urlchanger') {
+                if (sum.search) {
+                    const action = sum.action === 'unlink' ? 'Unlinked' : 'Replaced';
+                    return `${action} URLs matching <span class="font-mono">"${this.escape(sum.search)}"</span> across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'} (<strong>${items.length}</strong> URL${items.length === 1 ? '' : 's'} in total).`;
+                }
+                return `Replaced <strong>${items.length}</strong> URL${items.length === 1 ? '' : 's'} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+            }
+            if (snap.kind === 'bulkunlink') {
+                return `Removed <strong>${items.length}</strong> broken link${items.length === 1 ? '' : 's'} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+            }
+            return `Operation affected <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+        },
+
+        /** Header for the first table column. Different ops have different
+         *  natural names for the entry being modified. */
+        entryColumnLabel() {
+            const k = this.detail?.snapshot?.kind || '';
+            if (k === 'inboundinsert' || k === 'detailunlink') {
+                const mode = this.detail?.snapshot?.summary?.source_mode || 'inbound';
+                if (mode === 'inbound') return 'Source entry';
+            }
+            return 'Affected entry';
+        },
+
+        entryColumnTooltip() {
+            const k = this.detail?.snapshot?.kind || '';
+            if (k === 'inboundinsert' || (k === 'detailunlink' && this.detail?.snapshot?.summary?.source_mode === 'inbound')) {
+                return 'The entry that contains (or contained) the link — i.e. the source side of the link relationship. Click to open in Statamic.';
+            }
+            return 'The entry where Linkwise wrote — its content received the change. Click to open in Statamic.';
+        },
+
+        /** Per-kind extra column — null means "no extra column, header carries
+         *  enough context". Returned object: { label, tooltip }. */
+        extraColumnConfig() {
+            const k = this.detail?.snapshot?.kind || '';
+            if (k === 'detailunlink') {
+                return { label: 'Removed link', tooltip: 'The link Linkwise removed from this entry — anchor text plus its destination URL.' };
+            }
+            if (k === 'urlchanger') {
+                return { label: 'URL change', tooltip: 'Old URL replaced by the new URL on this entry.' };
+            }
+            if (k === 'inboundinsert' || k === 'outboundinsert') {
+                return { label: 'Anchor → Target', tooltip: 'The anchor text Linkwise inserted, plus the entry it now points at.' };
+            }
+            // applyrule + bulkunlink + multi-rule applyrule: header carries it.
+            return null;
+        },
+
+        extraColumnLabel() { return this.extraColumnConfig?.label || null; },
+        extraColumnTooltip() { return this.extraColumnConfig?.tooltip || ''; },
     },
 
     methods: {
@@ -526,6 +625,30 @@ export default {
                 }
                 return '';
             }).filter(Boolean);
+        },
+
+        // Per-row content for the kind-aware extra column (the middle one
+        // between Affected entry and Status). Returns HTML, rendered via
+        // v-html. Mirrors how the original DetailModal / SuggestionModal
+        // pick a different per-item summary based on mode.
+        entryExtraCell(e) {
+            const k = this.detail?.snapshot?.kind || '';
+            const items = e.items || [];
+            if (items.length === 0) return '';
+            const lines = items.map(it => {
+                const anchor = it.anchor_text ? `<span class="font-mono">"${this.escape(it.anchor_text)}"</span>` : '';
+                if (k === 'detailunlink') {
+                    return `${anchor || '<em>link</em>'} → ${this.targetLabel(it, 'matched_url')}`;
+                }
+                if (k === 'urlchanger') {
+                    return `${this.targetLabel(it, 'matched_url')} <span class="text-gray-400">→</span> ${this.targetLabel(it, 'new_url')}`;
+                }
+                if (k === 'inboundinsert' || k === 'outboundinsert') {
+                    return `${anchor || '<em>link</em>'} → ${this.targetLabel(it, 'target_entry_id')}`;
+                }
+                return '';
+            }).filter(Boolean);
+            return lines.map(l => `<div class="leading-snug">${l}</div>`).join('');
         },
 
         // Render a target reference: prefer the resolved entry title (with
