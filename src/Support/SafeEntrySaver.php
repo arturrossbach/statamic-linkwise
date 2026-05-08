@@ -74,6 +74,13 @@ class SafeEntrySaver
         // would be blocked too, which is the wrong default.
         ContentSafetyValidator::ensureNoNewViolations($current, $entry);
 
+        // Link-coverage runtime gate (added 2026-05-08 after Bug B):
+        // refuse saves that partially destroy an existing link mark.
+        // Last line of defense if a future code path slips past the
+        // walker's partial-overlap skip — fail-closed protects user data
+        // even when tests have a coverage gap.
+        ContentSafetyValidator::ensureLinkCoveragePreserved($current, $entry);
+
         self::saveWithCascadeGuard($entry);
     }
 

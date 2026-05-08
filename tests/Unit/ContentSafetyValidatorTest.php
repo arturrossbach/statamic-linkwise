@@ -4,8 +4,10 @@ namespace Arturrossbach\Linkwise\Tests\Unit;
 
 use Arturrossbach\Linkwise\Exceptions\ContentCorruptionException;
 use Arturrossbach\Linkwise\Support\ContentSafetyValidator;
+use Mockery;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
+use Statamic\Entries\Entry;
 
 /**
  * Last-line-of-defense tests. Each one represents a corruption pattern
@@ -326,5 +328,254 @@ class ContentSafetyValidatorTest extends TestCase
 
         $this->assertSame(2, $counts['body::reason-A']);
         $this->assertSame(1, $counts['body::reason-B']);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Link-coverage runtime gate (Bug B class — partial-overlap split).
+    //
+    // Domain rule: for each href in $before with N>0 linked chars, $after
+    // must have either ≥N (preserved/extended) OR 0 (deliberate removal).
+    // 0 < after < before is the "shortened-without-removal" pattern that
+    // Bug B produced. SafeEntrySaver::save calls
+    // ensureLinkCoveragePreserved as the last write-gate — fail-closed.
+    //
+    // The cases below cover every permutation of legitimate vs. corrupt
+    // diff between two entry states. Tests use Mockery-mocked Entry stubs
+    // because the real Statamic Entry's blueprint+fields chain is
+    // expensive to construct in a unit test and orthogonal to the logic
+    // under test.
+    // ─────────────────────────────────────────────────────────────────────
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+        parent::tearDown();
+    }
+
+    /**
+     * Build an Entry mock whose `body` field is a Bard tree. The Entry's
+     * blueprint reports a single bard-typed field, so $entry->get('body')
+     * returns the supplied content. Sufficient surface for the
+     * ensureLinkCoveragePreserved walk.
+     */
+    private function entryWithBard(array $bardContent, string $id = 'test-entry'): Entry
+    {
+        $field = Mockery::mock();
+        $field->shouldReceive('type')->andReturn('bard');
+
+        $fieldsCollection = Mockery::mock();
+        $fieldsCollection->shouldReceive('all')->andReturn(['body' => $field]);
+
+        $blueprint = Mockery::mock();
+        $blueprint->shouldReceive('fields')->andReturn($fieldsCollection);
+
+        $entry = Mockery::mock(Entry::class);
+        $entry->shouldReceive('id')->andReturn($id);
+        $entry->shouldReceive('blueprint')->andReturn($blueprint);
+        $entry->shouldReceive('get')->with('body')->andReturn($bardContent);
+
+        return $entry;
+    }
+
+    public function test_link_coverage_unchanged_passes(): void
+    {
+        // Idempotent save (no edits) must not trigger the gate.
+        $bard = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Hello world', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic://entry::a']],
+            ]],
+        ]]];
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved(
+            $this->entryWithBard($bard),
+            $this->entryWithBard($bard),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_link_coverage_full_removal_passes(): void
+    {
+        // DetailUnlink / URL-Changer remove the entire linked phrase.
+        // After: no link mark with that href anywhere → coverage = 0.
+        // 0 is the "deliberate removal" branch — must NOT throw.
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Hello world', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::a']],
+            ]],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Hello world'],
+        ]]];
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_link_coverage_url_upgrade_full_replace_passes(): void
+    {
+        // URL-Changer's primary use case: replace one href with another
+        // for the SAME text span. Old href: chars=N → 0. New href:
+        // 0 → N. Both transitions are at the boundary, both legitimate.
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Hello world', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'https://old.example.com']],
+            ]],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Hello world', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic://entry::new']],
+            ]],
+        ]]];
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_link_coverage_new_link_addition_passes(): void
+    {
+        // LinkInsert in plain text: no pre-existing link to preserve.
+        // Before has no link with the new href → no constraint applies.
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Hello world'],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Hello '],
+            ['type' => 'text', 'text' => 'world', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::new']],
+            ]],
+        ]]];
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_link_coverage_extension_passes(): void
+    {
+        // Auto-Link rule running multiple times can grow the linked-char
+        // count for a single href when an additional occurrence becomes
+        // a match. Before=N, after=N+M is monotonic-grow → allowed.
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Mention '],
+            ['type' => 'text', 'text' => 'Brauner', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::brauner']],
+            ]],
+            ['type' => 'text', 'text' => ' once. Mention Brauner twice.'],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Mention '],
+            ['type' => 'text', 'text' => 'Brauner', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::brauner']],
+            ]],
+            ['type' => 'text', 'text' => ' once. Mention '],
+            ['type' => 'text', 'text' => 'Brauner', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::brauner']],
+            ]],
+            ['type' => 'text', 'text' => ' twice.'],
+        ]]];
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_link_coverage_partial_destruction_throws(): void
+    {
+        // Bug B in minimal form. Before: ONE node "Brauner-Zucker-Speck-
+        // Kekse" linked to X. After: split into "Brauner"(Y) +
+        // "-Zucker-Speck-Kekse"(X). Coverage of X drops 26 → 18 — partial
+        // destruction. Gate must throw and abort the save.
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Brauner-Zucker-Speck-Kekse', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::cookies']],
+            ]],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Brauner', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::pasta']],
+            ]],
+            ['type' => 'text', 'text' => '-Zucker-Speck-Kekse', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::cookies']],
+            ]],
+        ]]];
+
+        $this->expectException(ContentCorruptionException::class);
+        $this->expectExceptionMessageMatches('/shorten an existing link/');
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+    }
+
+    public function test_link_coverage_throws_when_existing_link_partially_unlinked(): void
+    {
+        // Adjacent variant: half of the linked phrase becomes plain
+        // text. Coverage of X drops, no replacement href takes over.
+        // Still partial destruction, must throw.
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Brauner-Zucker-Speck-Kekse', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::cookies']],
+            ]],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Brauner'],
+            ['type' => 'text', 'text' => '-Zucker-Speck-Kekse', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::cookies']],
+            ]],
+        ]]];
+
+        $this->expectException(ContentCorruptionException::class);
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+    }
+
+    public function test_link_coverage_skips_field_with_unsupported_type(): void
+    {
+        // Plain `text` / `textarea` fields are intentionally not walked
+        // (Linkwise's retreat — those render as plaintext). The gate
+        // must not blow up on entries whose blueprint has only such
+        // fields. Mirrors the existing collectViolations pattern: get()
+        // is called unconditionally per handle, then the type-switch
+        // decides whether to walk.
+        $field = Mockery::mock();
+        $field->shouldReceive('type')->andReturn('text');
+        $coll = Mockery::mock();
+        $coll->shouldReceive('all')->andReturn(['headline' => $field]);
+        $bp = Mockery::mock();
+        $bp->shouldReceive('fields')->andReturn($coll);
+
+        $entry = Mockery::mock(Entry::class);
+        $entry->shouldReceive('id')->andReturn('plain');
+        $entry->shouldReceive('blueprint')->andReturn($bp);
+        $entry->shouldReceive('get')->with('headline')->andReturn('Just plain prose.');
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved($entry, $entry);
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_link_coverage_handles_missing_blueprint(): void
+    {
+        // Entry with no blueprint resolves to empty coverage map →
+        // no comparisons → no false positives.
+        $entry = Mockery::mock(Entry::class);
+        $entry->shouldReceive('id')->andReturn('no-bp');
+        $entry->shouldReceive('blueprint')->andThrow(new \RuntimeException('no blueprint'));
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved($entry, $entry);
+        $this->expectNotToPerformAssertions();
     }
 }

@@ -71,6 +71,171 @@ class ContentSafetyValidator
     }
 
     /**
+     * Runtime gate against partial destruction of an existing link.
+     *
+     * Real bug 2026-05-08 (Bug B): a single Bard text node "Brauner-Zucker-
+     * Speck-Kekse" linked to entry X. An Outbound suggestion proposed
+     * anchor "Brauner" → entry Y. The single-walker split the linked
+     * text node into "Brauner"(Y) + "-Zucker-Speck-Kekse"(X). The original
+     * link was torn in half, the user lost trust in revert.
+     *
+     * The walker fix (BardLinkInserter::findAndLinkInChildren — refuse
+     * partial-overlap matches) closes the known path. THIS check closes
+     * any future path that gets the same effect by a different route:
+     * for each href in $before with N>0 linked chars, $after must have
+     * either >=N chars (preserved or extended) OR 0 chars (deliberate
+     * removal). 0 < after < before is partial destruction → throw.
+     *
+     * Cases this allows (legitimate):
+     *   - LinkInsert (0 → N for new href)
+     *   - DetailUnlink (N → 0 for removed href)
+     *   - URL-Changer full replace (N → 0 for old href, 0 → N for new)
+     *   - Auto-Link extension (N → N+M when an additional occurrence got linked)
+     *
+     * Case this refuses (corruption):
+     *   - Bug B partial overlap (26 → 18 for the original href)
+     *   - Any future code path that destructures linked text into
+     *     adjacent fragments with different marks
+     *
+     * @throws ContentCorruptionException
+     */
+    public static function ensureLinkCoveragePreserved(Entry $before, Entry $after): void
+    {
+        $beforeCoverage = self::collectLinkCoverage($before);
+        $afterCoverage = self::collectLinkCoverage($after);
+
+        foreach ($beforeCoverage as $field => $hrefMap) {
+            foreach ($hrefMap as $href => $beforeChars) {
+                if ($beforeChars <= 0) continue;
+                $afterChars = $afterCoverage[$field][$href] ?? 0;
+
+                // 0 < after < before → partial destruction.
+                if ($afterChars > 0 && $afterChars < $beforeChars) {
+                    throw new ContentCorruptionException(
+                        $after->id() ?? '?',
+                        $field,
+                        sprintf(
+                            'this save would shorten an existing link without removing it: '
+                            .'href "%s" had %d linked chars before, %d after (partial-overlap split detected)',
+                            $href,
+                            $beforeChars,
+                            $afterChars,
+                        ),
+                        sprintf('href=%s before=%d after=%d', $href, $beforeChars, $afterChars),
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Per-field, per-href total character count of linked text.
+     *
+     * @return array<string, array<string, int>>  [fieldHandle => [href => totalChars]]
+     */
+    protected static function collectLinkCoverage(Entry $entry): array
+    {
+        $coverage = [];
+
+        try {
+            $fields = $entry->blueprint()->fields()->all();
+        } catch (\Throwable) {
+            return $coverage;
+        }
+
+        foreach ($fields as $handle => $field) {
+            $value = $entry->get($handle);
+            $key = (string) $handle;
+
+            if ($field->type() === 'bard' && is_array($value) && ! empty($value)) {
+                $hrefs = [];
+                self::sumLinkCharsInBard($value, $hrefs);
+                $coverage[$key] = $hrefs;
+            } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
+                $hrefs = [];
+                self::sumLinkCharsInReplicator($value, $hrefs);
+                $coverage[$key] = $hrefs;
+            } elseif ($field->type() === 'markdown' && is_string($value) && $value !== '') {
+                $coverage[$key] = self::sumLinkCharsInMarkdown($value);
+            }
+        }
+
+        return $coverage;
+    }
+
+    /**
+     * Walk a Bard tree, accumulate href → linked-chars sums.
+     *
+     * @param  array  $content  ProseMirror node array
+     * @param  array<string, int>  $out
+     */
+    protected static function sumLinkCharsInBard(array $content, array &$out): void
+    {
+        foreach ($content as $node) {
+            if (! is_array($node)) continue;
+
+            if (($node['type'] ?? '') === 'text') {
+                $text = (string) ($node['text'] ?? '');
+                if ($text !== '') {
+                    foreach ($node['marks'] ?? [] as $mark) {
+                        if (! is_array($mark) || ($mark['type'] ?? '') !== 'link') continue;
+                        $href = (string) ($mark['attrs']['href'] ?? '');
+                        if ($href === '') continue;
+                        $out[$href] = ($out[$href] ?? 0) + mb_strlen($text);
+                    }
+                }
+            }
+
+            if (isset($node['content']) && is_array($node['content'])) {
+                self::sumLinkCharsInBard($node['content'], $out);
+            }
+        }
+    }
+
+    /**
+     * Walk a Replicator value, accumulate per-href linked chars from
+     * nested Bard fragments.
+     *
+     * @param  array<string, int>  $out
+     */
+    protected static function sumLinkCharsInReplicator(array $sets, array &$out): void
+    {
+        foreach ($sets as $set) {
+            if (! is_array($set)) continue;
+            foreach ($set as $key => $value) {
+                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
+                    continue;
+                }
+                if (ProseMirrorTypes::looksLikeBardContent($value)) {
+                    self::sumLinkCharsInBard($value, $out);
+                } elseif (isset($value[0]['type'], $value[0]['id'])) {
+                    self::sumLinkCharsInReplicator($value, $out);
+                }
+            }
+        }
+    }
+
+    /**
+     * Parse [anchor](href) markdown links, sum mb_strlen(anchor) per href.
+     *
+     * @return array<string, int>
+     */
+    protected static function sumLinkCharsInMarkdown(string $markdown): array
+    {
+        $out = [];
+        if (! preg_match_all('/\[([^\]]*)\]\(([^\)]+)\)/u', $markdown, $matches)) {
+            return $out;
+        }
+        foreach ($matches[1] as $i => $anchor) {
+            $href = $matches[2][$i];
+            if ($href === '') continue;
+            $out[$href] = ($out[$href] ?? 0) + mb_strlen((string) $anchor);
+        }
+
+        return $out;
+    }
+
+    /**
      * Diff-based validation. Compares violation set in $before vs $after.
      * Throws ONLY when $after has more violations of any (field, reason)
      * tuple than $before — i.e., when this save introduced new corruption.
