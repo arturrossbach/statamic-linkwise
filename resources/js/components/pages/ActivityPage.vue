@@ -56,8 +56,11 @@
                                 {{ snap.started_by || '—' }}
                             </td>
                             <td class="whitespace-nowrap text-xs">
-                                <span class="font-medium">{{ snap.entry_count_total }}</span>
-                                <span class="text-gray-400 ml-1">{{ snap.entry_count_total === 1 ? 'entry' : 'entries' }}</span>
+                                <span class="font-medium">{{ effectiveEntryCount(snap) }}</span>
+                                <span class="text-gray-400 ml-1">{{ effectiveEntryCount(snap) === 1 ? 'entry' : 'entries' }}</span>
+                                <span v-if="entrySkipDelta(snap) > 0" class="text-amber-600 dark:text-amber-400 ml-1" v-tooltip="entrySkipDelta(snap) + ' entry was modified between bulk and revert and was left untouched. See drawer for details.'">
+                                    ({{ entrySkipDelta(snap) }} skipped)
+                                </span>
                             </td>
                             <td class="text-xs text-gray-500 dark:text-gray-400">
                                 <span v-if="snap.summary && summaryLabel(snap)">{{ summaryLabel(snap) }}</span>
@@ -130,14 +133,19 @@
                     </p>
                 </Alert>
 
-                <!-- Skipped-during-revert table — surfaces the entries that
-                     a revert dispatched against this snapshot couldn't
-                     process (hash mismatch from user edits, deleted entry,
-                     etc.). Only meaningful for snapshots that have BEEN
-                     reverted (reverted_at set) AND have skip records. -->
+                <!-- Skipped-entries table — entries that this snapshot's bulk
+                     run touched but couldn't write (hash mismatch from user
+                     edits, deleted entry, etc.). Surfaces as a banner above
+                     the main entries table. Two render modes:
+                       - Looking at this snapshot AS THE BULK: "X entries
+                         were skipped during this run".
+                       - Looking at an ORIGINAL snapshot AFTER it was
+                         reverted: "X entries were skipped during the revert".
+                     The skipped rows are also EXCLUDED from sortedDetailEntries
+                     so the main table doesn't show them as empty rows. -->
                 <Alert v-if="hasSkippedDuringRevert" variant="warning" class="mb-3">
                     <p class="text-sm font-medium mb-2">
-                        ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during the revert because of changes made since this bulk ran. Their content is intact — Linkwise refused to overwrite them.
+                        ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during {{ skippedScopeLabel }} because of changes made since the bulk ran. Their content is intact — Linkwise refused to overwrite them.
                     </p>
                     <div class="overflow-x-auto">
                         <table class="data-table w-full text-xs">
@@ -186,7 +194,7 @@
 
                 <div class="flex items-center justify-between mb-2 gap-3">
                     <p class="text-xs text-gray-500 dark:text-gray-400">
-                        <strong>{{ detail.entries.length }}</strong> {{ detail.entries.length === 1 ? 'entry' : 'entries' }} affected:
+                        <strong>{{ sortedDetailEntries.length }}</strong> {{ sortedDetailEntries.length === 1 ? 'entry' : 'entries' }} affected:
                     </p>
                     <a
                         v-if="detail.deep_link_url_changer"
@@ -247,7 +255,18 @@
                                     </td>
                                     <td class="text-xs">
                                         <span v-if="e.status === 'unknown'" class="text-gray-400" v-tooltip="'This snapshot was recorded before per-entry post-hash tracking shipped — comparison with the current state is not possible.'">—</span>
-                                        <Badge v-else :variant="statusVariant(e.status)" :text="statusLabel(e.status)" />
+                                        <template v-else>
+                                            <Badge :variant="statusVariant(e.status)" :text="statusLabel(e.status)" />
+                                            <!-- Per-row skip preview: when this snapshot is revertable
+                                                 and not-yet-reverted, mark every modified/deleted row
+                                                 as one that the Revert action would skip. The drawer's
+                                                 Revert card shows the aggregate count; this surfaces
+                                                 the same fact at row level so users can spot which
+                                                 specific entries are at stake. -->
+                                            <div v-if="wouldBeSkippedOnRevert(e)" class="mt-0.5 text-amber-700 dark:text-amber-400 text-xs">
+                                                → skipped on revert
+                                            </div>
+                                        </template>
                                     </td>
                                 </tr>
                             </tbody>
@@ -339,20 +358,29 @@ export default {
 
         /** Drawer rows sorted by drawerSortField. Same shape as the original
          *  Suggestion / Detail modals — separate state so the listing's sort
-         *  isn't clobbered. */
+         *  isn't clobbered.
+         *
+         *  Filters out entries listed in revert_skipped: those rendered in
+         *  the dedicated skipped-entries table above (with reason + modified-
+         *  by info), so re-listing them here as empty rows would be both
+         *  redundant and misleading ("affected" implies the entry was
+         *  written; skipped entries weren't). */
         sortedDetailEntries() {
             if (!this.detail?.entries) return [];
+            const skippedIds = new Set(this.skippedDuringRevert.map(r => r.entry_id));
             const f = this.drawerSortField;
             const dir = this.drawerSortDirection === 'asc' ? 1 : -1;
-            return [...this.detail.entries].sort((a, b) => {
-                let av, bv;
-                if (f === 'collection') { av = a.collection || ''; bv = b.collection || ''; }
-                else if (f === 'status') { av = a.status || ''; bv = b.status || ''; }
-                else { av = (a.title || '').toLowerCase(); bv = (b.title || '').toLowerCase(); }
-                if (av < bv) return -1 * dir;
-                if (av > bv) return 1 * dir;
-                return 0;
-            });
+            return [...this.detail.entries]
+                .filter(e => !skippedIds.has(e.id))
+                .sort((a, b) => {
+                    let av, bv;
+                    if (f === 'collection') { av = a.collection || ''; bv = b.collection || ''; }
+                    else if (f === 'status') { av = a.status || ''; bv = b.status || ''; }
+                    else { av = (a.title || '').toLowerCase(); bv = (b.title || '').toLowerCase(); }
+                    if (av < bv) return -1 * dir;
+                    if (av > bv) return 1 * dir;
+                    return 0;
+                });
         },
 
         /** Toggle for the drawer sort — the mixin's toggleSort works on
@@ -581,21 +609,34 @@ export default {
             return Math.max(0, this.revertableSummary.revertableItems - skippable);
         },
 
-        /** True when this snapshot has been reverted AND the revert
-         *  recorded per-entry skip records. The skipped table only
-         *  makes sense post-revert — pre-revert nothing has been skipped. */
+        /** True when this snapshot has skip records — surfaces as a
+         *  separate "skipped entries" table above the main affected list.
+         *  Two cases produce records:
+         *    - The snapshot IS a bulk run that hit conflicts (skipped its
+         *      own entries) — recordRevertSkipped on $snapshotId.
+         *    - The snapshot's bulk WAS reverted by a later run that hit
+         *      conflicts — recordRevertSkipped on $reverts.
+         *  Either way the field is non-empty here; rendering is the same. */
         hasSkippedDuringRevert() {
-            const snap = this.detail?.snapshot;
-            if (! snap?.reverted_at) return false;
-            const skipped = snap.revert_skipped;
+            const skipped = this.detail?.snapshot?.revert_skipped;
             return Array.isArray(skipped) && skipped.length > 0;
         },
 
-        /** The skip records as written by the revert command. Each record:
+        /** The skip records as written by the bulk command. Each record:
          *  {entry_id, entry_title, reason, modified_by?, modified_at?,
          *   edit_url?, collection?}. */
         skippedDuringRevert() {
             return this.detail?.snapshot?.revert_skipped || [];
+        },
+
+        /** Wording for the skipped-table banner. "this run" when the
+         *  snapshot itself is the bulk that skipped (e.g. an Apply Rule
+         *  with one conflict-skipped entry, or a revert dispatch that
+         *  skipped 1 of N). "the revert" when looking at an ORIGINAL
+         *  snapshot post-revert — the skip records there describe what
+         *  the revert run hit, not the original bulk. */
+        skippedScopeLabel() {
+            return this.detail?.snapshot?.reverted_at ? 'the revert' : 'this run';
         },
 
         /** Drives the optional Context column. Per-kind: kinds whose items
@@ -756,6 +797,40 @@ export default {
             }[kind] || 'default');
         },
 
+        /** Net entries-affected count for the listing column. The raw
+         *  entry_count_total is captured at snapshot.record() time and
+         *  counts every entry the bulk TRIED to write — it doesn't yet
+         *  know which writes will get conflict-skipped. We subtract the
+         *  skip records, but only for snapshots whose own run produced
+         *  the skips (revert snapshots and original bulks): for ORIGINAL
+         *  snapshots a later revert can also append skip records, and
+         *  those describe the revert's behavior, not this bulk's. We
+         *  proxy "skipped during this run" via completion_stats.skipped
+         *  when present — a count, not a list, so we cap at the recorded
+         *  list length. */
+        effectiveEntryCount(snap) {
+            const total = snap.entry_count_total ?? (snap.entry_ids || []).length ?? 0;
+            const skipDelta = this.entrySkipDelta(snap);
+            return Math.max(0, total - skipDelta);
+        },
+
+        /** How many of this snapshot's recorded skip records describe
+         *  THIS bulk's own conflict-skips (vs skip records appended by
+         *  a later revert run targeting an original snapshot). */
+        entrySkipDelta(snap) {
+            const recordedSkips = (snap.revert_skipped || []).length;
+            // Revert snapshots — every recorded skip is from this run.
+            if (snap.summary && snap.summary.reverts) return recordedSkips;
+            // Original snapshots — completion_stats.skipped counts items,
+            // not entries. We approximate "entries skipped during this run"
+            // by capping recorded skips at the run's skipped-count. If the
+            // snapshot has been reverted, the skips listed include the
+            // revert's skips on top — but on the original we don't know
+            // which is which. Show 0 to avoid misleading the listing.
+            if (snap.reverted_at) return 0;
+            return recordedSkips;
+        },
+
         statusLabel(status) {
             return ({
                 unchanged: 'Unchanged since bulk',
@@ -763,6 +838,19 @@ export default {
                 deleted: 'Deleted',
                 unknown: 'Unknown',
             }[status] || status);
+        },
+
+        /** True when this entry row would be excluded by a Revert action.
+         *  Conditions: snapshot is revertable, not already reverted, and
+         *  the entry's hash diverges from post-bulk (status modified) or
+         *  the entry is gone (deleted). Drives the inline "→ skipped on
+         *  revert" hint under the Status badge so users see at a glance
+         *  which rows feed the aggregate "X will be skipped" count from
+         *  the Revert card above. */
+        wouldBeSkippedOnRevert(entry) {
+            if (! this.canRevert) return false;
+            if (this.detail?.snapshot?.reverted_at) return false;
+            return entry.status === 'modified' || entry.status === 'deleted';
         },
 
         statusVariant(status) {

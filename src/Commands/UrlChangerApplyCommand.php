@@ -167,7 +167,7 @@ class UrlChangerApplyCommand extends Command
                     $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                     $skipped += count($entryReps);
                     $processedReplacements += count($entryReps);
-                    if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                    $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
                     Cache::put('linkwise:urlchanger:status', [
                         'phase' => 'running',
                         'current' => $processedReplacements,
@@ -239,7 +239,7 @@ class UrlChangerApplyCommand extends Command
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
-                if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
@@ -288,8 +288,16 @@ class UrlChangerApplyCommand extends Command
             'skipped' => $skipped,
         ]);
 
-        if ($reverts && ! empty($revertSkippedRecords)) {
-            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+        // Persist per-entry skip records onto THIS snapshot (always) and
+        // — for revert flows — also onto the ORIGINAL snapshot. Drawer
+        // surfaces them as a separate "skipped entries" table above the
+        // main affected-entries list. See DetailUnlinkCommand for the
+        // same pattern.
+        if (! empty($revertSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($snapshotId, $revertSkippedRecords);
+            if ($reverts) {
+                app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+            }
         }
 
         Cache::put('linkwise:urlchanger:status', [

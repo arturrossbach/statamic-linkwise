@@ -178,6 +178,40 @@ class LinkInsertCommand extends Command
                     continue;
                 }
 
+                // Pre-flight hash check: if the entry has been modified
+                // since the snapshot we're reverting from (or since the
+                // request payload was built), skip with a "modified" reason
+                // instead of letting BardLinkInserter overwrite the user's
+                // edits. The activity-log UI promises this — DetailUnlink
+                // and UrlChangerApply enforce it the same way. Without this
+                // check, a revert that the drawer marked as skippable would
+                // silently apply anyway, re-inserting links into entries
+                // the user explicitly edited after the original bulk.
+                if (isset($entryHashes[$sourceEntryId]) && $entryHashes[$sourceEntryId] !== '') {
+                    $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes(
+                        [$sourceEntryId => $entryHashes[$sourceEntryId]],
+                    );
+                    if (! empty($conflicts)) {
+                        $msg = 'Entry was modified by another editor';
+                        $errors[$msg] = ($errors[$msg] ?? 0) + 1;
+                        $skipped++;
+                        $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
+                        Cache::put($statusKey, [
+                            'phase' => 'running',
+                            'current' => $i + 1,
+                            'total' => $total,
+                            'succeeded' => $succeeded,
+                            'skipped' => $skipped,
+                            'source_mode' => $sourceMode,
+                            'entry_title' => $entryTitle,
+                            'started_by' => $startedBy,
+                            'started_by_id' => $startedById,
+                            'heartbeat' => time(),
+                        ], 600);
+                        continue;
+                    }
+                }
+
                 $success = BardLinkInserter::insertLinkIntoEntryWithHref(
                     $sourceEntryId,
                     $anchorText,
@@ -211,7 +245,7 @@ class LinkInsertCommand extends Command
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
-                if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
+                $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
@@ -257,8 +291,16 @@ class LinkInsertCommand extends Command
             'skipped' => $skipped,
         ]);
 
-        if ($reverts && ! empty($revertSkippedRecords)) {
-            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+        // Persist per-entry skip records onto THIS snapshot (always) and
+        // — for revert flows — also onto the ORIGINAL snapshot. Drawer
+        // surfaces them as a separate "skipped entries" table above the
+        // main affected-entries list. See DetailUnlinkCommand for the
+        // same pattern.
+        if (! empty($revertSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($snapshotId, $revertSkippedRecords);
+            if ($reverts) {
+                app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+            }
         }
 
         Cache::put($statusKey, [

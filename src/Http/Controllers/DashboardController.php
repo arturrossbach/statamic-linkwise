@@ -441,6 +441,12 @@ class DashboardController extends CpController
                 'summary' => $snap['summary'] ?? [],
                 'reverted_at' => $snap['reverted_at'] ?? null,
                 'reverted_by' => $snap['reverted_by'] ?? null,
+                // Forwarded so the listing's "Entries affected" cell can
+                // subtract skipped entries via effectiveEntryCount(snap).
+                // Pass the array (not just count) — entrySkipDelta needs
+                // (snap.revert_skipped || []).length on the same shape the
+                // drawer reads.
+                'revert_skipped' => $snap['revert_skipped'] ?? [],
             ];
         }, $snapshots);
 

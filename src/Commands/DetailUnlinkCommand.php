@@ -160,11 +160,12 @@ class DetailUnlinkCommand extends Command
                     $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                     $skipped += count($entryReps);
                     $processedReplacements += count($entryReps);
-                    // For revert flows, persist a per-entry skip record on
-                    // the ORIGINAL snapshot so its drawer can show "these
-                    // entries were skipped because they were modified by
-                    // X on Y". Stored under revert_skipped on the original.
-                    if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                    // Persist a per-entry skip record so the drawer can show
+                    // "these entries were skipped because they were modified
+                    // by X on Y" — both on this snapshot AND, for revert
+                    // flows, on the ORIGINAL snapshot too (recorded after
+                    // the loop below).
+                    $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
                     Cache::put('linkwise:detailunlink:status', [
                         'phase' => 'running',
                         'current' => $processedReplacements,
@@ -242,7 +243,7 @@ class DetailUnlinkCommand extends Command
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
                 // Same per-entry skip-record write as the pre-flight branch.
-                if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
@@ -300,12 +301,18 @@ class DetailUnlinkCommand extends Command
             'skipped' => $skipped,
         ]);
 
-        // Push per-entry skip records back onto the ORIGINAL snapshot when
-        // this run was itself a revert. Lets the original drawer surface
-        // "of N items I tried to revert, here's the M that were skipped
-        // and WHY (modified by X on Y)". No-op when not a revert.
-        if ($reverts && ! empty($revertSkippedRecords)) {
-            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+        // Persist per-entry skip records:
+        //   1. Always onto THIS snapshot — the drawer's skipped-table
+        //      shows "during my run these were skipped" so the activity-log
+        //      reader can tell which entries the bulk left untouched.
+        //   2. For revert flows, also onto the ORIGINAL snapshot so its
+        //      drawer surfaces "of N items I tried to revert, here's the M
+        //      skipped and WHY (modified by X on Y)".
+        if (! empty($revertSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($snapshotId, $revertSkippedRecords);
+            if ($reverts) {
+                app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+            }
         }
 
         Cache::put('linkwise:detailunlink:status', [

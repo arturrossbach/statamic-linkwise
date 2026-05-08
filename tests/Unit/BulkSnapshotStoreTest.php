@@ -175,4 +175,64 @@ class BulkSnapshotStoreTest extends TestCase
             @unlink($blocker);
         }
     }
+
+    public function test_record_revert_skipped_appends_across_multiple_calls(): void
+    {
+        // The 2026-05-08 fix: DetailUnlink, UrlChangerApply and LinkInsert
+        // now write skip records on EVERY conflict — not only when running
+        // as a revert. For original snapshots that get reverted, this means
+        // recordRevertSkipped is called twice: once by the original bulk
+        // for its own conflicts ($snapshotId), once by the revert run for
+        // entries it had to skip ($reverts). Both sets must coexist on the
+        // same snapshot — the drawer reads the merged list. If the second
+        // call clobbered the first, the original bulk's conflicts would
+        // disappear when the revert ran.
+        $store = new BulkSnapshotStore($this->tempDir);
+        $id = $store->record('detailunlink', ['e1', 'e2', 'e3']);
+
+        $store->recordRevertSkipped($id, [
+            ['entry_id' => 'e1', 'reason' => 'modified', 'entry_title' => 'First'],
+        ]);
+        $store->recordRevertSkipped($id, [
+            ['entry_id' => 'e2', 'reason' => 'modified', 'entry_title' => 'Second'],
+            ['entry_id' => 'e3', 'reason' => 'deleted',  'entry_title' => 'Third'],
+        ]);
+
+        $reloaded = $store->get($id);
+        $this->assertCount(3, $reloaded['revert_skipped']);
+        $this->assertSame('e1', $reloaded['revert_skipped'][0]['entry_id']);
+        $this->assertSame('e2', $reloaded['revert_skipped'][1]['entry_id']);
+        $this->assertSame('e3', $reloaded['revert_skipped'][2]['entry_id']);
+        $this->assertSame('deleted', $reloaded['revert_skipped'][2]['reason']);
+    }
+
+    public function test_record_revert_skipped_no_op_on_empty_array(): void
+    {
+        // Defensive — every command issues this call unconditionally now,
+        // so an "always-record" pattern with zero conflicts must NOT
+        // initialise revert_skipped to []. Drawers test
+        // Array.isArray(skipped) && skipped.length > 0 — an empty array
+        // would still be truthy on the array side but cleaner not to write.
+        $store = new BulkSnapshotStore($this->tempDir);
+        $id = $store->record('linkinsert', ['e1']);
+
+        $store->recordRevertSkipped($id, []);
+
+        $reloaded = $store->get($id);
+        $this->assertArrayNotHasKey('revert_skipped', $reloaded);
+    }
+
+    public function test_record_revert_skipped_no_op_when_snapshot_missing(): void
+    {
+        // Snapshot directory cleaned up between record and revert (e.g.
+        // 30-day auto-prune fired during a long-running revert) — must
+        // not throw, the revert proceeds even without forensic context.
+        $store = new BulkSnapshotStore($this->tempDir);
+
+        $store->recordRevertSkipped('does-not-exist', [
+            ['entry_id' => 'e1', 'reason' => 'modified'],
+        ]);
+
+        $this->assertTrue(true); // reached without throwing
+    }
 }
