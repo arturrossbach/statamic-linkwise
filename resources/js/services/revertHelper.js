@@ -21,7 +21,9 @@
  *   detailunlink           ❌ V1 — re-insert is fragile (anchor must still
  *                              exist in the entry text after intervening edits)
  *   bulkunlink             ❌ never — broken-link removals shouldn't re-link
- *   applyrule (multi-rule) ❌ V1 — no per-entry items, only rule list
+ *   applyrule (multi-rule) ✅ each rule is now its own single-rule snapshot
+ *                            (handleMultiple split, batch_id ties them
+ *                            together for listing — revert is per-rule)
  *
  * The UI layer reads `isReversible()` to enable/disable the Revert button
  * and `buildRevertRequest()` to obtain the {url, payload, kindLabel} tuple
@@ -49,6 +51,11 @@ export function isReversible(snapshot) {
 
     const kind = snapshot.kind;
     if (kind === 'bulkunlink') return false;
+    // Note: multi-rule "Apply Selected" no longer creates a single
+    // mode='multi-rule' snapshot — handleMultiple now splits into N
+    // single-rule snapshots. Each is revertable by the standard applyrule
+    // path. Old snapshots with mode='multi-rule' (pre-split) stay
+    // unrevertable via the legacy reason in nonReversibleReason.
     if (kind === 'applyrule' && snapshot.summary?.mode === 'multi-rule') return false;
 
     // Need items to build the inverse payload
@@ -120,7 +127,7 @@ export function nonReversibleReason(snapshot) {
         return 'This unlink snapshot was recorded before per-item anchor capture shipped — Linkwise can\'t reconstruct which text to re-link. Newer unlinks (created from now on) are revertable.';
     }
     if (snapshot.kind === 'applyrule' && snapshot.summary?.mode === 'multi-rule') {
-        return 'Multi-rule applies are not yet revertable in V1 — revert each rule individually from a single-rule activity entry.';
+        return 'This is a legacy multi-rule snapshot from before the per-rule split shipped — items list rules, not entries, so Linkwise can\'t target an inverse bulk. New "Apply Selected" runs create one snapshot per rule, each individually revertable.';
     }
     if (snapshot.kind === 'urlchanger') {
         // Only legacy unlink snapshots without anchor_text fall here now —

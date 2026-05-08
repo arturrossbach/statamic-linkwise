@@ -287,29 +287,16 @@ class ApplyRuleCommand extends Command
             array_merge(array_keys($conflictedEntries), $userExcluded)
         ));
 
-        // Forensic snapshot for the multi-rule batch. We don't have per-entry
-        // pre-hashes here (the hash map covers the union of all rule scopes,
-        // which we use as best-effort); entry IDs are the union from the
-        // payload's entry_hashes (the frontend captures hashes for every entry
-        // visible in the rule-preview tables).
-        //
-        // items=[] start; per-rule per-affected-entry rows are appended via
-        // appendWrittenItem after each rule's apply finishes. That lets
-        // multi-rule reverts work too (V1.1) — every appended item carries
-        // its rule_id + entry_id + keyword + url. The activity-log header
-        // shows "applied N rules", the table lists what really landed.
+        // Multi-rule split: instead of ONE meta-snapshot covering the whole
+        // batch, we write one snapshot PER rule (kind='applyrule', single-
+        // rule shape). This makes every rule individually revertable — the
+        // user can revert just rule #3 of a 10-rule "Apply Selected" without
+        // touching the others. A shared batch_id ties them back together for
+        // future grouping in the activity-log listing (Task #9).
         $batchEntryIds = is_array($entryHashes) ? array_keys($entryHashes) : [];
-        $snapshotId = app(BulkSnapshotStore::class)->record(
-            kind: 'applyrule',
-            entryIds: $batchEntryIds,
-            preHashes: $entryHashes,
-            summary: [
-                'mode' => 'multi-rule',
-                'rule_ids' => $ruleIds,
-                'total_rules' => $totalRules,
-            ],
-            items: [],
-        );
+        $batchId = (string) \Illuminate\Support\Str::uuid();
+        // Per-rule snapshot ids, populated as the loop walks rules.
+        $perRuleSnapshotIds = [];
 
         // Polled inside applyRule's record loop so a Cancel click takes effect
         // mid-rule (not just at rule boundaries). Combined with the per-rule
@@ -354,6 +341,36 @@ class ApplyRuleCommand extends Command
                 Log::warning('[Linkwise] ApplyRuleCommand multi preview failed for '.$rule->keyword.': '.$e->getMessage());
                 continue;
             }
+
+            // Per-rule snapshot. Single-rule shape so revertHelper handles
+            // it without any multi-rule special-case (we drop the multi-rule
+            // block separately). batch_id + batch_index let the listing
+            // collapse them back into a "Apply Selected" grouping later.
+            $rulePreviewEntryIds = [];
+            foreach ($preview['affected_entries'] ?? [] as $aff) {
+                if (is_array($aff) && ! empty($aff['id'])) $rulePreviewEntryIds[] = $aff['id'];
+            }
+            $rulePreHashes = is_array($entryHashes)
+                ? array_intersect_key($entryHashes, array_flip($rulePreviewEntryIds))
+                : [];
+            $ruleSnapshotId = app(BulkSnapshotStore::class)->record(
+                kind: 'applyrule',
+                entryIds: $rulePreviewEntryIds,
+                preHashes: $rulePreHashes,
+                summary: [
+                    'rule_id' => $rule->id,
+                    'rule_keyword' => $rule->keyword,
+                    'estimated_links' => $totalEstimate,
+                    // Batch metadata — same UUID across all rules in this
+                    // "Apply Selected" run; the listing can collapse rows
+                    // sharing a batch_id.
+                    'batch_id' => $batchId,
+                    'batch_index' => $idx + 1,
+                    'batch_total' => $totalRules,
+                ],
+                items: [],
+            );
+            $perRuleSnapshotIds[$rule->id] = $ruleSnapshotId;
 
             // Initial status for this rule — banner shows "rule X of Y".
             Cache::put('linkwise:applyrule:status', [
@@ -403,15 +420,15 @@ class ApplyRuleCommand extends Command
             $totalLinksAdded += $linksAdded;
             $ruleResults[$rule->id] = $linksAdded;
 
-            // Append-on-success: record one item per entry this rule
-            // really wrote a link to. rule_id is included so a future
-            // multi-rule revert can group items by rule. No appends for
-            // entries that were skipped — they don't enter $result
-            // ['affected_entries'] in the first place.
+            // Append-on-success — items into THIS rule's snapshot, single-
+            // rule shape (no rule_id needed inside the item; the snapshot's
+            // summary carries it). Entries that got skipped never enter
+            // $result['affected_entries'].
+            $writtenIds = [];
             foreach ($result['affected_entries'] ?? [] as $affected) {
                 if (! is_array($affected) || empty($affected['id'])) continue;
-                app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
-                    'rule_id' => $rule->id,
+                $writtenIds[] = $affected['id'];
+                app(BulkSnapshotStore::class)->appendWrittenItem($ruleSnapshotId, [
                     'entry_id' => $affected['id'],
                     'anchor_text' => $rule->keyword,
                     'url' => $rule->url,
@@ -424,11 +441,27 @@ class ApplyRuleCommand extends Command
                 $allAffectedIds[$id] = true;
             }
 
-            // Cancelled mid-rule: skip the per-rule stamp (rule didn't fully
-            // apply) and let the next iteration's flag check write phase=cancelled.
+            // Cancelled mid-rule: leave the per-rule snapshot WITHOUT
+            // markCompleted — the activity-log listing will show it as
+            // "in progress" (which is honest, the rule didn't finish).
+            // The next iteration's flag check writes the batch's cancel
+            // status, so we just break here.
             if (! empty($result['cancelled'])) {
                 break;
             }
+
+            // Per-rule post-hashes + finalize. recordPostHashesForEntries
+            // captures the live hashes of the entries we just wrote, so a
+            // future revert can detect whether the user has edited any of
+            // them since this rule ran.
+            app(BulkSnapshotStore::class)->recordPostHashesForEntries(
+                $ruleSnapshotId,
+                $writtenIds ?: $rulePreviewEntryIds,
+            );
+            app(BulkSnapshotStore::class)->markCompleted($ruleSnapshotId, [
+                'phase' => 'done',
+                'links_added' => $linksAdded,
+            ]);
 
             // Stamp last-applied per rule (same semantics as single-rule path).
             try {
@@ -454,12 +487,9 @@ class ApplyRuleCommand extends Command
 
         $this->finalizeIndex(array_keys($allAffectedIds));
 
-        app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $batchEntryIds);
-        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
-            'phase' => 'done',
-            'total_rules' => $totalRules,
-            'total_links_added' => $totalLinksAdded,
-        ]);
+        // Per-rule snapshots already had recordPostHashes + markCompleted
+        // called inside the loop (per success). No outer snapshot to close
+        // out — the activity log shows N independent applyrule snapshots.
 
         Cache::put('linkwise:applyrule:status', [
             'phase' => 'done',
