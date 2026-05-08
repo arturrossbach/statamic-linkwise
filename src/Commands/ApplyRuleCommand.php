@@ -101,19 +101,18 @@ class ApplyRuleCommand extends Command
         $preview = $applier->applyRule($rule, true);
         $totalEstimate = count($preview['affected_entries'] ?? []);
 
-        // Forensic snapshot before any writes — entry IDs from the preview's
-        // would-link list, hashes from the verified entry_hashes payload.
+        // Forensic snapshot before any writes — entry_ids carries the
+        // preview's would-link set for forensics ("the bulk INTENDED to
+        // touch these"), but items=[] starts empty. AutoLinkApplier
+        // returns its actual writes via $result['affected_entries'] —
+        // we append those after it finishes (no per-item callback yet,
+        // so the granularity is end-of-batch rather than per-record;
+        // crash mid-apply leaves items empty, which is correct because
+        // we don't know which writes landed before the crash).
         $previewEntryIds = [];
-        $snapshotItems = [];
         foreach ($preview['affected_entries'] ?? [] as $affected) {
             if (! is_array($affected) || empty($affected['id'])) continue;
             $previewEntryIds[] = $affected['id'];
-            $snapshotItems[] = [
-                'entry_id' => $affected['id'],
-                'anchor_text' => $rule->keyword,
-                'url' => $rule->url,
-                'sentence_context' => $affected['sentence_context'] ?? '',
-            ];
         }
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'applyrule',
@@ -124,7 +123,7 @@ class ApplyRuleCommand extends Command
                 'rule_keyword' => $rule->keyword,
                 'estimated_links' => $totalEstimate,
             ],
-            items: $snapshotItems,
+            items: [],
         );
 
         Cache::put('linkwise:applyrule:status', [
@@ -178,22 +177,19 @@ class ApplyRuleCommand extends Command
             return self::FAILURE;
         }
 
-        // Replace snapshot items with the entries that ACTUALLY received a
-        // link write. The initial record() above used preview's optimistic
-        // affected_entries (everything that LOOKS insertable) but real
-        // BardLinkInserter rejects entries with no Bard field, anchor not
-        // found, etc. Without this trim, the activity-log claims "we wrote
-        // here" for entries that never got the link, and revert tries to
-        // unlink them with a confusing "Links were already gone" skip.
-        $writtenIds = array_values(array_filter(array_map(
-            fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
-            $result['affected_entries'] ?? [],
-        )));
-        $actualItems = array_values(array_filter(
-            $snapshotItems,
-            fn ($i) => in_array($i['entry_id'] ?? '', $writtenIds, true),
-        ));
-        app(BulkSnapshotStore::class)->replaceItems($snapshotId, $actualItems, $writtenIds);
+        // Append-on-success: AutoLinkApplier returns the entries it really
+        // wrote via $result['affected_entries']. Each one becomes a snapshot
+        // item — what didn't write doesn't show up. This is what makes the
+        // activity-log table honest about what landed.
+        foreach ($result['affected_entries'] ?? [] as $affected) {
+            if (! is_array($affected) || empty($affected['id'])) continue;
+            app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                'entry_id' => $affected['id'],
+                'anchor_text' => $rule->keyword,
+                'url' => $rule->url,
+                'sentence_context' => $affected['sentence_context'] ?? '',
+            ]);
+        }
 
         if (Cache::get('linkwise:applyrule:cancel')) {
             Cache::forget('linkwise:applyrule:cancel');
@@ -297,22 +293,12 @@ class ApplyRuleCommand extends Command
         // payload's entry_hashes (the frontend captures hashes for every entry
         // visible in the rule-preview tables).
         //
-        // Items here list the RULES (one per rule), not the entries — multi-
-        // rule mode doesn't pre-compute per-entry effects (would cost a
-        // preview-pass per rule × all entries). The activity-log shows the
-        // batch as "applied N rules" and links each rule's keyword + URL.
+        // items=[] start; per-rule per-affected-entry rows are appended via
+        // appendWrittenItem after each rule's apply finishes. That lets
+        // multi-rule reverts work too (V1.1) — every appended item carries
+        // its rule_id + entry_id + keyword + url. The activity-log header
+        // shows "applied N rules", the table lists what really landed.
         $batchEntryIds = is_array($entryHashes) ? array_keys($entryHashes) : [];
-        $snapshotItems = [];
-        foreach ($ruleIds as $rid) {
-            $r = $this->manager->getRule($rid);
-            if ($r) {
-                $snapshotItems[] = [
-                    'rule_id' => $r->id,
-                    'anchor_text' => $r->keyword,
-                    'url' => $r->url,
-                ];
-            }
-        }
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'applyrule',
             entryIds: $batchEntryIds,
@@ -322,7 +308,7 @@ class ApplyRuleCommand extends Command
                 'rule_ids' => $ruleIds,
                 'total_rules' => $totalRules,
             ],
-            items: $snapshotItems,
+            items: [],
         );
 
         // Polled inside applyRule's record loop so a Cancel click takes effect
@@ -416,6 +402,22 @@ class ApplyRuleCommand extends Command
             $linksAdded = $result['links_added'] ?? 0;
             $totalLinksAdded += $linksAdded;
             $ruleResults[$rule->id] = $linksAdded;
+
+            // Append-on-success: record one item per entry this rule
+            // really wrote a link to. rule_id is included so a future
+            // multi-rule revert can group items by rule. No appends for
+            // entries that were skipped — they don't enter $result
+            // ['affected_entries'] in the first place.
+            foreach ($result['affected_entries'] ?? [] as $affected) {
+                if (! is_array($affected) || empty($affected['id'])) continue;
+                app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                    'rule_id' => $rule->id,
+                    'entry_id' => $affected['id'],
+                    'anchor_text' => $rule->keyword,
+                    'url' => $rule->url,
+                    'sentence_context' => $affected['sentence_context'] ?? '',
+                ]);
+            }
 
             // Accumulate this rule's affected entries (sources + target).
             foreach ($this->affectedIdsFor($rule, $result) as $id) {

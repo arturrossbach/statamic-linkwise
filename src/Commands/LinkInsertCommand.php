@@ -75,6 +75,9 @@ class LinkInsertCommand extends Command
         $total = count($insertions);
         $succeeded = 0;
         $skipped = 0;
+        // Per-entry skip records pushed back onto the ORIGINAL snapshot
+        // when this run is a revert. See DetailUnlinkCommand for rationale.
+        $revertSkippedRecords = [];
         $errors = [];
         // Entries whose link relationships actually changed (source +
         // target of every successful insertion). Used by finalizeIndex
@@ -92,12 +95,10 @@ class LinkInsertCommand extends Command
             fn ($i) => is_array($i) ? ($i['source_entry_id'] ?? null) : null,
             $insertions,
         ))));
-        $snapshotItems = array_map(fn (array $i) => [
-            'source_entry_id' => $i['source_entry_id'] ?? '',
-            'target_entry_id' => $i['target_entry_id'] ?? '',
-            'anchor_text' => $i['anchor_text'] ?? '',
-            'sentence_context' => $i['sentence_context'] ?? '',
-        ], array_filter($insertions, 'is_array'));
+        // Append-on-success pattern: items=[] at start, grows via
+        // appendWrittenItem on each confirmed insert. See BulkSnapshotStore
+        // for rationale — keeps the activity-log honest about what we wrote
+        // even when conflicts skip individual items mid-run.
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: $kind,
             entryIds: $touchedSources,
@@ -108,7 +109,7 @@ class LinkInsertCommand extends Command
                 'insertion_count' => $total,
                 'reverts' => $reverts,
             ], fn ($v) => $v !== null),
-            items: $snapshotItems,
+            items: [],
             startedBy: $startedBy,
             startedById: $startedById,
         );
@@ -164,6 +165,15 @@ class LinkInsertCommand extends Command
 
                 if ($success) {
                     $succeeded++;
+                    // Append-on-success: only confirmed inserts make it
+                    // into the snapshot.items list — guarantees the
+                    // activity-log table reflects reality.
+                    app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                        'source_entry_id' => $sourceEntryId,
+                        'target_entry_id' => $targetEntryId,
+                        'anchor_text' => $anchorText,
+                        'sentence_context' => $insertion['sentence_context'] ?? '',
+                    ]);
                     // Both ends of the new edge are affected — source's
                     // outbound counts shift, target's inbound counts shift.
                     $affectedIds[$sourceEntryId] = true;
@@ -177,6 +187,7 @@ class LinkInsertCommand extends Command
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
+                if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
@@ -221,6 +232,10 @@ class LinkInsertCommand extends Command
             'succeeded' => $succeeded,
             'skipped' => $skipped,
         ]);
+
+        if ($reverts && ! empty($revertSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+        }
 
         Cache::put($statusKey, [
             'phase' => 'done',

@@ -430,18 +430,13 @@ class AutoLinkController extends CpController
             )));
             $previewForSnapshot = $previewApplier->applyRule($rule, true);
             $snapshotEntryIds = [];
-            $snapshotItems = [];
             foreach ($previewForSnapshot['affected_entries'] ?? [] as $affected) {
                 if (! is_array($affected) || empty($affected['id'])) continue;
                 $snapshotEntryIds[] = $affected['id'];
-                $snapshotItems[] = [
-                    'entry_id' => $affected['id'],
-                    'anchor_text' => $rule->keyword,
-                    'url' => $rule->url,
-                    'sentence_context' => $affected['sentence_context'] ?? '',
-                ];
             }
             $hashes = $request->input('entry_hashes', []);
+            // items=[] start; we append per-entry below after the apply
+            // returns its actual writes (append-on-success pattern).
             $snapshotId = app(BulkSnapshotStore::class)->record(
                 kind: 'applyrule',
                 entryIds: $snapshotEntryIds,
@@ -451,7 +446,7 @@ class AutoLinkController extends CpController
                     'rule_keyword' => $rule->keyword,
                     'caller' => 'sync',
                 ],
-                items: $snapshotItems,
+                items: [],
             );
         } else {
             $snapshotId = null;
@@ -459,23 +454,21 @@ class AutoLinkController extends CpController
 
         $result = $applier->applyRule($rule, $preview);
 
-        // Post-bulk hashes for the activity-log (apply path only — preview
-        // doesn't write). Skipped when no snapshot was taken.
+        // Post-bulk hashes + append-on-success items for the activity-log
+        // (apply path only — preview doesn't write). Skipped when no
+        // snapshot was taken.
         if (! $preview && $snapshotId !== null && ! empty($snapshotEntryIds)) {
-            // Trim the snapshot items down to entries that ACTUALLY received
-            // a link — same rationale as ApplyRuleCommand. Without this the
-            // activity-log claims "we wrote here" for entries that BardLink-
-            // Inserter rejected (no Bard field, anchor not found, etc.) and
-            // revert reports false-positive "Links were already gone" skips.
-            $writtenIds = array_values(array_filter(array_map(
-                fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
-                $result['affected_entries'] ?? [],
-            )));
-            $actualItems = array_values(array_filter(
-                $snapshotItems,
-                fn ($i) => in_array($i['entry_id'] ?? '', $writtenIds, true),
-            ));
-            app(BulkSnapshotStore::class)->replaceItems($snapshotId, $actualItems, $writtenIds);
+            $writtenIds = [];
+            foreach ($result['affected_entries'] ?? [] as $affected) {
+                if (! is_array($affected) || empty($affected['id'])) continue;
+                $writtenIds[] = $affected['id'];
+                app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                    'entry_id' => $affected['id'],
+                    'anchor_text' => $rule->keyword,
+                    'url' => $rule->url,
+                    'sentence_context' => $affected['sentence_context'] ?? '',
+                ]);
+            }
             app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $writtenIds ?: $snapshotEntryIds);
             app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
                 'phase' => 'done',

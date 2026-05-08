@@ -64,6 +64,10 @@ class DetailUnlinkCommand extends Command
         $total = count($replacements);
         $succeeded = 0;
         $skipped = 0;
+        // Per-entry skip records for the activity-log drawer of the ORIGINAL
+        // snapshot — only populated when this run is itself a revert. Empty
+        // for normal-flow detail-unlink.
+        $revertSkippedRecords = [];
         $errors = [];
         // Entries whose link relationships actually changed (the entry
         // being modified + the target, if the removed URL is internal).
@@ -83,15 +87,11 @@ class DetailUnlinkCommand extends Command
         }
         $entryGroups = array_values($byEntry);
 
-        // Forensic snapshot — see BulkSnapshotStore. Recorded BEFORE writes
-        // so the activity-log can show "this bulk affected entries X, Y, Z"
-        // even if the bulk later crashes or is cancelled mid-flight.
-        $snapshotItems = array_map(fn (array $r) => [
-            'entry_id' => $r['entry_id'] ?? '',
-            'matched_url' => $r['matched_url'] ?? '',
-            'anchor_text' => $r['anchor_text'] ?? '',
-            'sentence_context' => $r['sentence_context'] ?? '',
-        ], $replacements);
+        // Forensic snapshot — recorded BEFORE writes for entry-id forensics
+        // (we know what the bulk INTENDED to touch even if it crashes), but
+        // items=[] starts empty and grows via appendWrittenItem on each
+        // confirmed success. Append-on-success makes "items lists what we
+        // wrote" structurally guaranteed — no more skipped-leaks-into-table.
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'detailunlink',
             entryIds: array_keys($byEntry),
@@ -102,7 +102,7 @@ class DetailUnlinkCommand extends Command
                 'replacement_count' => $total,
                 'reverts' => $reverts,
             ], fn ($v) => $v !== null),
-            items: $snapshotItems,
+            items: [],
             startedBy: $startedBy,
             startedById: $startedById,
         );
@@ -160,6 +160,11 @@ class DetailUnlinkCommand extends Command
                     $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                     $skipped += count($entryReps);
                     $processedReplacements += count($entryReps);
+                    // For revert flows, persist a per-entry skip record on
+                    // the ORIGINAL snapshot so its drawer can show "these
+                    // entries were skipped because they were modified by
+                    // X on Y". Stored under revert_skipped on the original.
+                    if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
                     Cache::put('linkwise:detailunlink:status', [
                         'phase' => 'running',
                         'current' => $processedReplacements,
@@ -206,6 +211,21 @@ class DetailUnlinkCommand extends Command
                         $skipped += $missed;
                     }
 
+                    // Append-on-success: each replacement that actually
+                    // landed gets recorded as one snapshot item. Avoids
+                    // the older "items recorded upfront, hope the writes
+                    // succeeded" pattern which leaked skipped entries
+                    // into the activity-log table claiming "link removed
+                    // here" when the entry was untouched.
+                    foreach ($entryReps as $r) {
+                        app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                            'entry_id' => $r['entry_id'] ?? '',
+                            'matched_url' => $r['matched_url'] ?? '',
+                            'anchor_text' => $r['anchor_text'] ?? '',
+                            'sentence_context' => $r['sentence_context'] ?? '',
+                        ]);
+                    }
+
                     // Update broken-link report — remove old URLs.
                     foreach ($entryReps as $r) {
                         $this->brokenReport->removeLink($r['entry_id'], $r['matched_url']);
@@ -221,6 +241,8 @@ class DetailUnlinkCommand extends Command
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
+                // Same per-entry skip-record write as the pre-flight branch.
+                if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
@@ -277,6 +299,14 @@ class DetailUnlinkCommand extends Command
             'succeeded' => $succeeded,
             'skipped' => $skipped,
         ]);
+
+        // Push per-entry skip records back onto the ORIGINAL snapshot when
+        // this run was itself a revert. Lets the original drawer surface
+        // "of N items I tried to revert, here's the M that were skipped
+        // and WHY (modified by X on Y)". No-op when not a revert.
+        if ($reverts && ! empty($revertSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+        }
 
         Cache::put('linkwise:detailunlink:status', [
             'phase' => 'done',

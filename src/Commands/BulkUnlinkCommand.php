@@ -69,17 +69,16 @@ class BulkUnlinkCommand extends Command
             array_column($replacements, 'entry_id'),
             'is_string',
         )));
-        $snapshotItems = array_map(fn (array $r) => [
-            'entry_id' => $r['entry_id'] ?? '',
-            'matched_url' => $r['matched_url'] ?? '',
-            'sentence_context' => $r['sentence_context'] ?? '',
-        ], $replacements);
+        // Append-on-success — items grows only on confirmed unlink writes.
+        // Even though bulkunlink isn't revertable, keeping the activity-log
+        // honest (only listing real removals) is the same hygiene as other
+        // bulk paths.
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'bulkunlink',
             entryIds: $entryIds,
             preHashes: is_array($entryHashes) ? array_intersect_key($entryHashes, array_flip($entryIds)) : [],
             summary: ['replacement_count' => $total],
-            items: $snapshotItems,
+            items: [],
         );
 
         Cache::put('linkwise:bulkunlink:status', [
@@ -124,6 +123,12 @@ class BulkUnlinkCommand extends Command
                     $skipped++;
                 } else {
                     $succeeded++;
+                    // Append-on-success: confirmed removal lands in items.
+                    app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                        'entry_id' => $r['entry_id'] ?? '',
+                        'matched_url' => $r['matched_url'] ?? '',
+                        'sentence_context' => $r['sentence_context'] ?? '',
+                    ]);
                     $affectedIds[$r['entry_id']] = true;
                     if (preg_match('#^statamic://entry::([0-9a-f-]+)$#i', $r['matched_url'], $m)) {
                         $affectedIds[$m[1]] = true;

@@ -113,18 +113,15 @@ class UrlChangerController extends CpController
             ], 409);
         }
 
-        // Forensic snapshot — recorded BEFORE the write so the activity-log
-        // captures the operation even if applySelected throws mid-flight.
+        // Forensic snapshot — recorded BEFORE the write for entry-id forensics
+        // (we know what the bulk INTENDED to touch even if applySelected
+        // throws mid-flight). items=[] starts empty; we append each
+        // confirmed replacement after applySelected returns. See the
+        // commands' append-on-success pattern.
         $snapshotEntryIds = array_values(array_unique(array_filter(
             array_column($request->replacements, 'entry_id'),
             'is_string',
         )));
-        $snapshotItems = array_map(fn (array $r) => [
-            'entry_id' => $r['entry_id'] ?? '',
-            'matched_url' => $r['matched_url'] ?? '',
-            'new_url' => $r['new_url'] ?? '',
-            'sentence_context' => $r['sentence_context'] ?? '',
-        ], $request->replacements);
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'urlchanger',
             entryIds: $snapshotEntryIds,
@@ -135,7 +132,7 @@ class UrlChangerController extends CpController
                 'replacement_count' => count($request->replacements),
                 'caller' => 'sync', // distinguishes per-row Broken-Links unlink from the async batch
             ],
-            items: $snapshotItems,
+            items: [],
         );
 
         try {
@@ -147,6 +144,23 @@ class UrlChangerController extends CpController
                 'message' => $e->getMessage(),
                 'entry_id' => $e->entryId,
             ], 409);
+        }
+
+        // Append-on-success: only confirmed replacements end up in items.
+        // The sync path can't do per-item granularity (UrlReplacer batches
+        // internally and only reports total_replacements), so when at
+        // least one landed we record all replacements for this batch as a
+        // best-effort. Zero-replacement runs leave items empty — honest.
+        if (($result['total_replacements'] ?? 0) > 0) {
+            foreach ($request->replacements as $r) {
+                app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                    'entry_id' => $r['entry_id'] ?? '',
+                    'matched_url' => $r['matched_url'] ?? '',
+                    'new_url' => $r['new_url'] ?? '',
+                    'anchor_text' => $r['anchor_text'] ?? '',
+                    'sentence_context' => $r['sentence_context'] ?? '',
+                ]);
+            }
         }
 
         // Rebuild index (skip on intermediate sequential requests for per-item UI feedback)

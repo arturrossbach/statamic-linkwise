@@ -75,6 +75,9 @@ class UrlChangerApplyCommand extends Command
         $total = count($replacements);
         $succeeded = 0;
         $skipped = 0;
+        // Per-entry skip records pushed back onto the ORIGINAL snapshot
+        // when this run is a revert — see DetailUnlinkCommand for rationale.
+        $revertSkippedRecords = [];
         $errors = [];
         // Source entry plus any internal targets parsed out of matched_url
         // (old) and new_url (replacement). Keeping both ends ensures
@@ -96,13 +99,9 @@ class UrlChangerApplyCommand extends Command
 
         // Forensic snapshot before any writes — entry IDs from the grouped
         // replacements, hashes from the payload's entry_hashes map.
-        $snapshotItems = array_map(fn (array $r) => [
-            'entry_id' => $r['entry_id'] ?? '',
-            'matched_url' => $r['matched_url'] ?? '',
-            'new_url' => $r['new_url'] ?? '',
-            'anchor_text' => $r['anchor_text'] ?? '',
-            'sentence_context' => $r['sentence_context'] ?? '',
-        ], $replacements);
+        // items=[] starts empty; each confirmed replacement is appended via
+        // appendWrittenItem so the activity-log only lists what actually
+        // landed (skips no longer leak in as fake "URL replaced" rows).
         $snapshotId = app(BulkSnapshotStore::class)->record(
             kind: 'urlchanger',
             entryIds: array_keys($byEntry),
@@ -114,7 +113,7 @@ class UrlChangerApplyCommand extends Command
                 'replacement_count' => $total,
                 'reverts' => $reverts,
             ], fn ($v) => $v !== null),
-            items: $snapshotItems,
+            items: [],
             startedBy: $startedBy,
             startedById: $startedById,
         );
@@ -168,6 +167,7 @@ class UrlChangerApplyCommand extends Command
                     $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                     $skipped += count($entryReps);
                     $processedReplacements += count($entryReps);
+                    if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
                     Cache::put('linkwise:urlchanger:status', [
                         'phase' => 'running',
                         'current' => $processedReplacements,
@@ -210,9 +210,18 @@ class UrlChangerApplyCommand extends Command
                         $skipped += $missed;
                     }
 
-                    // Update broken-link report — remove old URLs that were
-                    // replaced or unlinked.
+                    // Append-on-success: snapshot.items grows only with
+                    // confirmed replacements. The old upfront-record-all
+                    // pattern leaked skipped rows into the activity-log.
                     foreach ($entryReps as $r) {
+                        app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                            'entry_id' => $r['entry_id'] ?? '',
+                            'matched_url' => $r['matched_url'] ?? '',
+                            'new_url' => $r['new_url'] ?? '',
+                            'anchor_text' => $r['anchor_text'] ?? '',
+                            'sentence_context' => $r['sentence_context'] ?? '',
+                        ]);
+
                         $this->brokenReport->removeLink($r['entry_id'], $r['matched_url']);
                         $affectedIds[$r['entry_id']] = true;
                         // Old target loses an inbound (if internal).
@@ -230,6 +239,7 @@ class UrlChangerApplyCommand extends Command
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
+                if ($reverts) $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
@@ -277,6 +287,10 @@ class UrlChangerApplyCommand extends Command
             'succeeded' => $succeeded,
             'skipped' => $skipped,
         ]);
+
+        if ($reverts && ! empty($revertSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+        }
 
         Cache::put('linkwise:urlchanger:status', [
             'phase' => 'done',

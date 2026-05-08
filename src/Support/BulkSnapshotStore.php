@@ -325,6 +325,145 @@ class BulkSnapshotStore
     }
 
     /**
+     * Append per-entry skip records to a snapshot's revert_skipped list.
+     * Called by the inverse-bulk command when a hash-mismatch (or other
+     * skip reason) prevents reverting a specific entry — the activity-log
+     * drawer surfaces these so the user sees "of N items I tried to
+     * revert, here's the M that were skipped + WHY (modified by X on Y)".
+     *
+     * Best-effort, never throws upward — same shape as markCompleted.
+     *
+     * @param  array  $skipped  list of records, each {entry_id, entry_title, reason, modified_by?, modified_at?}
+     */
+    /**
+     * Build a skip record for one entry that was bypassed during a revert.
+     * Resolves entry-title + last-modified-by + last-modified-at via Statamic
+     * so the activity-log drawer can show "modified by Artur on 2026-05-08
+     * at 12:31". Falls back gracefully when the entry was deleted between
+     * the original bulk and the revert (lookup returns null → reason
+     * defaults to 'deleted').
+     *
+     * @return array{entry_id: string, entry_title: ?string, reason: string, modified_by: ?string, modified_at: ?string}
+     */
+    public static function buildSkipRecord(string $entryId, string $reason): array
+    {
+        $entry = \Statamic\Facades\Entry::find($entryId);
+        if (! $entry) {
+            return [
+                'entry_id' => $entryId,
+                'entry_title' => null,
+                'reason' => 'deleted',
+                'modified_by' => null,
+                'modified_at' => null,
+            ];
+        }
+        $modifiedBy = null;
+        try {
+            $user = $entry->lastModifiedBy();
+            if ($user) {
+                $modifiedBy = $user->name() ?? $user->email() ?? null;
+            }
+        } catch (\Throwable) {
+            // Statamic flat-file sites without user-tracking on entries
+            // raise on lastModifiedBy() — treat as unknown editor.
+        }
+        $modifiedAt = null;
+        try {
+            $lm = $entry->lastModified();
+            if ($lm) $modifiedAt = $lm->toIso8601String();
+        } catch (\Throwable) {
+        }
+
+        return [
+            'entry_id' => $entryId,
+            'entry_title' => $entry->get('title') ?? $entryId,
+            'reason' => $reason,
+            'modified_by' => $modifiedBy,
+            'modified_at' => $modifiedAt,
+        ];
+    }
+
+    /**
+     * Append a single per-item record to a snapshot's items list — the
+     * append-on-success pattern that replaces the older "record items
+     * upfront, hope the bulk succeeded" model.
+     *
+     * The activity-log promise is "this snapshot lists what we WROTE".
+     * If items are recorded before a write runs (the old pattern), every
+     * skipped / conflicted / failed entry leaks into the table claiming
+     * "we wrote here" — confuses users, lies on revert. Instead we start
+     * each snapshot with items=[] and grow only on confirmed success.
+     *
+     * Uses file-lock so concurrent appends from different bulk runs
+     * (rare but possible) don't clobber each other; cap enforced so
+     * a 5000-write batch can't blow up the file.
+     *
+     * Best-effort, never throws upward. Bulk completion shouldn't fail
+     * because forensic logging did.
+     */
+    public function appendWrittenItem(string $snapshotId, array $item): void
+    {
+        $path = $this->pathFor($snapshotId);
+        if (! file_exists($path)) return;
+
+        $fp = fopen($path, 'c+');
+        if ($fp === false) return;
+
+        try {
+            if (! flock($fp, LOCK_EX)) return;
+            rewind($fp);
+            $contents = stream_get_contents($fp);
+            $data = $contents ? json_decode($contents, true) : null;
+            if (! is_array($data)) {
+                flock($fp, LOCK_UN);
+                return;
+            }
+            $items = $data['items'] ?? [];
+            if (! is_array($items)) $items = [];
+
+            // Keep capping in line with the upfront-trim logic — same MAX
+            // applies whether items were pre-loaded or appended one by one.
+            if (count($items) >= self::MAX_ENTRIES_PER_SNAPSHOT) {
+                $data['items_trimmed'] = true;
+            } else {
+                $items[] = $item;
+                $data['items'] = $items;
+            }
+            $data['item_count_total'] = ($data['item_count_total'] ?? 0) + 1;
+
+            ftruncate($fp, 0);
+            rewind($fp);
+            fwrite($fp, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            fflush($fp);
+            flock($fp, LOCK_UN);
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::appendWrittenItem failed — '.$e->getMessage());
+        } finally {
+            fclose($fp);
+        }
+    }
+
+    public function recordRevertSkipped(string $originalId, array $skipped): void
+    {
+        if (empty($skipped)) return;
+        $path = $this->pathFor($originalId);
+        if (! file_exists($path)) return;
+        $data = $this->readFile($path);
+        if ($data === null) return;
+        $existing = $data['revert_skipped'] ?? [];
+        if (! is_array($existing)) $existing = [];
+        $data['revert_skipped'] = array_values(array_merge($existing, array_values($skipped)));
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::recordRevertSkipped failed — '.$e->getMessage());
+        }
+    }
+
+    /**
      * Mark a snapshot as reverted. Called by the activity-log Revert flow
      * once the inverse bulk has finished. The activity-log UI uses these
      * fields to show a "[Reverted]" badge and to disable the Revert button
