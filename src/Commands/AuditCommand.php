@@ -85,6 +85,9 @@ class AuditCommand extends Command
             'orphan-split-link'      => fn () => $this->auditOrphanSplitLinks(),
             'revert-completeness'    => fn () => $this->auditRevertCompleteness(),
             'post-hash-coverage'     => fn () => $this->auditPostHashCoverage(),
+            'apply-counter-honesty'  => fn () => $this->auditApplyCounterHonesty(),
+            'snapshot-self-consistency' => fn () => $this->auditSnapshotSelfConsistency(),
+            'stale-job-locks'        => fn () => $this->auditStaleJobLocks(),
             'domains'                => fn () => $this->auditDomainParity(),
             'broken-links'           => fn () => $this->auditBrokenLinks(),
             'url-changer'            => fn () => $this->auditUrlChanger(),
@@ -1263,6 +1266,189 @@ class AuditCommand extends Command
                 'post-hash-coverage',
                 "snapshot {$row['id']} ({$kind}): {$missingCount}/{$totalCount} entry post-hashes missing — bulk wrote without recording, activity-log will mark them as 'modified by user'",
             );
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Apply-counter honesty. Tester clicks Bulk Apply, sees toast
+    // "5 added". Opens Activity Log for that snapshot, expects exactly
+    // 5 items in the drawer. Anything else means either the toast lied
+    // or the snapshot lied.
+    //
+    // Invariant: for every completed snapshot, the items array length
+    // equals completion_stats.succeeded. Items is append-on-success;
+    // one item per confirmed write. The two are recorded by entirely
+    // different code paths (appendWrittenItem vs markCompleted) so a
+    // mismatch indicates a write that didn't get recorded — or a
+    // counter that got incremented without the write happening.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditApplyCounterHonesty(): void
+    {
+        $this->line('<fg=yellow>apply-counter-honesty</> — items.length matches completion_stats.succeeded');
+
+        $store = app(BulkSnapshotStore::class);
+        $snapshots = $store->list();
+
+        foreach ($snapshots as $row) {
+            $snap = $store->get($row['id']);
+            if (! is_array($snap)) continue;
+            $phase = $snap['completion_stats']['phase'] ?? null;
+            if ($phase !== 'done') continue; // skip in-flight / cancelled
+
+            $succeeded = (int) ($snap['completion_stats']['succeeded'] ?? -1);
+            $items = $snap['items'] ?? [];
+            if (! is_array($items)) $items = [];
+            $itemsCount = count($items);
+            $itemsTrimmed = (bool) ($snap['items_trimmed'] ?? false);
+
+            // items_trimmed=true means the bulk hit the per-snapshot cap
+            // (e.g. a 5000-write batch). The trim is intentional; comparison
+            // with succeeded would be guaranteed to fail. Skip those — the
+            // forensic trail is incomplete by design, not by bug.
+            if ($itemsTrimmed) {
+                $this->pass('apply-counter-honesty');
+                continue;
+            }
+
+            if ($itemsCount !== $succeeded) {
+                $kind = (string) ($snap['kind'] ?? '?');
+                $startedBy = (string) ($snap['started_by'] ?? '?');
+                $this->recordFailure(
+                    'apply-counter-honesty',
+                    "snapshot {$row['id']} ({$kind} by {$startedBy}): items.length={$itemsCount} but completion_stats.succeeded={$succeeded}",
+                );
+            } else {
+                $this->pass('apply-counter-honesty');
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Snapshot self-consistency. The forensic record must
+    // reference only entries it claims to have touched. Items pointing
+    // at entry IDs that aren't in the snapshot's entry_ids list mean
+    // either the snapshot was stitched together from multiple bulks
+    // (impossible in normal flow) or items got written under the wrong
+    // snapshot ID (race condition between concurrent bulks). Either
+    // way the activity log can't be trusted.
+    //
+    // Invariant: every items[*].entry_id (or source_entry_id for
+    // outboundinsert) appears in snapshot.entry_ids.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditSnapshotSelfConsistency(): void
+    {
+        $this->line('<fg=yellow>snapshot-self-consistency</> — every snapshot item references a recorded entry_id');
+
+        $store = app(BulkSnapshotStore::class);
+        $snapshots = $store->list();
+
+        foreach ($snapshots as $row) {
+            $snap = $store->get($row['id']);
+            if (! is_array($snap)) continue;
+
+            $entryIds = array_filter(
+                $snap['entry_ids'] ?? [],
+                fn ($x) => is_string($x) && $x !== '',
+            );
+            $entryIdSet = array_flip($entryIds);
+
+            $items = $snap['items'] ?? [];
+            if (! is_array($items)) $items = [];
+
+            $orphanItems = [];
+            foreach ($items as $item) {
+                if (! is_array($item)) continue;
+                // Different kinds use different keys for the touched entry:
+                //   detailunlink / urlchanger / inboundinsert: 'entry_id'
+                //   outboundinsert: 'source_entry_id'
+                //   bulkunlink: 'entry_id'
+                //   applyrule (single): 'entry_id'
+                $itemEntryId = $item['entry_id']
+                    ?? $item['source_entry_id']
+                    ?? null;
+                if (! is_string($itemEntryId) || $itemEntryId === '') continue;
+                if (! isset($entryIdSet[$itemEntryId])) {
+                    $orphanItems[] = $itemEntryId;
+                }
+            }
+
+            if (empty($orphanItems)) {
+                $this->pass('snapshot-self-consistency');
+                continue;
+            }
+
+            $kind = (string) ($snap['kind'] ?? '?');
+            $first = $orphanItems[0];
+            $extra = count($orphanItems) > 1 ? ' (+'.(count($orphanItems) - 1).' more)' : '';
+            $this->recordFailure(
+                'snapshot-self-consistency',
+                "snapshot {$row['id']} ({$kind}): item references entry_id '{$first}' which is not in the snapshot's entry_ids list{$extra}",
+            );
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Stale job locks. JobLock is a Cache-backed mutex: a
+    // background command writes its kind's status key with a phase in
+    // ACTIVE_PHASES; other endpoints check that key before dispatch.
+    // If the command crashes without rewriting the phase, the lock
+    // becomes orphaned — the user sees "Linkwise busy" forever, no
+    // bulk can start, the recovery banner can't even fire because
+    // crash-guard registers AFTER the lock is set.
+    //
+    // Detection signal: cache key claims active phase but the
+    // heartbeat is stale (commands write heartbeat=time() each loop)
+    // OR no corresponding running snapshot exists. Stale-by-heartbeat
+    // is the cleaner signal — captures both crashed commands and
+    // legitimately-finished commands that didn't clean up.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditStaleJobLocks(): void
+    {
+        $this->line('<fg=yellow>stale-job-locks</> — no orphaned cache locks blocking new bulks');
+
+        // Heartbeat older than 90s = stale. Active commands refresh
+        // every iteration (at most a few seconds apart even on slow
+        // entries). 90s gives ample slack for a single very-large
+        // entry write before flagging.
+        $staleThresholdSeconds = 90;
+        $now = time();
+
+        // ACTIVE_PHASES is protected; mirror the literal here so the
+        // audit doesn't depend on reflection. Keep aligned with
+        // JobLock::ACTIVE_PHASES.
+        $activePhases = ['starting', 'running', 'indexing', 'suggestions', 'saving', 'checking'];
+
+        foreach (\Arturrossbach\Linkwise\Support\JobLock::JOBS as $name => $meta) {
+            $status = \Illuminate\Support\Facades\Cache::get($meta['key']);
+            if (! is_array($status)) {
+                $this->pass('stale-job-locks');
+                continue;
+            }
+            $phase = (string) ($status['phase'] ?? '');
+            if (! in_array($phase, $activePhases, true)) {
+                $this->pass('stale-job-locks');
+                continue;
+            }
+            // Lock claims active. Check heartbeat age.
+            $heartbeat = (int) ($status['heartbeat'] ?? 0);
+            $age = $heartbeat > 0 ? ($now - $heartbeat) : null;
+
+            if ($age === null) {
+                $this->recordFailure(
+                    'stale-job-locks',
+                    "{$name} ({$meta['label']}): cache lock has phase='{$phase}' but no heartbeat — likely orphaned from a crashed run",
+                );
+                continue;
+            }
+            if ($age > $staleThresholdSeconds) {
+                $this->recordFailure(
+                    'stale-job-locks',
+                    "{$name} ({$meta['label']}): cache lock has phase='{$phase}' with heartbeat {$age}s old — likely orphaned, blocking new bulks. Run `php artisan cache:clear` or wait for TTL",
+                );
+                continue;
+            }
+            // Fresh heartbeat → real running command, fine.
+            $this->pass('stale-job-locks');
         }
     }
 
