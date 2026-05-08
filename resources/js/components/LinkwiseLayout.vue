@@ -441,25 +441,28 @@ export default {
             if (kind === 'bulkunlink') {
                 const n = e.succeeded || 0;
                 const skipped = e.skipped || 0;
+                const reason = this.topErrorReason(e.errors);
                 if (n > 0 && skipped === 0) return `${n} link(s) removed.`;
-                if (n > 0) return `${n} link(s) removed, ${skipped} skipped.`;
-                return `Could not remove any links — ${skipped} skipped.`;
+                if (n > 0) return `${n} link(s) removed, ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
+                return `Could not remove any links — ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
             }
             if (kind === 'urlchanger') {
                 const n = e.succeeded || 0;
                 const skipped = e.skipped || 0;
                 const verb = e.action === 'unlink' ? 'unlinked' : 'replaced';
+                const reason = this.topErrorReason(e.errors);
                 if (n > 0 && skipped === 0) return `${n} URL(s) ${verb}.`;
-                if (n > 0) return `${n} URL(s) ${verb}, ${skipped} skipped.`;
-                return `Could not ${e.action || 'change'} any URLs — ${skipped} skipped.`;
+                if (n > 0) return `${n} URL(s) ${verb}, ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
+                return `Could not ${e.action || 'change'} any URLs — ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
             }
             if (kind === 'detailunlink') {
                 const n = e.succeeded || 0;
                 const skipped = e.skipped || 0;
                 const direction = e.source_mode === 'outbound' ? 'outbound' : 'inbound';
                 const t = e.entry_title ? ` for "${e.entry_title}"` : '';
+                const reason = this.topErrorReason(e.errors);
                 if (n > 0 && skipped === 0) return `${n} ${direction} link(s) removed${t}.`;
-                if (n > 0) return `${n} ${direction} link(s) removed${t}, ${skipped} skipped.`;
+                if (n > 0) return `${n} ${direction} link(s) removed${t}, ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
                 // 0 succeeded — surface the top error reason from the
                 // command's per-item errors map (same pattern as inboundinsert).
                 // Without this, the user sees "X skipped" with no idea why.
@@ -678,6 +681,17 @@ export default {
     },
 
     methods: {
+        /** Pick the most-frequent error reason from a {message: count} map.
+         *  Surfaced in completion toasts so the user knows WHY items were
+         *  skipped instead of guessing. Returns '' when the map is empty. */
+        topErrorReason(errors) {
+            if (! errors || typeof errors !== 'object') return '';
+            const entries = Object.entries(errors);
+            if (entries.length === 0) return '';
+            entries.sort((a, b) => (b[1] || 0) - (a[1] || 0));
+            return entries[0][0] || '';
+        },
+
         /**
          * Banner CTA: kick off a broken-link check. Reuses the existing
          * /linkwise/check-links endpoint so the unified bulk-status poller

@@ -178,6 +178,23 @@ class ApplyRuleCommand extends Command
             return self::FAILURE;
         }
 
+        // Replace snapshot items with the entries that ACTUALLY received a
+        // link write. The initial record() above used preview's optimistic
+        // affected_entries (everything that LOOKS insertable) but real
+        // BardLinkInserter rejects entries with no Bard field, anchor not
+        // found, etc. Without this trim, the activity-log claims "we wrote
+        // here" for entries that never got the link, and revert tries to
+        // unlink them with a confusing "Links were already gone" skip.
+        $writtenIds = array_values(array_filter(array_map(
+            fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
+            $result['affected_entries'] ?? [],
+        )));
+        $actualItems = array_values(array_filter(
+            $snapshotItems,
+            fn ($i) => in_array($i['entry_id'] ?? '', $writtenIds, true),
+        ));
+        app(BulkSnapshotStore::class)->replaceItems($snapshotId, $actualItems, $writtenIds);
+
         if (Cache::get('linkwise:applyrule:cancel')) {
             Cache::forget('linkwise:applyrule:cancel');
             Cache::put('linkwise:applyrule:status', [

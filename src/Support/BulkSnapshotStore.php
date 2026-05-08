@@ -248,6 +248,50 @@ class BulkSnapshotStore
     }
 
     /**
+     * Replace the items array on an existing snapshot. Used by Apply-Rule
+     * after the actual write loop completes — the initial record() is filed
+     * with preview's optimistic affected_entries (everything that LOOKS
+     * insertable), but only some of those actually got a link written. The
+     * activity-log + revert flow needs items to reflect what was actually
+     * written, otherwise revert tries to unlink links that were never there
+     * and reports false-positive "Links were already gone" skips.
+     */
+    public function replaceItems(string $id, array $items, ?array $entryIds = null): void
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return;
+        }
+        $data = $this->readFile($path);
+        if ($data === null) {
+            return;
+        }
+        $items = array_values(array_filter($items, 'is_array'));
+        if (count($items) > self::MAX_ENTRIES_PER_SNAPSHOT) {
+            $items = array_slice($items, 0, self::MAX_ENTRIES_PER_SNAPSHOT);
+            $data['items_trimmed'] = true;
+        }
+        $data['items'] = $items;
+        $data['item_count_total'] = count($items);
+        if ($entryIds !== null) {
+            $entryIds = array_values(array_unique(array_filter(
+                $entryIds,
+                fn ($v) => is_string($v) && $v !== '',
+            )));
+            $data['entry_ids'] = array_slice($entryIds, 0, self::MAX_ENTRIES_PER_SNAPSHOT);
+            $data['entry_count_total'] = count($entryIds);
+        }
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::replaceItems failed — '.$e->getMessage());
+        }
+    }
+
+    /**
      * Mark a snapshot as completed (the bulk run reached a terminal phase —
      * done, partial, cancelled, or error). The activity-log UI uses this to
      * gate the Revert button: an in-flight bulk's snapshot stays "in progress"

@@ -462,7 +462,21 @@ class AutoLinkController extends CpController
         // Post-bulk hashes for the activity-log (apply path only — preview
         // doesn't write). Skipped when no snapshot was taken.
         if (! $preview && $snapshotId !== null && ! empty($snapshotEntryIds)) {
-            app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $snapshotEntryIds);
+            // Trim the snapshot items down to entries that ACTUALLY received
+            // a link — same rationale as ApplyRuleCommand. Without this the
+            // activity-log claims "we wrote here" for entries that BardLink-
+            // Inserter rejected (no Bard field, anchor not found, etc.) and
+            // revert reports false-positive "Links were already gone" skips.
+            $writtenIds = array_values(array_filter(array_map(
+                fn ($e) => is_array($e) && isset($e['id']) ? $e['id'] : null,
+                $result['affected_entries'] ?? [],
+            )));
+            $actualItems = array_values(array_filter(
+                $snapshotItems,
+                fn ($i) => in_array($i['entry_id'] ?? '', $writtenIds, true),
+            ));
+            app(BulkSnapshotStore::class)->replaceItems($snapshotId, $actualItems, $writtenIds);
+            app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $writtenIds ?: $snapshotEntryIds);
             app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
                 'phase' => 'done',
                 'links_added' => $result['links_added'] ?? 0,
