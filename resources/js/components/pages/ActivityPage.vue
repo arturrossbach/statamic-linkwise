@@ -157,8 +157,8 @@
                                 <tr>
                                     <th scope="col" class="text-left">
                                         <div class="inline-flex items-center gap-1">
-                                            Title
-                                            <HelpIcon tooltip="The entry that this operation touched. Click the title to open it in Statamic." />
+                                            Affected entry
+                                            <HelpIcon tooltip="The entry where Linkwise wrote — i.e. for an Apply-Rule run, the entry whose content received the new link; for a Detail-modal Bulk Unlink, the entry whose links were removed; for a URL Changer batch, the entry whose URLs were swapped. Click the title to open it in Statamic. The 'What happened' column shows the target / counterpart of each change." />
                                         </div>
                                     </th>
                                     <th scope="col" class="text-left">
@@ -508,27 +508,42 @@ export default {
             const items = e.items || [];
             return items.map(it => {
                 const anchor = it.anchor_text ? `<span class="font-mono">"${this.escape(it.anchor_text)}"</span>` : '';
-                const url = it.url ? this.truncateUrl(it.url) : '';
-                const matched = it.matched_url ? this.truncateUrl(it.matched_url) : '';
-                const newUrl = it.new_url ? this.truncateUrl(it.new_url) : '';
                 if (kind === 'applyrule') {
-                    return `Inserted ${anchor || 'link'} → <span class="text-gray-500">${this.escape(url)}</span>`;
+                    return `Inserted ${anchor || 'link'} → ${this.targetLabel(it, 'url')}`;
                 }
                 if (kind === 'inboundinsert' || kind === 'outboundinsert') {
                     const dir = kind === 'inboundinsert' ? 'inbound' : 'outbound';
-                    return `Inserted ${dir} link ${anchor || ''} → <span class="text-gray-500">entry ${it.target_entry_id ? it.target_entry_id.slice(0, 8) + '…' : '?'}</span>`;
+                    return `Inserted ${dir} link ${anchor || ''} → ${this.targetLabel(it, 'target_entry_id')}`;
                 }
                 if (kind === 'detailunlink') {
-                    return `Removed ${anchor || 'link'} → <span class="text-gray-500">${this.escape(matched)}</span>`;
+                    return `Removed ${anchor || 'link'} → ${this.targetLabel(it, 'matched_url')}`;
                 }
                 if (kind === 'urlchanger') {
-                    return `Replaced <span class="text-gray-500">${this.escape(matched)}</span> → <span class="text-gray-500">${this.escape(newUrl)}</span>`;
+                    return `Replaced ${this.targetLabel(it, 'matched_url')} → ${this.targetLabel(it, 'new_url')}`;
                 }
                 if (kind === 'bulkunlink') {
-                    return `Removed broken link → <span class="text-gray-500">${this.escape(matched)}</span>`;
+                    return `Removed broken link → ${this.targetLabel(it, 'matched_url')}`;
                 }
                 return '';
             }).filter(Boolean);
+        },
+
+        // Render a target reference: prefer the resolved entry title (with
+        // an edit-link to Statamic) when the value points at a Statamic entry,
+        // otherwise fall back to the truncated raw URL/UUID. Backend fills
+        // <field>_title and <field>_edit_url whenever it could resolve them.
+        targetLabel(item, field) {
+            const titleKey = field + '_title';
+            const editKey = field + '_edit_url';
+            const raw = item[field];
+            if (!raw) return '<span class="text-gray-400">—</span>';
+            if (item[titleKey] && item[editKey]) {
+                return `<a href="${this.escape(item[editKey])}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">${this.escape(item[titleKey])}</a>`;
+            }
+            if (item[titleKey]) {
+                return `<span class="text-gray-700 dark:text-gray-300">${this.escape(item[titleKey])}</span>`;
+            }
+            return `<span class="text-gray-500">${this.escape(this.truncateUrl(raw))}</span>`;
         },
 
         // Tiny escape so v-html-rendered action lines can't bleed user content

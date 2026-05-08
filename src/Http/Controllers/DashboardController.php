@@ -510,13 +510,49 @@ class DashboardController extends CpController
             } catch (\Throwable) {
                 // Best-effort — fall back to ID-only display.
             }
+            // Enrich items with target-entry titles where the URL points to
+            // a Statamic entry. The drawer otherwise shows opaque "entry: abc123de…"
+            // for internal links — useless to a user who can't read UUIDs at
+            // a glance. We resolve target_entry_id explicitly (link-insert items)
+            // AND any *_url field that uses the statamic://entry::UUID scheme
+            // (apply-rule, detail-unlink, url-changer items).
+            $resolvedItems = [];
+            foreach ($itemsByEntry[$entryId] ?? [] as $item) {
+                $resolved = $item;
+                foreach (['url', 'matched_url', 'new_url', 'target_entry_id'] as $field) {
+                    if (empty($item[$field])) continue;
+                    $value = (string) $item[$field];
+                    $targetId = null;
+                    if ($field === 'target_entry_id') {
+                        $targetId = $value;
+                    } elseif (preg_match('#^statamic://entry::([0-9a-f-]+)$#i', $value, $m)) {
+                        $targetId = $m[1];
+                    }
+                    if ($targetId !== null) {
+                        try {
+                            $targetEntry = \Statamic\Facades\Entry::find($targetId);
+                            if ($targetEntry) {
+                                $resolved[$field.'_title'] = $targetEntry->get('title') ?? $targetId;
+                                $resolved[$field.'_edit_url'] = cp_route(
+                                    'collections.entries.edit',
+                                    [$targetEntry->collectionHandle(), $targetId],
+                                );
+                            }
+                        } catch (\Throwable) {
+                            // Best-effort — UI falls back to truncated id.
+                        }
+                    }
+                }
+                $resolvedItems[] = $resolved;
+            }
+
             $entries[] = [
                 'id' => $entryId,
                 'title' => $title,
                 'collection' => $collection,
                 'edit_url' => $editUrl,
                 'status' => $statuses[$entryId] ?? 'unknown',
-                'items' => $itemsByEntry[$entryId] ?? [],
+                'items' => $resolvedItems,
             ];
         }
 
