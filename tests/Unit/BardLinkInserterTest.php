@@ -598,6 +598,262 @@ class BardLinkInserterTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Bug B regression suite — partial-overlap with an existing link must
+    // NOT split the linked text node and tear the original link apart.
+    //
+    // Real-data trigger 2026-05-08: source entry had
+    //   text: "Brauner-Zucker-Speck-Kekse" (single text node, linked to X)
+    // An Outbound suggestion proposed anchor "Brauner" → entry Y.
+    // splitSingleNode produced
+    //   "Brauner" (link Y) + "-Zucker-Speck-Kekse" (link X)
+    // Original phrase ended up half-pointing at the wrong target. The
+    // multi-walker (findAndLinkAllInChildren) had skipped pre-linked
+    // nodes since day one — single walker now matches that contract.
+    //
+    // Fully-covered linked nodes (URL-upgrade case, anchor === entire
+    // linked text) STAY replaceable — that is intentional and used by
+    // URL-Changer. See test_replaces_different_link_on_already_linked_text
+    // and the dedicated multi-node fully-covered test below.
+    // ─────────────────────────────────────────────────────────────────────
+
+    public function test_bugB_skips_anchor_inside_partially_covered_linked_phrase(): void
+    {
+        // The original user-reported case in minimal form: anchor is a
+        // strict prefix of a linked hyphen-word, no other valid occurrence
+        // exists → return null, do NOT tear the original link.
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Weiter mit '],
+                    [
+                        'type' => 'text',
+                        'text' => 'Brauner-Zucker-Speck-Kekse',
+                        'marks' => [
+                            ['type' => 'link', 'attrs' => ['href' => 'statamic://entry::existing-cookie']],
+                        ],
+                    ],
+                    ['type' => 'text', 'text' => '.'],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::insertLink($bard, 'Brauner', 'pasta-salbeibutter');
+
+        $this->assertNull(
+            $result,
+            'Anchor inside a partially-covered linked phrase must be skipped — splitting would tear the existing link in half',
+        );
+    }
+
+    public function test_bugB_falls_back_to_later_unlinked_occurrence(): void
+    {
+        // Crucial counterpart: skip-and-continue, NOT abort. If the FIRST
+        // occurrence sits inside a linked phrase but a LATER plain
+        // occurrence exists, the walker must find that one. Returning
+        // null after the partial-overlap skip would leave a perfectly
+        // valid suggestion unfulfilled.
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Weiter mit '],
+                    [
+                        'type' => 'text',
+                        'text' => 'Brauner-Zucker-Speck-Kekse',
+                        'marks' => [
+                            ['type' => 'link', 'attrs' => ['href' => 'statamic://entry::existing']],
+                        ],
+                    ],
+                    ['type' => 'text', 'text' => '. Später kam ein Brauner Bär vorbei.'],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::insertLink($bard, 'Brauner', 'pasta-salbeibutter');
+
+        $this->assertNotNull($result, 'Walker must continue past the linked occurrence and find the plain "Brauner" later in the paragraph');
+        $children = $result[0]['content'];
+
+        // Linked hyphen-word must be untouched.
+        $linkedNode = $children[1];
+        $this->assertSame('Brauner-Zucker-Speck-Kekse', $linkedNode['text']);
+        $this->assertCount(1, $linkedNode['marks']);
+        $this->assertSame('statamic://entry::existing', $linkedNode['marks'][0]['attrs']['href']);
+
+        // Walk the children to find a node with text === 'Brauner' that is
+        // NOT the start of the original linked phrase. Asserting via
+        // structure-position is fragile because the splits can produce
+        // 4-5 nodes depending on how the suffix gets carved.
+        $brauner = null;
+        foreach ($children as $c) {
+            if (($c['text'] ?? '') === 'Brauner' && empty(array_filter(
+                $c['marks'] ?? [],
+                fn ($m) => ($m['attrs']['href'] ?? '') === 'statamic://entry::existing',
+            ))) {
+                $brauner = $c;
+                break;
+            }
+        }
+        $this->assertNotNull($brauner, 'Plain "Brauner" should be split out and linked');
+        $this->assertNotEmpty($brauner['marks'] ?? []);
+        $this->assertSame('statamic://entry::pasta-salbeibutter', $brauner['marks'][0]['attrs']['href']);
+    }
+
+    public function test_bugB_skips_when_anchor_crosses_into_linked_node(): void
+    {
+        // Multi-node match where the END falls inside a linked node.
+        // Anchor "Brauner-Zucker" starts in node[1] (plain "Brauner") and
+        // ends inside node[2] (linked "-Zucker-Speck-Kekse"). The link
+        // node is partially covered → skip.
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Mit '],
+                    ['type' => 'text', 'text' => 'Brauner'],
+                    [
+                        'type' => 'text',
+                        'text' => '-Zucker-Speck-Kekse',
+                        'marks' => [
+                            ['type' => 'link', 'attrs' => ['href' => 'statamic://entry::existing']],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::insertLink($bard, 'Brauner-Zucker', 'other-target');
+
+        $this->assertNull($result, 'Anchor that crosses into a linked node must be skipped');
+    }
+
+    public function test_bugB_skips_when_anchor_crosses_out_of_linked_node(): void
+    {
+        // Mirror case: match starts inside a linked node, ends in plain
+        // text. Linked node is partially covered → skip.
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    [
+                        'type' => 'text',
+                        'text' => 'Brauner-Zucker',
+                        'marks' => [
+                            ['type' => 'link', 'attrs' => ['href' => 'statamic://entry::existing']],
+                        ],
+                    ],
+                    ['type' => 'text', 'text' => ' und Mehr'],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::insertLink($bard, 'Zucker und Mehr', 'other-target');
+
+        $this->assertNull($result, 'Anchor that starts inside a linked node and crosses out must be skipped');
+    }
+
+    public function test_bugB_fully_covers_linked_node_still_replaces(): void
+    {
+        // Preserves the URL-upgrade behavior: anchor === full linked text
+        // → existing different-href link mark is replaced with the new one.
+        // See also test_replaces_different_link_on_already_linked_text and
+        // test_replaces_existing_external_link_in_single_node.
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    [
+                        'type' => 'text',
+                        'text' => 'Redis Setup Guide',
+                        'marks' => [
+                            ['type' => 'link', 'attrs' => ['href' => 'https://example.com/old']],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::insertLink($bard, 'Redis Setup Guide', 'target-123');
+
+        $this->assertNotNull($result, 'Fully-covered different-href link should still be replaceable');
+        $this->assertSame(
+            'statamic://entry::target-123',
+            $result[0]['content'][0]['marks'][0]['attrs']['href'],
+        );
+    }
+
+    public function test_bugB_invariant_existing_link_text_stays_linked(): void
+    {
+        // Domain invariant for any single-walker run: text spans that
+        // were inside a link mark before the call must STILL be inside
+        // a link mark after the call. This guards the broader Bug B
+        // class — any future code path that destructures text nodes
+        // around an existing link must preserve coverage.
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Mit '],
+                    [
+                        'type' => 'text',
+                        'text' => 'Brauner-Zucker-Speck-Kekse',
+                        'marks' => [
+                            ['type' => 'link', 'attrs' => ['href' => 'statamic://entry::existing']],
+                        ],
+                    ],
+                    ['type' => 'text', 'text' => '. Auch ein Brauner Bär kam vorbei.'],
+                ],
+            ],
+        ];
+
+        $beforeLinkedText = self::concatLinkedText($bard);
+        $result = BardLinkInserter::insertLink($bard, 'Brauner', 'target-123');
+        // Either the walker found a plain occurrence (modified tree) or
+        // it didn't (null). Either way every original linked character
+        // must still belong to a link mark in the post-state.
+        $afterTree = $result ?? $bard;
+        $afterLinkedText = self::concatLinkedText($afterTree);
+
+        // The post-state's linked text is allowed to GROW (new link added)
+        // but every character of the pre-state's linked text must still
+        // appear as part of a linked span. Cheapest check: original linked
+        // substring is still a contiguous substring of the linked text.
+        $this->assertStringContainsString(
+            $beforeLinkedText,
+            $afterLinkedText,
+            'Original linked text must remain entirely inside a link mark — no link node may be partially destroyed',
+        );
+    }
+
+    /**
+     * Helper: concat all text content carrying a link mark, in tree order.
+     * Used by the invariant test above.
+     */
+    private static function concatLinkedText(array $tree): string
+    {
+        $buf = '';
+        $walk = function ($nodes) use (&$walk, &$buf) {
+            foreach ($nodes as $n) {
+                if (! is_array($n)) continue;
+                if (($n['type'] ?? '') === 'text') {
+                    foreach ($n['marks'] ?? [] as $m) {
+                        if (($m['type'] ?? '') === 'link') {
+                            $buf .= $n['text'] ?? '';
+                            break;
+                        }
+                    }
+                } elseif (isset($n['content']) && is_array($n['content'])) {
+                    $walk($n['content']);
+                }
+            }
+        };
+        $walk($tree);
+
+        return $buf;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Retreat tests: V1 only writes to `bard` (structured) and `markdown`
     // (top-level). Plain-string fields (text/textarea) and plain-string
     // values nested in Replicator sets are NEVER touched, because they

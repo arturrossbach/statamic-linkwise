@@ -723,12 +723,51 @@ class BardLinkInserter
 
             if ($valid) {
                 $startMap = $nodeMap[$found];
-                if ($startMap['index'] === -1) {
+                $endMap = $nodeMap[$found + $anchorLen - 1];
+                if ($startMap['index'] === -1 || $endMap['index'] === -1) {
                     $valid = false;
                 } else {
                     $startChild = $children[$startMap['index']];
                     if (static::isLinkedToHref($startChild, $href)) {
                         return null; // Already linked to this target at this occurrence — nothing to do
+                    }
+
+                    // Bug B (2026-05-08): refuse to write into a partially-
+                    // covered existing link. If the match starts mid-text-node
+                    // OR ends mid-text-node AND that node carries a (different-
+                    // href) link mark, splitSingleNode would tear the existing
+                    // link apart — original "Brauner-Zucker-Speck-Kekse" link
+                    // becomes "Brauner"=NEW + "-Zucker-Speck-Kekse"=OLD on
+                    // suggestion-add of "Brauner". The multi-walker
+                    // (findAndLinkAllInChildren) skips any pre-linked node
+                    // entirely; this brings the single walker symmetric.
+                    //
+                    // Fully-covered linked nodes (URL-upgrade case where the
+                    // anchor matches the entire linked phrase) stay valid —
+                    // see test_replaces_different_link_on_already_linked_text.
+                    $startIdx = $startMap['index'];
+                    $endIdx = $endMap['index'];
+                    $startOffsetInChild = $startMap['offset'];
+                    $endOffsetInChild = $endMap['offset'] + 1; // exclusive
+
+                    for ($idx = $startIdx; $idx <= $endIdx; $idx++) {
+                        $child = $children[$idx];
+                        $hasLink = false;
+                        foreach ($child['marks'] ?? [] as $m) {
+                            if (($m['type'] ?? '') === 'link') {
+                                $hasLink = true;
+                                break;
+                            }
+                        }
+                        if (! $hasLink) continue;
+
+                        $childTextLen = mb_strlen($child['text'] ?? '');
+                        $startsAtChildBeginning = $idx > $startIdx || $startOffsetInChild === 0;
+                        $endsAtChildEnd = $idx < $endIdx || $endOffsetInChild === $childTextLen;
+                        if (! ($startsAtChildBeginning && $endsAtChildEnd)) {
+                            $valid = false;
+                            break;
+                        }
                     }
                 }
             }
