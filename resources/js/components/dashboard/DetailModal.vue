@@ -434,11 +434,11 @@ export default {
                         ? {
                             entry_id: entryId,
                             content_hash: this.getEntryHash(entryId),
-                            insertions: [{ target_entry_id: targetEntryId, anchor_text: item._anchor }],
+                            insertions: [{ target_entry_id: targetEntryId, anchor_text: item._anchor, sentence_context: item.sentence_context || '' }],
                         }
                         : {
                             entry_hashes: { [entryId]: this.getEntryHash(entryId) },
-                            insertions: [{ source_entry_id: entryId, target_entry_id: targetEntryId, anchor_text: item._anchor }],
+                            insertions: [{ source_entry_id: entryId, target_entry_id: targetEntryId, anchor_text: item._anchor, sentence_context: item.sentence_context || '' }],
                         };
 
                     const response = await fetch(insertUrl, {

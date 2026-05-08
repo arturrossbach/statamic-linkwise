@@ -79,6 +79,10 @@ class InboundController extends CpController
             'insertions.*.source_entry_id' => ['required', 'string', 'max:64'],
             'insertions.*.target_entry_id' => ['required', 'string', 'max:64'],
             'insertions.*.anchor_text' => ['required', 'string', 'max:500'],
+            // Sentence around the anchor at preview-time. Carried into the
+            // activity-log snapshot so the drawer's Context column shows the
+            // editor's view at apply-time, even after the entry has changed.
+            'insertions.*.sentence_context' => ['sometimes', 'nullable', 'string', 'max:1024'],
             'entry_title' => ['sometimes', 'nullable', 'string', 'max:300'],
             // Activity-log Revert flow — marks the new snapshot as a reverse-of-X.
             'reverts' => ['sometimes', 'nullable', 'string', 'max:64'],

@@ -789,6 +789,7 @@ export default {
                 source_entry_id: item.source_entry_id,
                 target_entry_id: targetEntryId,
                 anchor_text: item._anchor || item.anchor_text,
+                sentence_context: item.sentence_context || '',
             }));
 
             // Client-side cap with explicit message + alternative.
@@ -959,6 +960,7 @@ export default {
                                 source_entry_id: s.source_entry_id,
                                 target_entry_id: s.target_entry_id,
                                 anchor_text: s._anchor,
+                                sentence_context: s.sentence_context || '',
                             }],
                             skip_rebuild: !isLast,
                         }),

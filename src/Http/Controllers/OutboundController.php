@@ -84,6 +84,10 @@ class OutboundController extends CpController
             'insertions' => ['required', 'array', 'min:1', 'max:200'],
             'insertions.*.target_entry_id' => ['required', 'string', 'max:64'],
             'insertions.*.anchor_text' => ['required', 'string', 'max:500'],
+            // Sentence around the anchor at preview-time — fed through to
+            // the activity-log Context column. See InboundController for the
+            // matching field on the inbound side.
+            'insertions.*.sentence_context' => ['sometimes', 'nullable', 'string', 'max:1024'],
             'entry_title' => ['sometimes', 'nullable', 'string', 'max:300'],
             // Activity-log Revert flow — marks the new snapshot as a reverse-of-X.
             'reverts' => ['sometimes', 'nullable', 'string', 'max:64'],
