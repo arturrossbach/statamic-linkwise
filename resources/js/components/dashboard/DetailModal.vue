@@ -321,6 +321,11 @@ export default {
                     field_type: item.field_type || '',
                     matched_url: item.url,
                     occurrence_index: item.occurrence_index ?? 0,
+                    // Carried into the snapshot so the activity-log drawer's
+                    // Context column shows the sentence + anchor (and a
+                    // future Unlink-revert can re-insert at the same spot).
+                    anchor_text: item.anchor_text || '',
+                    sentence_context: item.sentence_context || '',
                 };
             });
             const entryHashes = {};

@@ -77,7 +77,12 @@ class InboundController extends CpController
             'entry_hashes' => ['sometimes', 'array', 'max:50000'],
             'insertions' => ['required', 'array', 'min:1', 'max:200'],
             'insertions.*.source_entry_id' => ['required', 'string', 'max:64'],
-            'insertions.*.target_entry_id' => ['required', 'string', 'max:64'],
+            // target_entry_id OR href — either may be present (LinkInsertCommand
+            // builds the effective href from whichever is provided). Internal
+            // re-links use target_entry_id, external re-links (revert of
+            // detail-unlink with https:// URLs) use href.
+            'insertions.*.target_entry_id' => ['nullable', 'string', 'max:64'],
+            'insertions.*.href' => ['nullable', 'string', 'max:2048'],
             'insertions.*.anchor_text' => ['required', 'string', 'max:500'],
             // Sentence around the anchor at preview-time. Carried into the
             // activity-log snapshot so the drawer's Context column shows the

@@ -595,6 +595,31 @@ class DashboardController extends CpController
             }, $snap['items']);
         }
 
+        // Enrich revert_skipped records with edit_url so the drawer's
+        // skipped-entries table can render Entry as a clickable link.
+        // Best-effort — buildSkipRecord persisted entry_id + entry_title +
+        // modified_by + modified_at; we resolve the entry here to add the
+        // edit_url. Deleted entries (lookup miss) keep entry_title as-is
+        // and edit_url stays absent.
+        if (! empty($snap['revert_skipped']) && is_array($snap['revert_skipped'])) {
+            $snap['revert_skipped'] = array_map(function ($row) {
+                if (! is_array($row) || empty($row['entry_id'])) return $row;
+                try {
+                    $e = \Statamic\Facades\Entry::find($row['entry_id']);
+                    if ($e) {
+                        $row['edit_url'] = cp_route(
+                            'collections.entries.edit',
+                            [$e->collectionHandle(), $row['entry_id']],
+                        );
+                        $row['collection'] = $e->collectionHandle();
+                    }
+                } catch (\Throwable) {
+                    // Deleted entry — leave the record as-is.
+                }
+                return $row;
+            }, $snap['revert_skipped']);
+        }
+
         // Compute a deep-link to URL Changer search if we have a meaningful
         // search term. Used by the drawer's "Find these in URL Changer" button.
         $deepLinkSearch = $this->deepLinkSearchFor($snap);
@@ -1045,6 +1070,12 @@ class DashboardController extends CpController
             'replacements.*.matched_url' => 'required|string|max:2048',
             'replacements.*.occurrence_index' => 'required|numeric|min:0',
             'replacements.*.search' => 'nullable|string|max:2048',
+            // Anchor + sentence carried from DetailModal so the activity-
+            // log drawer's Context column shows the editor's view at
+            // unlink-time. Without these the column was rendering "—"
+            // for every detail-unlink snapshot.
+            'replacements.*.anchor_text' => 'nullable|string|max:512',
+            'replacements.*.sentence_context' => 'nullable|string|max:1024',
             'entry_hashes' => 'sometimes|array|max:50000',
             'source_mode' => 'sometimes|in:inbound,outbound',
             'entry_title' => 'sometimes|nullable|string|max:300',

@@ -148,19 +148,40 @@ class LinkInsertCommand extends Command
 
             try {
                 $sourceEntryId = $insertion['source_entry_id'];
-                $targetEntryId = $insertion['target_entry_id'];
+                $targetEntryId = $insertion['target_entry_id'] ?? null;
+                $href = $insertion['href'] ?? null;
                 $anchorText = $insertion['anchor_text'];
 
-                // BardLinkInserter does its own SafeEntrySaver-based hash
-                // check via insertLinkIntoEntry → SafeEntrySaver::load+save.
-                // For inbound mode the per-entry hash flows from $entryHashes;
-                // for outbound the source is fixed and content_hash applies
-                // (carried in $insertion if needed; for V1 the per-item path
-                // uses fresh-load each time).
-                $success = BardLinkInserter::insertLinkIntoEntry(
+                // Two routing modes — same write path under the hood
+                // (BardLinkInserter::insertLinkIntoEntryWithHref handles
+                // BOTH internal statamic://entry:: refs AND arbitrary URLs).
+                // Internal: build href from target_entry_id. External:
+                // href passed directly (used by detail-unlink revert for
+                // external URLs — re-wraps the anchor in the original URL).
+                $effectiveHref = $href ?? ($targetEntryId ? 'statamic://entry::' . $targetEntryId : null);
+                if (! $effectiveHref) {
+                    $msg = 'Insertion missing both target_entry_id and href';
+                    $errors[$msg] = ($errors[$msg] ?? 0) + 1;
+                    $skipped++;
+                    Cache::put($statusKey, [
+                        'phase' => 'running',
+                        'current' => $i + 1,
+                        'total' => $total,
+                        'succeeded' => $succeeded,
+                        'skipped' => $skipped,
+                        'source_mode' => $sourceMode,
+                        'entry_title' => $entryTitle,
+                        'started_by' => $startedBy,
+                        'started_by_id' => $startedById,
+                        'heartbeat' => time(),
+                    ], 600);
+                    continue;
+                }
+
+                $success = BardLinkInserter::insertLinkIntoEntryWithHref(
                     $sourceEntryId,
                     $anchorText,
-                    $targetEntryId,
+                    $effectiveHref,
                 );
 
                 if ($success) {
@@ -170,14 +191,17 @@ class LinkInsertCommand extends Command
                     // activity-log table reflects reality.
                     app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
                         'source_entry_id' => $sourceEntryId,
-                        'target_entry_id' => $targetEntryId,
+                        'target_entry_id' => $targetEntryId ?? '',
+                        'href' => $effectiveHref,
                         'anchor_text' => $anchorText,
                         'sentence_context' => $insertion['sentence_context'] ?? '',
                     ]);
                     // Both ends of the new edge are affected — source's
-                    // outbound counts shift, target's inbound counts shift.
+                    // outbound counts shift, target's inbound counts shift
+                    // (only for internal targets — external href has no
+                    // counterpart to refresh).
                     $affectedIds[$sourceEntryId] = true;
-                    $affectedIds[$targetEntryId] = true;
+                    if ($targetEntryId) $affectedIds[$targetEntryId] = true;
                 } else {
                     $msg = 'Anchor text not found in entry';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;

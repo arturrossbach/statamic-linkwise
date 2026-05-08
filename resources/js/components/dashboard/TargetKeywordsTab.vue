@@ -110,10 +110,6 @@
                             >{{ kw }}</span>
                             <span v-if="editModal.content_keywords.length === 0" class="text-xs text-gray-400">No content keywords extracted.</span>
                         </div>
-                        <p class="text-xs text-gray-400 mt-2">
-                            TF-IDF based. Imperfect on small content sets.
-                            AI-powered keyword extraction is planned for V1.1.
-                        </p>
                     </div>
 
                     <div>

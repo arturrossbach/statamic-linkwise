@@ -59,10 +59,14 @@ export function isReversible(snapshot) {
     // entry to re-link through inbound/outbound-insert, which we don't have.
     // If at least one item is a statamic:// link we still surface the button
     // (filtered to those at apply-time); the UI clarifies the partial scope.
+    // detailunlink revert: re-add the link mark on the original anchor.
+    // Routes via outbound-insert which now supports BOTH internal entry
+    // refs (target_entry_id) AND external URLs (href). The only hard
+    // requirement is anchor_text — without it we don't know what plain-
+    // text run to wrap. Older snapshots from before anchor recording
+    // shipped have no anchor_text, so they stay unrevertable.
     if (kind === 'detailunlink') {
-        return snapshot.items.some(i =>
-            typeof i?.matched_url === 'string' && i.matched_url.startsWith('statamic://entry::')
-        );
+        return snapshot.items.some(i => !! i?.anchor_text && !! i?.matched_url);
     }
 
     // URL-Changer mixes two operation shapes that revert through different
@@ -70,9 +74,8 @@ export function isReversible(snapshot) {
     //   - replace items (new_url is a real URL): symmetric swap via url-changer apply
     //   - unlink items (new_url=UNLINK_SENTINEL): asymmetric — needs the link
     //     mark RE-ADDED on the original anchor; we route those through
-    //     outbound-insert. Requires anchor_text + an internal target (we can
-    //     only add a link mark if matched_url is statamic://entry::ID — for
-    //     external URLs there's no "re-link this plain text" write path yet).
+    //     outbound-insert (which accepts arbitrary href, so internal AND
+    //     external URLs are both fine — we just need anchor_text).
     //   Mixed snapshots are reversible if any item is swappable OR any item
     //   is a re-link candidate.
     if (kind === 'urlchanger') {
@@ -85,11 +88,11 @@ export function isReversible(snapshot) {
 function isUrlchangerItemReversible(item) {
     if (! item) return false;
     if (item.new_url && item.new_url !== UNLINK_SENTINEL) return true; // swap path
-    if (item.new_url === UNLINK_SENTINEL
-        && typeof item.matched_url === 'string'
-        && item.matched_url.startsWith('statamic://entry::')
-        && item.anchor_text) {
-        return true; // re-link path
+    // Unlink revert: re-link via outbound-insert. Needs anchor_text + a
+    // matched_url (internal or external) — outbound-insert accepts both
+    // via the href fallback, so external URLs are now first-class too.
+    if (item.new_url === UNLINK_SENTINEL && item.matched_url && item.anchor_text) {
+        return true;
     }
     return false;
 }
@@ -111,29 +114,23 @@ export function nonReversibleReason(snapshot) {
         return 'Bulk-unlink of broken links is not reversible — the URLs were broken at the time of removal. Re-linking them would re-introduce broken references.';
     }
     if (snapshot.kind === 'detailunlink') {
-        // Reachable only when no items are internal entry-refs at all.
-        return 'This unlink only removed external (https://…) links. Linkwise can\'t auto-re-link external URLs — they\'d need a target Statamic entry to point to. Use Statamic Revisions or a backup to restore.';
+        // Reachable only when no items have anchor_text — older snapshots
+        // recorded before anchor capture shipped, so we don't know which
+        // plain-text run to wrap on re-link.
+        return 'This unlink snapshot was recorded before per-item anchor capture shipped — Linkwise can\'t reconstruct which text to re-link. Newer unlinks (created from now on) are revertable.';
     }
     if (snapshot.kind === 'applyrule' && snapshot.summary?.mode === 'multi-rule') {
-        return 'Multi-rule applies are not yet revertable in V1 — use the "Find these in URL Changer" link or revert each rule individually from a single-rule activity entry.';
+        return 'Multi-rule applies are not yet revertable in V1 — revert each rule individually from a single-rule activity entry.';
     }
     if (snapshot.kind === 'urlchanger') {
-        // None of the items are reversible — all sentinel-with-external-URL
-        // (would need a re-link write path we don't have) or all missing
-        // anchor_text (legacy snapshot from before anchor recording shipped).
+        // Only legacy unlink snapshots without anchor_text fall here now —
+        // external-URL unlinks ARE revertable via the href path.
         const items = Array.isArray(snapshot.items) ? snapshot.items : [];
-        const hasUnlink = items.some(i => i?.new_url === UNLINK_SENTINEL);
-        const hasLegacy = items.some(i => i?.new_url === UNLINK_SENTINEL && ! i?.anchor_text);
-        const hasExternalUnlink = items.some(i =>
-            i?.new_url === UNLINK_SENTINEL
-            && typeof i?.matched_url === 'string'
-            && ! i.matched_url.startsWith('statamic://entry::')
+        const hasUnlinkWithoutAnchor = items.some(i =>
+            i?.new_url === UNLINK_SENTINEL && ! i?.anchor_text
         );
-        if (hasUnlink && hasLegacy) {
+        if (hasUnlinkWithoutAnchor) {
             return 'This URL-Changer "Unlink" snapshot was recorded before per-item anchor capture shipped — Linkwise can\'t reconstruct which text to re-link. Snapshots created from now on are revertable.';
-        }
-        if (hasUnlink && hasExternalUnlink) {
-            return 'URL-Changer "Unlink" of external URLs (https://…) isn\'t auto-revertable yet — re-adding the link would need a write path that wraps plain text in a new link mark, which we ship in V1.1. Internal-target unlinks ARE revertable.';
         }
     }
     if (!Array.isArray(snapshot.items) || snapshot.items.length === 0) {
@@ -215,30 +212,24 @@ export function buildRevertRequest(snapshot, endpoints) {
 
     if (snapshot.kind === 'detailunlink') {
         // Items = {entry_id, matched_url, anchor_text}.
-        // Re-insert each via inbound/outbound-insert. Only internal entry
-        // references survive the filter — external URLs need a target_entry_id
-        // we don't have. The UI already surfaces this in the explanation.
-        const internalItems = items.filter(i =>
-            typeof i?.matched_url === 'string' && i.matched_url.startsWith('statamic://entry::')
-        );
-        const insertions = internalItems.map(i => {
-            const targetId = i.matched_url.replace('statamic://entry::', '');
-            const sourceMode = summary.source_mode || 'inbound';
-            // For inbound-mode unlinks: we removed inbound links pointing TO
-            // a target → original entry was the SOURCE → re-insert via inbound
-            // logic with that source. For outbound-mode: entry_id was the
-            // source itself → re-insert via outbound logic.
-            return sourceMode === 'inbound'
-                ? {
-                      source_entry_id: i.entry_id,   // the entry that had the link
-                      target_entry_id: targetId,     // the entry being linked to
-                      anchor_text: i.anchor_text || '',
-                  }
-                : {
-                      source_entry_id: i.entry_id,
-                      target_entry_id: targetId,
-                      anchor_text: i.anchor_text || '',
-                  };
+        // Re-insert each via inbound/outbound-insert. The endpoint accepts
+        // BOTH internal entry refs AND arbitrary URLs — for internal we
+        // pass target_entry_id (resolves into statamic://entry::ID server-
+        // side), for external we pass href verbatim. Both call into the
+        // same BardLinkInserter::insertLinkIntoEntryWithHref path.
+        // The only requirement is anchor_text — without it we don't know
+        // what plain-text run to wrap.
+        const reLinkable = items.filter(i => i?.matched_url && i?.anchor_text);
+        const insertions = reLinkable.map(i => {
+            const isInternal = typeof i.matched_url === 'string'
+                && i.matched_url.startsWith('statamic://entry::');
+            const base = {
+                source_entry_id: i.entry_id,
+                anchor_text: i.anchor_text || '',
+            };
+            return isInternal
+                ? { ...base, target_entry_id: i.matched_url.replace('statamic://entry::', '') }
+                : { ...base, href: i.matched_url };
         });
         const isInbound = (summary.source_mode || 'inbound') === 'inbound';
         return {
@@ -274,8 +265,7 @@ export function buildRevertRequest(snapshot, endpoints) {
         const reLink = items.filter(i =>
             i.new_url === UNLINK_SENTINEL
             && i.entry_id
-            && typeof i.matched_url === 'string'
-            && i.matched_url.startsWith('statamic://entry::')
+            && i.matched_url
             && i.anchor_text
         );
 
@@ -303,11 +293,17 @@ export function buildRevertRequest(snapshot, endpoints) {
         }
 
         if (reLink.length > 0) {
-            const insertions = reLink.map(i => ({
-                source_entry_id: i.entry_id,
-                target_entry_id: i.matched_url.replace('statamic://entry::', ''),
-                anchor_text: i.anchor_text,
-            }));
+            const insertions = reLink.map(i => {
+                const isInternal = typeof i.matched_url === 'string'
+                    && i.matched_url.startsWith('statamic://entry::');
+                const base = {
+                    source_entry_id: i.entry_id,
+                    anchor_text: i.anchor_text,
+                };
+                return isInternal
+                    ? { ...base, target_entry_id: i.matched_url.replace('statamic://entry::', '') }
+                    : { ...base, href: i.matched_url };
+            });
             return {
                 url: endpoints.outboundInsert,
                 payload: {

@@ -123,17 +123,41 @@
                         Look for the matching reverse-bulk further up in this list.
                     </p>
                 </Alert>
-                <Alert v-else variant="default" class="mb-3">
+                <Alert v-else-if="nonReversibleReason" variant="default" class="mb-3">
                     <p class="text-sm">
-                        <strong>How to undo this:</strong>
-                        <span v-if="nonReversibleReason">{{ nonReversibleReason }}</span>
-                        <span v-else>Linkwise can't auto-revert this operation — use whichever recovery path fits your setup:</span>
+                        <strong>Not auto-revertable:</strong> {{ nonReversibleReason }}
                     </p>
-                    <ul class="text-xs mt-2 ml-4 list-disc space-y-0.5 leading-relaxed">
-                        <li><strong>Statamic Revisions</strong> (if enabled on the collection): open the entry → Revisions → restore.</li>
-                        <li><strong>Git</strong> (if your <code>content/</code> is committed): roll the affected entry files back to a previous commit.</li>
-                        <li><strong>Hosting backup</strong>: every hoster (Forge, Ploi, Cleavr, your own server) has scheduled snapshots.</li>
-                    </ul>
+                </Alert>
+
+                <!-- Skipped-during-revert table — surfaces the entries that
+                     a revert dispatched against this snapshot couldn't
+                     process (hash mismatch from user edits, deleted entry,
+                     etc.). Only meaningful for snapshots that have BEEN
+                     reverted (reverted_at set) AND have skip records. -->
+                <Alert v-if="hasSkippedDuringRevert" variant="warning" class="mb-3">
+                    <p class="text-sm font-medium mb-2">
+                        ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during the revert because of changes made since this bulk ran. Their content is intact — Linkwise refused to overwrite them.
+                    </p>
+                    <div class="overflow-x-auto">
+                        <table class="data-table w-full text-xs">
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="text-left">Entry</th>
+                                    <th scope="col" class="text-left">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="row in skippedDuringRevert" :key="row.entry_id">
+                                    <td>
+                                        <a v-if="row.edit_url" :href="row.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ row.entry_title || row.entry_id }}</a>
+                                        <span v-else>{{ row.entry_title || '(deleted)' }}</span>
+                                        <span v-if="row.collection" class="ml-2 text-xs text-gray-400">{{ row.collection }}</span>
+                                    </td>
+                                    <td class="text-gray-600 dark:text-gray-400" v-html="formatSkipReason(row)"></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </Alert>
 
                 <!-- Revert lineage banner — when this snapshot is itself the
@@ -534,6 +558,23 @@ export default {
             return rf.kind || 'previous operation';
         },
 
+        /** True when this snapshot has been reverted AND the revert
+         *  recorded per-entry skip records. The skipped table only
+         *  makes sense post-revert — pre-revert nothing has been skipped. */
+        hasSkippedDuringRevert() {
+            const snap = this.detail?.snapshot;
+            if (! snap?.reverted_at) return false;
+            const skipped = snap.revert_skipped;
+            return Array.isArray(skipped) && skipped.length > 0;
+        },
+
+        /** The skip records as written by the revert command. Each record:
+         *  {entry_id, entry_title, reason, modified_by?, modified_at?,
+         *   edit_url?, collection?}. */
+        skippedDuringRevert() {
+            return this.detail?.snapshot?.revert_skipped || [];
+        },
+
         /** Drives the optional Context column. Per-kind: kinds whose items
          *  carry context get a permanent column (consistent table structure
          *  across snapshots) — empty cells render "—" instead of hiding the
@@ -852,6 +893,23 @@ export default {
         // human-readable label instead of leaking it as text in the table.
         isUnlinkSentinel(v) {
             return typeof v === 'string' && v === '__LINKWISE_UNLINK__';
+        },
+
+        // Format a skip-record's reason for the skipped-during-revert table.
+        // Backend persists modified_by + modified_at when available; falls
+        // back to a generic "modified" / "deleted" message otherwise.
+        // Example output: "Modified by <strong>Artur</strong> on 2026-05-08 at 12:31"
+        formatSkipReason(row) {
+            if (! row) return '';
+            if (row.reason === 'deleted') {
+                return 'Entry was deleted since this bulk ran';
+            }
+            // 'modified' (and unknown reason fallback): show editor + when.
+            const who = row.modified_by ? `by <strong>${this.escape(row.modified_by)}</strong>` : 'by another editor';
+            if (row.modified_at) {
+                return `Modified ${who} on ${this.escape(this.formatAbsolute(row.modified_at))}`;
+            }
+            return `Modified ${who} since this bulk ran`;
         },
 
         // Inbound bulks share a single target entry across all items; we

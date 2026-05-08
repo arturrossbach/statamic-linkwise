@@ -82,7 +82,9 @@ class OutboundController extends CpController
             'entry_id' => ['required', 'string', 'max:64'],
             'content_hash' => ['sometimes', 'string', 'max:64'],
             'insertions' => ['required', 'array', 'min:1', 'max:200'],
-            'insertions.*.target_entry_id' => ['required', 'string', 'max:64'],
+            // target_entry_id OR href — see InboundController for rationale.
+            'insertions.*.target_entry_id' => ['nullable', 'string', 'max:64'],
+            'insertions.*.href' => ['nullable', 'string', 'max:2048'],
             'insertions.*.anchor_text' => ['required', 'string', 'max:500'],
             // Sentence around the anchor at preview-time — fed through to
             // the activity-log Context column. See InboundController for the
