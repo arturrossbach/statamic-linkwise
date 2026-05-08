@@ -981,32 +981,51 @@ class SuggestionEngine
         foreach ($parts as $i => $p) {
             if ($i % 2 === 0 && $p !== '') $wordIndexes[] = $i;
         }
-        if (count($wordIndexes) < 2) {
+        if (empty($wordIndexes)) {
             return [$anchor, 0];
         }
-        // Walk forward, drop while leading word is a stopword.
+        // Stopword check ignores attached punctuation: "die," and "die." both
+        // count as the German stopword "die". Otherwise "Dokumentation, die"
+        // would never trim because the trailing word is "die" with no
+        // attached punctuation but real-world matches like "Dokumentation, die"
+        // (split: ["Dokumentation," " " "die"]) need both sides cleaned.
+        $stripPunct = fn (string $w): string => preg_replace('/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u', '', mb_strtolower($w));
+
+        // Walk forward, drop while leading word is a stopword (with attached
+        // punctuation stripped before the check).
         $first = 0;
-        while ($first < count($wordIndexes) - 1
-            && $this->isStopword(mb_strtolower($parts[$wordIndexes[$first]]))) {
+        while ($first < count($wordIndexes)
+            && $this->isStopword($stripPunct($parts[$wordIndexes[$first]]))) {
             $first++;
         }
         // Walk backward, drop while trailing word is a stopword.
         $last = count($wordIndexes) - 1;
-        while ($last > $first
-            && $this->isStopword(mb_strtolower($parts[$wordIndexes[$last]]))) {
+        while ($last >= $first
+            && $this->isStopword($stripPunct($parts[$wordIndexes[$last]]))) {
             $last--;
         }
-        // Need at least 2 remaining words to keep the trim — otherwise
-        // we'd return a single content word, which is too aggressive and
-        // could break downstream filters that require min_phrase_words.
-        if ($last - $first < 1) {
+        // Empty result (every word was a stopword) → keep original. A single
+        // content word IS allowed to survive the trim — that's still a
+        // legitimate anchor (e.g. "Dokumentation" for the title "Dokumentation,
+        // die wirklich gelesen wird").
+        if ($last < $first) {
             return [$anchor, 0];
         }
-        // Reconstruct: drop everything before parts[$wordIndexes[$first]]
-        // and after parts[$wordIndexes[$last]].
         $startIdx = $wordIndexes[$first];
         $endIdx = $wordIndexes[$last];
-        $leadingShift = mb_strlen(implode('', array_slice($parts, 0, $startIdx)));
+        // Strip leading and trailing non-letter characters from the final
+        // boundary words too — "Dokumentation," → "Dokumentation". Trailing
+        // commas/periods don't belong in a hyperlink anchor.
+        $leadingPunctRe = '/^[^\p{L}\p{N}]+/u';
+        $trailingPunctRe = '/[^\p{L}\p{N}]+$/u';
+        $leadingPunctShift = 0;
+        if (preg_match($leadingPunctRe, $parts[$startIdx], $m)) {
+            $leadingPunctShift = mb_strlen($m[0]);
+            $parts[$startIdx] = mb_substr($parts[$startIdx], $leadingPunctShift);
+        }
+        $parts[$endIdx] = preg_replace($trailingPunctRe, '', $parts[$endIdx]);
+
+        $leadingShift = mb_strlen(implode('', array_slice($parts, 0, $startIdx))) + $leadingPunctShift;
         $trimmed = implode('', array_slice($parts, $startIdx, $endIdx - $startIdx + 1));
 
         return [$trimmed, $leadingShift];
