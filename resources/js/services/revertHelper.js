@@ -165,14 +165,18 @@ export function buildRevertRequest(snapshot, endpoints) {
     const entryHashes = snapshot.post_hashes || {};
 
     if (snapshot.kind === 'applyrule') {
-        // Single-rule apply: each item = {entry_id, anchor_text, url}.
-        // Revert = remove that specific link from each entry.
+        // Single-rule apply: each item = {entry_id, anchor_text, url, sentence_context}.
+        // Revert = remove that specific link from each entry. sentence_context
+        // is forwarded so the new (revert) snapshot's drawer Context column
+        // shows what the editor was looking at — same UX guarantee as for
+        // any other bulk that has captured per-item context.
         const replacements = items
             .filter(i => i.entry_id && i.url)
             .map(i => ({
                 entry_id: i.entry_id,
                 matched_url: i.url,
                 anchor_text: i.anchor_text || '',
+                sentence_context: i.sentence_context || '',
                 occurrence_index: 0,
                 new_url: UNLINK_SENTINEL,
             }));
@@ -190,14 +194,16 @@ export function buildRevertRequest(snapshot, endpoints) {
     }
 
     if (snapshot.kind === 'inboundinsert' || snapshot.kind === 'outboundinsert') {
-        // Items = {source_entry_id, target_entry_id, anchor_text}
-        // Revert = unlink each (source, target) pair.
+        // Items = {source_entry_id, target_entry_id, anchor_text, sentence_context}
+        // Revert = unlink each (source, target) pair. sentence_context is
+        // carried forward so the revert's own drawer shows context too.
         const replacements = items
             .filter(i => i.source_entry_id && i.target_entry_id)
             .map(i => ({
                 entry_id: i.source_entry_id,
                 matched_url: 'statamic://entry::' + i.target_entry_id,
                 anchor_text: i.anchor_text || '',
+                sentence_context: i.sentence_context || '',
                 occurrence_index: 0,
                 new_url: UNLINK_SENTINEL,
             }));
@@ -233,6 +239,7 @@ export function buildRevertRequest(snapshot, endpoints) {
             const base = {
                 source_entry_id: i.entry_id,
                 anchor_text: i.anchor_text || '',
+                sentence_context: i.sentence_context || '',
             };
             return isInternal
                 ? { ...base, target_entry_id: i.matched_url.replace('statamic://entry::', '') }
@@ -281,6 +288,8 @@ export function buildRevertRequest(snapshot, endpoints) {
                 entry_id: i.entry_id,
                 matched_url: i.new_url,    // swapped
                 new_url: i.matched_url,    // swapped
+                anchor_text: i.anchor_text || '',
+                sentence_context: i.sentence_context || '',
                 occurrence_index: 0,
                 field: '',
                 field_type: '',
@@ -306,6 +315,7 @@ export function buildRevertRequest(snapshot, endpoints) {
                 const base = {
                     source_entry_id: i.entry_id,
                     anchor_text: i.anchor_text,
+                    sentence_context: i.sentence_context || '',
                 };
                 return isInternal
                     ? { ...base, target_entry_id: i.matched_url.replace('statamic://entry::', '') }
