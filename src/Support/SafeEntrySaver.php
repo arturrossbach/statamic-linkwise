@@ -123,17 +123,39 @@ class SafeEntrySaver
     /**
      * Compute a hash of the entry's data for conflict detection.
      *
-     * Volatile fields (updated_at, updated_by, last_modified) are stripped:
-     * Statamic refreshes them on every save() — even saves triggered by
-     * unrelated subscribers (index updates, supplements, etc.) — which would
-     * otherwise produce a false-positive "modified by another editor" 409
-     * during bulk runs.
+     * Reads from the on-disk file (not $entry->data()) so the hash reflects
+     * the persisted source of truth. Statamic's in-memory Entry instance can
+     * temporarily hold pre-canonicalisation data (e.g. Bard fieldtype
+     * normalisations applied during save) that re-serialises to the same YAML
+     * but produces a different json_encode byte stream. Hashing data() then
+     * caused recordPostHashesForEntries to capture a hash that no later
+     * Entry::find could ever reproduce, falsely flagging revert-preview
+     * entries as "modified" with no user edit.
      *
-     * Real edits change content fields (title, body, etc.) which DO go into
-     * the hash, so this stays safe against actual concurrent modification.
+     * Volatile fields (updated_at, updated_by, last_modified) are stripped:
+     * Statamic rewrites them on every save() — even cascading subscribers —
+     * so leaving them in would produce false 409 conflicts during bulk runs.
+     *
+     * Fallback to data()-based hash for new entries that have no on-disk
+     * path yet (creation flow). Those have $expectedHash = '' so the value
+     * is never compared.
      */
     public static function hash(Entry $entry): string
     {
+        $path = method_exists($entry, 'path') ? $entry->path() : null;
+        if (is_string($path) && $path !== '' && is_file($path)) {
+            $raw = @file_get_contents($path);
+            if ($raw !== false) {
+                $stripped = preg_replace(
+                    '/^(updated_at|updated_by|last_modified):.*$\n?/m',
+                    '',
+                    $raw,
+                );
+
+                return md5($stripped);
+            }
+        }
+
         $data = $entry->data()->all();
         unset($data['updated_at'], $data['updated_by'], $data['last_modified']);
 
