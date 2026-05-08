@@ -1,15 +1,27 @@
 # Linkwise — Claude Code Rules
 
+## BLOCKING: Domain-First Brainstorm Before Tests
+
+Tests aus Code-Sicht zu schreiben ("welcher Pfad fehlt?") fängt nur Bugs in den getesteten Pfaden. Bugs leben in Echtdaten, nicht in synthetischen Beispielen. Vor jedem Feature/Fix:
+
+1. **Brainstorm aus Anwender-Sicht** ("was wäre dem User schlimm?") — keine Code-Begriffe, nur Domain. Pro User-Aktion 5-10 Punkte.
+2. **Mapping pro Punkt**: Unit-Test (isolierter Algorithmus) ODER Audit-Check (Konsistenz auf Echtdaten gegen prose-peak-test). Wenn weder noch: explizit als bekanntes Risiko dokumentieren.
+3. **Invariant-Tests bei Mutatoren**: "no existing structure is destroyed", "no content drift beyond intended span", "all marks preserved". Diese gelten für JEDEN Walker / JEDEN Replacer.
+4. **Audit-Erweiterung wenn Echtdaten-Komplexität nötig**: Highlight-vs-Tatsache, Toast-vs-Realität, Vorschlag-vs-Sicherheit, Revert-Completeness — gehören in `linkwise:audit`, nicht in Unit-Tests.
+
+Anti-Pattern: synthetische Bard-JSONs handcrafted in Tests, ohne Patterns die echte Inhalte haben (hyphen-words, mixed-marks, multi-paragraph linked phrases). Echt heißt: gegen prose-peak-test simulieren.
+
 ## BLOCKING: Break It Before You Ship It
 
 Before telling the user to test ANY implementation, you MUST:
 
-1. **List 5+ things that could go wrong.** Write them down explicitly.
-2. **Write a test for each.** Not just happy path — failure modes, edge cases, concurrent access, duplicate data, empty input, boundary conditions.
+1. **List 5+ things that could go wrong** — *aus User-Sicht, nicht Code-Sicht* (siehe Domain-First Brainstorm).
+2. **Write a test for each.** Unit-Test ODER Audit-Check. Not just happy path — failure modes, edge cases, concurrent access, duplicate data, empty input, boundary conditions.
 3. **Run the tests.** All must pass.
-4. **Only then** tell the user to test.
+4. **Run `php artisan linkwise:audit`** gegen prose-peak-test.
+5. **Only then** tell the user to test.
 
-The user should only find UX/visual issues — NEVER functional bugs, data corruption, or logic errors. Those are YOUR job to catch. If the user finds a bug that a test could have caught, that is a failure on your part.
+The user should only find UX/visual issues — NEVER functional bugs, data corruption, or logic errors. Those are YOUR job to catch. If the user finds a bug that a test or audit could have caught, that is a failure on your part. *Test-Verantwortung liegt bei Claude, nicht beim User* (verbindlich seit 2026-05-08).
 
 Ask yourself for every feature:
 - What if the input is empty? Null? A duplicate?
@@ -18,6 +30,8 @@ Ask yourself for every feature:
 - What if only part of the operation succeeds?
 - What if there are multiple items with the same key/identifier?
 - What happens at the boundaries (first, last, single item, zero items)?
+- **Was passiert mit bestehenden Strukturen die schon dort sind?** (existing links, existing marks, existing formatting)
+- **Stimmt das was die UI zeigt mit dem überein was der Code tut?** (highlight vs insert, toast vs reality)
 
 This is non-negotiable. No exceptions.
 
