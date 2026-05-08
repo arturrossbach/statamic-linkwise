@@ -34,6 +34,91 @@ Auto-registers via `AddonServiceProvider`. Open Control Panel → **Linkwise** i
 
 ---
 
+## Try it before you buy it
+
+Linkwise follows Statamic's standard licensing model: **free in
+development, paid in production**. You don't need a license to install
+Linkwise locally, point it at your actual content, and verify that
+
+- the NLP pipeline handles your language correctly,
+- auto-link rules find the matches you'd expect,
+- suggestions feel relevant for your editorial workflow,
+- performance is acceptable on your corpus size.
+
+Only when you're ready to deploy on a public site does the per-site
+license activate. Test locally first; the language compatibility matrix
+below tells you which kind of behaviour to expect.
+
+---
+
+## Language support
+
+Linkwise's NLP pipeline (stemming, stop-words, keyword extraction) is
+language-aware. Three tiers reflect what Linkwise actually does for each
+language out of the box, derived from objective code-level capability —
+not marketing claims. If your language is not in this list, the runtime
+falls back to English defaults; you can verify behaviour with a local
+scan before licensing.
+
+### Confident (14 languages)
+
+Snowball stemmer + curated [stopwords-iso](https://github.com/stopwords-iso/stopwords-iso)
+list + Western sentence punctuation. Auto-link rules canonicalize
+inflected forms (`Datenbank` matches `Datenbanken`, `bibliothèque`
+matches `bibliothèques`). Equivalent quality to English content.
+
+| Language   | Stemmer       | Stop-words |
+|------------|---------------|------------|
+| English    | Snowball EN   | 1298       |
+| German     | Snowball DE   |  620       |
+| French     | Snowball FR   |  691       |
+| Spanish    | Snowball ES   |  732       |
+| Italian    | Snowball IT   |  632       |
+| Dutch      | Snowball NL   |  413       |
+| Portuguese | Snowball PT   |  560       |
+| Swedish    | Snowball SV   |  418       |
+| Danish     | Snowball DA   |  170       |
+| Norwegian  | Snowball NO   |  221       |
+| Finnish    | Snowball FI   |  847       |
+| Romanian   | Snowball RO   |  434       |
+| Russian    | Snowball RU   |  559       |
+| Catalan    | Snowball CA   | (curated)  |
+
+### Limited (14 languages)
+
+Stop-words list available, but **no Snowball stemmer** (or a known
+edge case Linkwise doesn't yet handle). Auto-link is exact-match —
+plural and conjugated forms won't match a base-form rule.
+
+| Language        | Reason                                                        |
+|-----------------|---------------------------------------------------------------|
+| Hungarian       | No Snowball stemmer                                           |
+| Polish          | No Snowball stemmer                                           |
+| Czech / Slovak  | No Snowball stemmer                                           |
+| Slovenian       | No Snowball stemmer                                           |
+| Croatian        | No Snowball stemmer                                           |
+| Bulgarian       | No Snowball stemmer                                           |
+| Ukrainian       | No Snowball stemmer (Cyrillic)                                |
+| Latvian / Lithuanian / Estonian / Irish | No Snowball stemmer            |
+| Greek           | Greek `;` not yet recognised as a sentence boundary           |
+| Turkish         | Dotted/dotless-i lowercase rules not handled                  |
+
+### Not supported
+
+| Language   | Reason                                                                    |
+|------------|---------------------------------------------------------------------------|
+| Arabic / Hebrew | RTL + tokenization not implemented (V1.1 candidates)                |
+| Chinese    | No space-based word boundaries — needs jieba/ICU tokenizer                |
+| Japanese   | No space-based word boundaries — needs MeCab                              |
+| Korean     | No space-based word boundaries                                            |
+| Thai       | No space-based word boundaries                                            |
+| Vietnamese | Diacritic-based syllable structure complicates tokenization               |
+
+The Settings UI hard-blocks selecting a "not supported" language so you
+can't silently configure something that won't work.
+
+---
+
 ## Recommended setup for production
 
 ### Cache driver (multi-server only)

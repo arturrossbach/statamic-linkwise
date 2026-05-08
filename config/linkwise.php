@@ -7,11 +7,23 @@ return [
     | Language
     |--------------------------------------------------------------------------
     |
-    | Primary content language. Determines which stopwords are used.
-    | Options: 'en', 'de', 'en_de'
+    | Primary content language. Drives stop-word lists, stemming, keyword
+    | extraction. See LanguageRegistry for the full list of supported codes
+    | and tier (CONFIDENT / LIMITED / BLOCKED).
+    |
+    | Leave null/empty to auto-detect from Statamic's site locale (de_DE → de).
+    |
+    | CONFIDENT tier (Snowball stemmer + curated stopwords):
+    |   en, de, fr, es, it, nl, pt, sv, da, no, fi, ro, ru, ca
+    |
+    | LIMITED tier (stop-words only, no stemming → exact-match for plurals):
+    |   hu, pl, cs, sk, sl, hr, bg, uk, lv, lt, et, ga, el, tr
+    |
+    | BLOCKED (not supported in V1 — Settings UI hard-blocks these):
+    |   ar, he, zh, ja, ko, th, vi
     |
     */
-    'language' => 'en_de',
+    'language' => null,
 
     /*
     |--------------------------------------------------------------------------

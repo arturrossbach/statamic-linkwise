@@ -2,31 +2,48 @@
 
 namespace Arturrossbach\Linkwise\NLP;
 
+/**
+ * Stop-word lookup backed by stopwords-iso (MIT, github.com/stopwords-iso/
+ * stopwords-iso). The JSON ships in resources/data/stopwords-iso.json and
+ * covers 58 languages with curated lists (e.g. EN: 1298 words, DE: 620,
+ * FR: 691) — a substantial improvement over the small hand-picked lists
+ * we used pre-2026-05.
+ *
+ * The legacy English/German hand-picked methods are retained for back-
+ * compat with anyone calling them directly, but the default path now
+ * routes through the ISO data.
+ */
 class Stopwords
 {
+    /** @var array<string, list<string>>|null  Lazy-loaded JSON cache. */
+    private static ?array $isoCache = null;
+
     /**
-     * Get stopwords based on the configured language + custom stopwords.
+     * Stop-words for the configured language plus any custom stop-words
+     * from settings. Falls back to default ('en') when config is empty
+     * or points at an unknown language.
      *
      * @return string[]
      */
     public static function forConfig(): array
     {
+        // When no language is explicitly configured, fall back to the
+        // bilingual EN+DE list — preserves the long-standing behavior for
+        // dual-language editorial sites that haven't picked a language
+        // yet. resolve() returns DEFAULT_LANG ('en') when nothing's set,
+        // but in that "implicit" case we merge German for back-compat.
+        $configured = null;
         try {
-            $language = config('linkwise.language', 'en_de');
-            $customRaw = config('linkwise.custom_stopwords', '');
+            $configured = config('linkwise.language');
+            $customRaw = (string) (config('linkwise.custom_stopwords', '') ?? '');
         } catch (\Throwable) {
-            $language = 'en_de';
             $customRaw = '';
         }
+        $stopwords = (is_string($configured) && isset(LanguageRegistry::LANGUAGES[$configured]))
+            ? static::forLanguage($configured)
+            : static::default();
 
-        $stopwords = match ($language) {
-            'en' => static::english(),
-            'de' => static::german(),
-            default => static::default(),
-        };
-
-        // Add custom stopwords from settings
-        if (is_string($customRaw) && trim($customRaw) !== '') {
+        if (trim($customRaw) !== '') {
             $custom = array_filter(
                 array_map('trim', explode("\n", mb_strtolower($customRaw))),
                 fn ($w) => $w !== '',
@@ -38,191 +55,77 @@ class Stopwords
     }
 
     /**
-     * Get the default stopword list (English + German).
+     * Stop-words for a specific language code. Returns the ISO list when
+     * available; falls back to English when the code is unknown so the
+     * pipeline never runs with zero filtering.
+     *
+     * @return list<string>
+     */
+    public static function forLanguage(string $code): array
+    {
+        $iso = static::iso();
+        return $iso[$code] ?? $iso['en'] ?? [];
+    }
+
+    /**
+     * Lazy-load the bundled stopwords-iso JSON. The file is ~200KB and
+     * decoded once per process. Returns [] on missing/corrupt data so
+     * the rest of the NLP pipeline degrades gracefully (matches still
+     * work, they just don't filter common words).
+     *
+     * @return array<string, list<string>>
+     */
+    public static function iso(): array
+    {
+        if (self::$isoCache !== null) {
+            return self::$isoCache;
+        }
+        $path = __DIR__.'/../../resources/data/stopwords-iso.json';
+        if (! file_exists($path)) {
+            return self::$isoCache = [];
+        }
+        try {
+            $raw = file_get_contents($path);
+            $data = $raw ? json_decode($raw, true) : null;
+            self::$isoCache = is_array($data) ? $data : [];
+        } catch (\Throwable) {
+            self::$isoCache = [];
+        }
+        return self::$isoCache;
+    }
+
+    /**
+     * Legacy: English + German merged. Kept for callers that explicitly
+     * want this (e.g. multi-language test sites). Equivalent shape to
+     * stopwords-iso's en+de combined.
      *
      * @return string[]
      */
     public static function default(): array
     {
-        return array_merge(static::english(), static::german());
+        $iso = static::iso();
+        return array_values(array_unique(array_merge($iso['en'] ?? [], $iso['de'] ?? [])));
     }
 
     /**
-     * ISO standard English stopwords (stopwords-iso/stopwords-en) + domain extensions.
-     * Source: https://github.com/stopwords-iso/stopwords-en
+     * Legacy alias — returns stopwords-iso English. Keep until callers
+     * migrate to forLanguage('en').
      *
-     * @return string[]
+     * @return list<string>
      */
     public static function english(): array
     {
-        return [
-            // --- Pronouns ---
-            'i', 'me', 'my', 'myself', 'mine',
-            'you', 'your', 'yours', 'yourself', 'yourselves',
-            'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself',
-            'it', 'its', 'itself', 'we', 'us', 'our', 'ours', 'ourselves',
-            'they', 'them', 'their', 'theirs', 'themselves',
-            'who', 'whom', 'whose', 'which', 'what', 'that', 'this', 'these', 'those',
-            'somebody', 'someone', 'something', 'anybody', 'anyone', 'anything',
-            'everybody', 'everyone', 'everything', 'nobody', 'nothing', 'none',
-
-            // --- Articles, determiners, quantifiers ---
-            'a', 'an', 'the', 'some', 'any', 'no', 'every', 'each', 'all',
-            'both', 'few', 'fewer', 'more', 'most', 'much', 'many', 'several',
-            'other', 'another', 'such', 'own', 'same', 'half',
-
-            // --- Be / have / do / modals ---
-            'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-            'have', 'has', 'had', 'having',
-            'do', 'does', 'did', 'doing', 'done',
-            'will', 'would', 'shall', 'should', 'may', 'might',
-            'can', 'could', 'must', 'need', 'ought', 'dare',
-
-            // --- Contractions ---
-            "don't", "doesn't", "didn't", "won't", "wouldn't", "shouldn't",
-            "can't", "couldn't", "isn't", "aren't", "wasn't", "weren't",
-            "hasn't", "haven't", "hadn't", "mustn't", "needn't", "shan't",
-            "ain't", "let's", "i'm", "i've", "i'd", "i'll",
-            "you're", "you've", "you'd", "you'll",
-            "he's", "he'd", "he'll", "she's", "she'd", "she'll",
-            "it's", "it'd", "it'll", "we're", "we've", "we'd", "we'll",
-            "they're", "they've", "they'd", "they'll",
-            "that's", "that'll", "who's", "who'd", "who'll",
-            "what's", "what'll", "where's", "there's", "here's",
-            "how's", "why's", "when's",
-
-            // --- Prepositions ---
-            'about', 'above', 'across', 'after', 'against', 'along', 'amid',
-            'among', 'around', 'as', 'at', 'before', 'behind', 'below',
-            'beneath', 'beside', 'besides', 'between', 'beyond', 'by',
-            'despite', 'down', 'during', 'except', 'for', 'from', 'in',
-            'inside', 'into', 'like', 'near', 'of', 'off', 'on', 'onto',
-            'opposite', 'out', 'outside', 'over', 'past', 'per', 'plus',
-            'round', 'since', 'than', 'through', 'throughout', 'to',
-            'toward', 'towards', 'under', 'underneath', 'unlike', 'until',
-            'up', 'upon', 'via', 'with', 'within', 'without',
-
-            // --- Conjunctions & connectors ---
-            'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
-            'if', 'then', 'else', 'when', 'while', 'although', 'because',
-            'since', 'unless', 'until', 'whether', 'though', 'whereas',
-            'wherever', 'whenever', 'whoever', 'whatever', 'whichever',
-            'however', 'therefore', 'thus', 'hence', 'consequently',
-            'furthermore', 'moreover', 'nevertheless', 'nonetheless',
-            'meanwhile', 'otherwise', 'accordingly', 'instead',
-            'notwithstanding', 'provided', 'insofar',
-
-            // --- Adverbs (no topical value) ---
-            'not', 'no', 'yes', 'only', 'just', 'also', 'too', 'very',
-            'really', 'quite', 'rather', 'enough', 'almost', 'already',
-            'always', 'never', 'ever', 'often', 'sometimes', 'usually',
-            'still', 'again', 'further', 'once', 'twice', 'here', 'there',
-            'now', 'then', 'where', 'when', 'why', 'how',
-            'perhaps', 'probably', 'certainly', 'definitely', 'exactly',
-            'actually', 'basically', 'generally', 'especially', 'particularly',
-            'specifically', 'simply', 'merely', 'entirely', 'completely',
-            'absolutely', 'apparently', 'obviously', 'clearly', 'directly',
-            'effectively', 'essentially', 'frequently', 'hardly', 'highly',
-            'increasingly', 'initially', 'largely', 'mainly', 'mostly',
-            'naturally', 'necessarily', 'normally', 'notably', 'partly',
-            'potentially', 'previously', 'primarily', 'recently', 'relatively',
-            'significantly', 'slightly', 'somewhat', 'strongly', 'substantially',
-            'successfully', 'suddenly', 'surely', 'typically', 'ultimately',
-            'widely', 'recently', 'currently', 'approximately', 'respectively',
-            'elsewhere', 'everywhere', 'somewhere', 'nowhere', 'anyway',
-            'somehow', 'together', 'apart', 'aside', 'away', 'back',
-            'forth', 'forward', 'ahead', 'even', 'well', 'much',
-
-            // --- Generic adjectives (no topical value) ---
-            'good', 'great', 'best', 'better', 'bad', 'worse', 'worst',
-            'new', 'old', 'big', 'small', 'large', 'little', 'long', 'short',
-            'high', 'low', 'right', 'left', 'first', 'last', 'next', 'early',
-            'late', 'young', 'different', 'important', 'possible', 'available',
-            'able', 'sure', 'real', 'true', 'full', 'whole', 'clear', 'easy',
-            'hard', 'simple', 'common', 'specific', 'certain', 'likely',
-            'unlikely', 'major', 'minor', 'similar', 'various', 'recent',
-            'previous', 'current', 'general', 'particular', 'significant',
-            'necessary', 'effective', 'appropriate', 'useful', 'interesting',
-            'main', 'basic', 'free', 'open', 'close', 'ready', 'proper',
-            // Comparatives & superlatives
-            'easier', 'harder', 'faster', 'slower', 'bigger', 'smaller',
-            'higher', 'lower', 'longer', 'shorter', 'newer', 'older',
-            'simpler', 'stronger', 'weaker', 'closer', 'wider', 'deeper',
-            'largest', 'smallest', 'highest', 'lowest', 'greatest',
-
-            // --- Generic verbs (no topical value) ---
-            'get', 'got', 'gotten', 'go', 'went', 'gone', 'going',
-            'come', 'came', 'take', 'took', 'taken', 'make', 'made',
-            'give', 'gave', 'given', 'find', 'found', 'know', 'knew', 'known',
-            'think', 'thought', 'see', 'saw', 'seen', 'say', 'said',
-            'tell', 'told', 'ask', 'asked', 'try', 'tried',
-            'use', 'used', 'using', 'want', 'wanted', 'look', 'looked',
-            'show', 'showed', 'shown', 'help', 'helped',
-            'keep', 'kept', 'put', 'set', 'run', 'ran',
-            'turn', 'turned', 'move', 'moved', 'start', 'started',
-            'let', 'call', 'called', 'leave', 'left',
-            'bring', 'brought', 'begin', 'began', 'begun',
-            'seem', 'seemed', 'feel', 'felt', 'become', 'became',
-            'mean', 'meant', 'hold', 'held', 'stand', 'stood',
-            'happen', 'happened', 'follow', 'followed',
-            'lead', 'led', 'allow', 'allowed',
-            'add', 'added', 'change', 'changed', 'include', 'included',
-            'continue', 'continued', 'provide', 'provided', 'create', 'created',
-            'consider', 'considered', 'require', 'required',
-            'read', 'write', 'written', 'wrote', 'send', 'sent',
-            'receive', 'received', 'play', 'played', 'live', 'lived',
-            'believe', 'believed', 'exist', 'existed',
-            'expect', 'expected', 'offer', 'offered',
-            'remember', 'understand', 'understood',
-
-            // --- Number words ---
-            'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
-            'nine', 'ten', 'eleven', 'twelve', 'twenty', 'thirty', 'forty',
-            'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
-            'hundred', 'thousand', 'million', 'billion', 'zero',
-
-            // --- Filler nouns (no topical value) ---
-            'thing', 'things', 'way', 'ways', 'time', 'times',
-            'year', 'years', 'day', 'days', 'week', 'weeks', 'month', 'months',
-            'point', 'part', 'parts', 'place', 'places',
-            'case', 'cases', 'fact', 'facts', 'end', 'kind', 'lot', 'lots',
-            'number', 'numbers', 'example', 'examples', 'area', 'areas',
-            'world', 'life', 'work', 'works', 'result', 'results',
-            'group', 'groups', 'problem', 'problems', 'state', 'states',
-            'side', 'sides', 'line', 'lines', 'level', 'levels',
-            'order', 'form', 'person', 'people', 'man', 'woman', 'child',
-            'hand', 'home', 'room', 'word', 'words',
-        ];
+        return static::iso()['en'] ?? [];
     }
 
     /**
-     * @return string[]
+     * Legacy alias — returns stopwords-iso German. Keep until callers
+     * migrate to forLanguage('de').
+     *
+     * @return list<string>
      */
     public static function german(): array
     {
-        return [
-            // Articles, pronouns, prepositions, auxiliaries
-            'der', 'die', 'das', 'ein', 'eine', 'einer', 'eines', 'einem', 'einen',
-            'und', 'oder', 'aber', 'ist', 'sind', 'war', 'waren', 'wird', 'werden',
-            'hat', 'haben', 'hatte', 'hatten', 'nicht', 'auch', 'noch', 'schon',
-            'nur', 'dann', 'wenn', 'als', 'wie', 'mit', 'von', 'auf', 'aus',
-            'bei', 'nach', 'vor', 'zu', 'zum', 'zur', 'im', 'am', 'um',
-            'den', 'dem', 'des', 'er', 'sie', 'es', 'wir', 'ihr',
-            // Common prepositions previously missing — German content uses
-            // these as connectives, they should never end up as keyword
-            // candidates or anchor seeds.
-            'für', 'durch', 'gegen', 'ohne', 'während', 'seit', 'trotz',
-            // Common modals and adjectives too generic for keywords
-            'kann', 'muss', 'soll', 'will', 'darf', 'dass', 'mehr', 'viel',
-            'sehr', 'gut', 'neue', 'neuen', 'neuer', 'neues', 'andere', 'anderen',
-            'diese', 'dieser', 'dieses', 'diesem', 'diesen', 'jede', 'jeder',
-            'jedes', 'jedem', 'jeden', 'keine', 'keiner', 'keines', 'keinem',
-            'man', 'hier', 'dort', 'da', 'nun', 'doch', 'mal', 'ganz',
-            'so', 'also', 'schon', 'noch', 'wieder', 'immer',
-            // Both umlaut and ASCII transliteration: text normalize() keeps
-            // unicode letters intact, so "über" stays "über" and used to
-            // miss the stopword check entirely.
-            'über', 'ueber',
-        ];
+        return static::iso()['de'] ?? [];
     }
 }

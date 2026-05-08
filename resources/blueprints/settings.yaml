@@ -5,13 +5,42 @@ sections:
       - handle: language
         field:
           type: select
-          display: Language
-          instructions: "Select the primary language of your content. This determines which stopwords are used for keyword extraction."
+          display: 'Content language'
+          instructions: |
+            Drives stop-word filtering, stemming, and keyword extraction.
+            Confident (Snowball stemmer + curated stop-words — inflection-aware): English, German, French, Spanish, Italian, Dutch, Portuguese, Swedish, Danish, Norwegian, Finnish, Romanian, Russian, Catalan.
+            Limited (stop-words only — exact-match for plurals): Hungarian, Polish, Czech, Slovak, Slovenian, Croatian, Bulgarian, Ukrainian, Latvian, Lithuanian, Estonian, Irish, Greek, Turkish.
+            Leave empty to auto-detect from Statamic's site locale.
+            Not sure your language fits? Linkwise is free in dev environments under Statamic's licensing — install locally, run a scan on your real content, then license per-site for production.
           options:
-            en: English
-            de: German
-            en_de: "English + German"
-          default: en_de
+            en: 'English (Confident)'
+            de: 'German (Confident)'
+            fr: 'French (Confident)'
+            es: 'Spanish (Confident)'
+            it: 'Italian (Confident)'
+            nl: 'Dutch (Confident)'
+            pt: 'Portuguese (Confident)'
+            sv: 'Swedish (Confident)'
+            da: 'Danish (Confident)'
+            'no': 'Norwegian (Confident)'
+            fi: 'Finnish (Confident)'
+            ro: 'Romanian (Confident)'
+            ru: 'Russian (Confident)'
+            ca: 'Catalan (Confident)'
+            hu: 'Hungarian (Limited — exact-match only)'
+            pl: 'Polish (Limited — exact-match only)'
+            cs: 'Czech (Limited — exact-match only)'
+            sk: 'Slovak (Limited — exact-match only)'
+            sl: 'Slovenian (Limited — exact-match only)'
+            hr: 'Croatian (Limited — exact-match only)'
+            bg: 'Bulgarian (Limited — exact-match only)'
+            uk: 'Ukrainian (Limited — exact-match only)'
+            lv: 'Latvian (Limited — exact-match only)'
+            lt: 'Lithuanian (Limited — exact-match only)'
+            et: 'Estonian (Limited — exact-match only)'
+            ga: 'Irish (Limited — exact-match only)'
+            el: 'Greek (Limited — sentence-boundary edge case)'
+            tr: 'Turkish (Limited — case-sensitivity edge case)'
           width: 50
 
       - handle: collections
