@@ -13,7 +13,9 @@ use Arturrossbach\Linkwise\Suggestions\InboundEngine;
 use Arturrossbach\Linkwise\Suggestions\OutboundSuggestionGrouper;
 use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\EntryFieldWalker;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Arturrossbach\Linkwise\Support\TextExtractor;
 use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
 use Illuminate\Console\Command;
@@ -74,17 +76,21 @@ class AuditCommand extends Command
         $only = $this->option('path');
 
         $paths = [
-            'auto-link'           => fn () => $this->auditAutoLinkPreview(),
-            'index-parity'        => fn () => $this->auditIndexParity(),
-            'inbound'             => fn () => $this->auditInboundInsertability(),
-            'outbound'            => fn () => $this->auditOutboundInsertability(),
-            'suggestions-safety'  => fn () => $this->auditSuggestionsSafety(),
-            'domains'             => fn () => $this->auditDomainParity(),
-            'broken-links'        => fn () => $this->auditBrokenLinks(),
-            'url-changer'         => fn () => $this->auditUrlChanger(),
-            'target-keywords'     => fn () => $this->auditTargetKeywords(),
-            'links-report'        => fn () => $this->auditLinksReport(),
-            'overview'            => fn () => $this->auditOverview(),
+            'auto-link'              => fn () => $this->auditAutoLinkPreview(),
+            'index-parity'           => fn () => $this->auditIndexParity(),
+            'inbound'                => fn () => $this->auditInboundInsertability(),
+            'outbound'               => fn () => $this->auditOutboundInsertability(),
+            'suggestions-safety'     => fn () => $this->auditSuggestionsSafety(),
+            'suggestion-count-drift' => fn () => $this->auditSuggestionCountDrift(),
+            'orphan-split-link'      => fn () => $this->auditOrphanSplitLinks(),
+            'revert-completeness'    => fn () => $this->auditRevertCompleteness(),
+            'post-hash-coverage'     => fn () => $this->auditPostHashCoverage(),
+            'domains'                => fn () => $this->auditDomainParity(),
+            'broken-links'           => fn () => $this->auditBrokenLinks(),
+            'url-changer'            => fn () => $this->auditUrlChanger(),
+            'target-keywords'        => fn () => $this->auditTargetKeywords(),
+            'links-report'           => fn () => $this->auditLinksReport(),
+            'overview'               => fn () => $this->auditOverview(),
         ];
 
         if ($only && ! isset($paths[$only])) {
@@ -923,6 +929,340 @@ class AuditCommand extends Command
                     $this->walkReplicatorForOverlap($value, $anchor, $newHref, $hits);
                 }
             }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Suggestion-count drift. A real tester opens the dashboard
+    // and sees "Outbound: 5" next to an entry. They click in expecting
+    // 5 suggestions. If the engine produces 0 (or 12) something stale
+    // is between the index and the live computation. The user's
+    // bauchgefühl: numbers should reconcile across views.
+    //
+    // Tolerance: ±1 noise allowed (counts are eventually-consistent
+    // post-edit). Absolute drift > 1 is the signal.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditSuggestionCountDrift(): void
+    {
+        $this->line('<fg=yellow>suggestion-count-drift</> — index outbound-suggestion-count matches live engine count');
+
+        $records = $this->indexer->load();
+        // Walk every record. Cheap: just runs the engine once per entry.
+        foreach ($records as $record) {
+            $reported = $record->outboundSuggestionCount ?? 0;
+            try {
+                $raw = $this->suggestionEngine->suggest(
+                    $record->text, $records, $record->id, $record->outboundLinks
+                );
+                $live = OutboundSuggestionGrouper::groupAndFilter($raw, $record->id)['count'] ?? 0;
+            } catch (\Throwable $e) {
+                $this->recordFailure('suggestion-count-drift', "engine threw on '{$record->title}': ".$e->getMessage());
+                continue;
+            }
+            if (abs($reported - $live) > 1) {
+                $this->recordFailure(
+                    'suggestion-count-drift',
+                    "'{$record->title}': index reports {$reported}, engine produces {$live} (delta ".abs($reported - $live).")",
+                );
+            } else {
+                $this->pass('suggestion-count-drift');
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Orphan split-link detection. Forensic check on real data:
+    // does any entry currently have a structurally-suspicious sequence
+    // of adjacent text-nodes whose link marks point at different hrefs?
+    //
+    // The pattern: a single linked phrase ("Brauner-Zucker-Speck-Kekse")
+    // got split into two text-nodes by a buggy insert (Bug B 2026-05-08).
+    // Even after revert, the residue stays — Linkwise has no way to know
+    // the intended pre-state. This audit surfaces every such residue so
+    // the user can repair manually.
+    //
+    // Heuristic for "suspicious": two consecutive text-node children of
+    // the same content array, both carrying a link mark, hrefs differ,
+    // AND the boundary between them is NOT whitespace (i.e. the split
+    // happens mid-word or at a hyphen — humans almost never produce this
+    // by hand).
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditOrphanSplitLinks(): void
+    {
+        $this->line('<fg=yellow>orphan-split-link</> — no entry has adjacent different-href links splitting one phrase');
+
+        $records = $this->indexer->load();
+        foreach ($records as $record) {
+            $entry = Entry::find($record->id);
+            if (! $entry) continue;
+
+            $issues = $this->findOrphanSplitsInEntry($entry);
+            if (empty($issues)) {
+                $this->pass('orphan-split-link');
+                continue;
+            }
+            foreach ($issues as $issue) {
+                $this->recordFailure(
+                    'orphan-split-link',
+                    "'{$record->title}': adjacent linked spans \"{$issue['left']}\"→{$issue['left_href']} + \"{$issue['right']}\"→{$issue['right_href']} — likely Bug B residue, manual re-link needed",
+                );
+            }
+        }
+    }
+
+    /**
+     * @return list<array{left:string, right:string, left_href:string, right_href:string}>
+     */
+    protected function findOrphanSplitsInEntry($entry): array
+    {
+        $issues = [];
+        try {
+            $fields = $entry->blueprint()->fields()->all();
+        } catch (\Throwable) {
+            return $issues;
+        }
+
+        foreach ($fields as $handle => $field) {
+            $type = $field->type();
+            $value = $entry->get($handle);
+            if (! is_array($value) || empty($value)) continue;
+
+            if ($type === 'bard') {
+                $this->walkBardForOrphanSplits($value, $issues);
+            } elseif ($type === 'replicator') {
+                $this->walkReplicatorForOrphanSplits($value, $issues);
+            }
+        }
+
+        return $issues;
+    }
+
+    /**
+     * @param  list<array{left:string, right:string, left_href:string, right_href:string}>  $issues
+     */
+    protected function walkBardForOrphanSplits(array $content, array &$issues): void
+    {
+        foreach ($content as $node) {
+            if (! is_array($node)) continue;
+            if (isset($node['content']) && is_array($node['content'])) {
+                // The Bug B residue fingerprint: a hyphenated word was
+                // ONE text node before the buggy insert (e.g. "Brauner-
+                // Zucker-Speck-Kekse"); after split + revert it survives
+                // as adjacent text-nodes glued via the hyphen. The
+                // post-state always has at least one node whose text
+                // starts (or ends) with a hyphen and whose neighbor's
+                // text ends (or starts) with a letter — humans never
+                // author hyphenated words across multiple nodes.
+                //
+                // Stricter than "any non-whitespace seam between linked
+                // and plain": ", die direkt am Code lebt" after a linked
+                // "Dokumentation" is a normal author workflow (link a
+                // word, leave the trailing relative clause unlinked).
+                // Only word-joiner seams (- _ ') indicate split mid-word.
+                //
+                // Also flag: TWO adjacent linked nodes with different
+                // hrefs and a non-whitespace seam — the original Bug B
+                // tree before any revert. Non-hyphen seams catch comma-
+                // glued cases like "X][Y" where buggy multi-replace ate
+                // the boundary.
+                $children = $node['content'];
+                for ($i = 0; $i < count($children) - 1; $i++) {
+                    $a = $children[$i];
+                    $b = $children[$i + 1];
+                    if (! is_array($a) || ! is_array($b)) continue;
+                    if (($a['type'] ?? '') !== 'text' || ($b['type'] ?? '') !== 'text') continue;
+
+                    $textA = (string) ($a['text'] ?? '');
+                    $textB = (string) ($b['text'] ?? '');
+                    if ($textA === '' || $textB === '') continue;
+
+                    $hrefA = $this->firstLinkHref($a);
+                    $hrefB = $this->firstLinkHref($b);
+
+                    // Both plain → ProseMirror should have merged.
+                    if ($hrefA === null && $hrefB === null) continue;
+                    // Same-href both-linked → walker artifact, harmless.
+                    if ($hrefA !== null && $hrefB !== null && $hrefA === $hrefB) continue;
+
+                    // Two cases we flag:
+                    // (1) Word-joiner seam (hyphen, underscore, apostrophe)
+                    //     → hyphenated word that got split mid-word.
+                    // (2) Two different-href links glued without space
+                    //     → original Bug B tree pre-revert.
+                    $endsWithJoiner = (bool) preg_match('/[-_\']$/u', $textA);
+                    $startsWithJoiner = (bool) preg_match('/^[-_\']/u', $textB);
+                    $prevEndsWithLetter = (bool) preg_match('/\p{L}$/u', $textA);
+                    $nextStartsWithLetter = (bool) preg_match('/^\p{L}/u', $textB);
+
+                    $isHyphenSplit =
+                        ($startsWithJoiner && $prevEndsWithLetter)
+                        || ($endsWithJoiner && $nextStartsWithLetter);
+
+                    $isDifferentHrefGlued = false;
+                    if ($hrefA !== null && $hrefB !== null && $hrefA !== $hrefB) {
+                        $lastCharA = mb_substr($textA, -1);
+                        $firstCharB = mb_substr($textB, 0, 1);
+                        $isDifferentHrefGlued = ! preg_match('/\s/u', $lastCharA) && ! preg_match('/\s/u', $firstCharB);
+                    }
+
+                    if (! $isHyphenSplit && ! $isDifferentHrefGlued) continue;
+
+                    $issues[] = [
+                        'left' => mb_strimwidth($textA, 0, 40, '…'),
+                        'right' => mb_strimwidth($textB, 0, 40, '…'),
+                        'left_href' => $hrefA !== null ? mb_strimwidth($hrefA, 0, 60, '…') : '(plain)',
+                        'right_href' => $hrefB !== null ? mb_strimwidth($hrefB, 0, 60, '…') : '(plain)',
+                    ];
+                }
+                // Recurse into nested content.
+                $this->walkBardForOrphanSplits($children, $issues);
+            }
+        }
+    }
+
+    /**
+     * @param  list<array{left:string, right:string, left_href:string, right_href:string}>  $issues
+     */
+    protected function walkReplicatorForOrphanSplits(array $sets, array &$issues): void
+    {
+        foreach ($sets as $set) {
+            if (! is_array($set)) continue;
+            foreach ($set as $key => $value) {
+                if (! is_array($value) || empty($value)) continue;
+                if (in_array($key, \Arturrossbach\Linkwise\Support\UrlHelper::REPLICATOR_META_KEYS, true)) continue;
+                if (\Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($value)) {
+                    $this->walkBardForOrphanSplits($value, $issues);
+                } elseif (isset($value[0]['type'], $value[0]['id'])) {
+                    $this->walkReplicatorForOrphanSplits($value, $issues);
+                }
+            }
+        }
+    }
+
+    protected function firstLinkHref(array $node): ?string
+    {
+        foreach ($node['marks'] ?? [] as $m) {
+            if (is_array($m) && ($m['type'] ?? '') === 'link') {
+                $href = (string) ($m['attrs']['href'] ?? '');
+                return $href !== '' ? $href : null;
+            }
+        }
+        return null;
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Revert completeness. Tester clicks Revert on a snapshot,
+    // expects the entry to come back to its pre-bulk state. Bug B's
+    // fallout was exactly this expectation broken — half the link came
+    // back, half stayed corrupted. Audit catches Frankenstein-states by
+    // hashing each reverted entry and comparing to the snapshot's
+    // pre_hashes.
+    //
+    // Skips snapshots that aren't reverted yet, or that pre-date the
+    // pre_hashes capture (legacy data).
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditRevertCompleteness(): void
+    {
+        $this->line('<fg=yellow>revert-completeness</> — reverted bulks restore pre-bulk hash for every entry');
+
+        $store = app(BulkSnapshotStore::class);
+        $snapshots = $store->list(); // newest first
+
+        foreach ($snapshots as $row) {
+            $snap = $store->get($row['id']);
+            if (! is_array($snap)) continue;
+
+            // Only check snapshots that have been reverted and have
+            // pre-hash data to compare against.
+            if (empty($snap['reverted_at'])) continue;
+            $preHashes = $snap['pre_hashes'] ?? [];
+            if (! is_array($preHashes) || empty($preHashes)) continue;
+
+            $entryIds = $snap['entry_ids'] ?? [];
+            if (! is_array($entryIds)) continue;
+
+            // Track which entries match and which don't.
+            $mismatches = [];
+            foreach ($entryIds as $entryId) {
+                if (! is_string($entryId) || ! isset($preHashes[$entryId])) continue;
+                $entry = Entry::find($entryId);
+                if (! $entry) continue; // entry was deleted post-revert — separate concern
+                $currentHash = SafeEntrySaver::hash($entry);
+                if ($currentHash !== $preHashes[$entryId]) {
+                    $mismatches[] = [
+                        'entry_id' => $entryId,
+                        'title' => (string) ($entry->get('title') ?? $entryId),
+                    ];
+                }
+            }
+
+            if (empty($mismatches)) {
+                $this->pass('revert-completeness');
+                continue;
+            }
+
+            $kind = (string) ($snap['kind'] ?? '?');
+            $startedBy = (string) ($snap['started_by'] ?? '?');
+            $first = $mismatches[0];
+            $extra = count($mismatches) > 1 ? ' (+'.(count($mismatches) - 1).' more)' : '';
+            $this->recordFailure(
+                'revert-completeness',
+                "snapshot {$row['id']} ({$kind} by {$startedBy}): post-revert hash diverges from pre-bulk on '{$first['title']}'{$extra} — Frankenstein-state likely",
+            );
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Post-hash coverage. Every completed bulk MUST have recorded
+    // post-hashes for every entry it touched. Without that, the activity-
+    // log compareToCurrent renders every entry as "modified by user" —
+    // the bulk wrote, but the snapshot doesn't know it did. The promise
+    // of recordPostHashesForEntries is in the bulk-write-path standard
+    // (see feedback memory); this audit enforces it.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditPostHashCoverage(): void
+    {
+        $this->line('<fg=yellow>post-hash-coverage</> — every completed bulk recorded post-hashes for every entry');
+
+        $store = app(BulkSnapshotStore::class);
+        $snapshots = $store->list();
+
+        foreach ($snapshots as $row) {
+            $snap = $store->get($row['id']);
+            if (! is_array($snap)) continue;
+
+            $phase = $snap['completion_stats']['phase'] ?? null;
+            if ($phase !== 'done') continue; // in-flight or aborted — not auditable
+
+            $entryIds = array_filter(
+                $snap['entry_ids'] ?? [],
+                fn ($x) => is_string($x) && $x !== '',
+            );
+            if (empty($entryIds)) {
+                $this->pass('post-hash-coverage');
+                continue;
+            }
+
+            $postHashes = $snap['post_hashes'] ?? [];
+            if (! is_array($postHashes)) $postHashes = [];
+
+            $missing = array_values(array_filter(
+                $entryIds,
+                fn ($id) => ! isset($postHashes[$id]),
+            ));
+
+            if (empty($missing)) {
+                $this->pass('post-hash-coverage');
+                continue;
+            }
+
+            $kind = (string) ($snap['kind'] ?? '?');
+            $missingCount = count($missing);
+            $totalCount = count($entryIds);
+            $this->recordFailure(
+                'post-hash-coverage',
+                "snapshot {$row['id']} ({$kind}): {$missingCount}/{$totalCount} entry post-hashes missing — bulk wrote without recording, activity-log will mark them as 'modified by user'",
+            );
         }
     }
 
