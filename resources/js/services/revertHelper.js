@@ -65,6 +65,20 @@ export function isReversible(snapshot) {
         );
     }
 
+    // URL-Changer "unlink" action stores items with new_url=UNLINK_SENTINEL.
+    // The naive swap-revert (matched_url ↔ new_url) would search entries for
+    // the sentinel, find nothing, and report 0 replacements as "success" —
+    // the user sees a "Revert ran" toast that did literally nothing. Disable
+    // the button for these snapshots; future work can route internal-URL
+    // sentinel-items through outbound-insert (same shape as detailunlink-
+    // revert) but that's a new path with its own UX, not a V1 hot-fix.
+    if (kind === 'urlchanger') {
+        const hasSwappable = snapshot.items.some(i =>
+            i?.new_url && i.new_url !== UNLINK_SENTINEL
+        );
+        return hasSwappable;
+    }
+
     return true;
 }
 
@@ -90,6 +104,13 @@ export function nonReversibleReason(snapshot) {
     }
     if (snapshot.kind === 'applyrule' && snapshot.summary?.mode === 'multi-rule') {
         return 'Multi-rule applies are not yet revertable in V1 — use the "Find these in URL Changer" link or revert each rule individually from a single-rule activity entry.';
+    }
+    if (snapshot.kind === 'urlchanger') {
+        const allSentinel = Array.isArray(snapshot.items) && snapshot.items.length > 0
+            && snapshot.items.every(i => i?.new_url === UNLINK_SENTINEL);
+        if (allSentinel) {
+            return 'URL-Changer "Unlink" operations aren\'t auto-revertable in V1 — re-adding the link would need to know which target entry to point to. Use the Detail Modal on the affected entry to re-add a link manually.';
+        }
     }
     if (!Array.isArray(snapshot.items) || snapshot.items.length === 0) {
         return 'This snapshot has no per-item operation data — it was recorded by an older version of Linkwise.';

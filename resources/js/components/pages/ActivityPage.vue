@@ -732,6 +732,9 @@ export default {
                     return `Removed ${anchor || 'link'} → ${this.targetLabel(it, 'matched_url')}`;
                 }
                 if (kind === 'urlchanger') {
+                    if (this.isUnlinkSentinel(it.new_url)) {
+                        return `Unlinked ${this.targetLabel(it, 'matched_url')}`;
+                    }
                     return `Replaced ${this.targetLabel(it, 'matched_url')} → ${this.targetLabel(it, 'new_url')}`;
                 }
                 if (kind === 'bulkunlink') {
@@ -784,6 +787,9 @@ export default {
                     return `${anchor || '<em>link</em>'} → ${this.targetLabel(it, 'matched_url')}`;
                 }
                 if (k === 'urlchanger') {
+                    if (this.isUnlinkSentinel(it.new_url)) {
+                        return `${this.targetLabel(it, 'matched_url')} <span class="text-gray-400">→</span> <em class="text-gray-500">(unlinked)</em>`;
+                    }
                     return `${this.targetLabel(it, 'matched_url')} <span class="text-gray-400">→</span> ${this.targetLabel(it, 'new_url')}`;
                 }
                 if (k === 'inboundinsert' || k === 'outboundinsert') {
@@ -810,6 +816,13 @@ export default {
                 return `<span class="text-gray-700 dark:text-gray-300">${this.escape(item[titleKey])}</span>`;
             }
             return `<span class="text-gray-500">${this.escape(this.truncateUrl(raw))}</span>`;
+        },
+
+        // URL-Changer "Unlink" action stores items with new_url set to this
+        // sentinel. Detector kept in one place so renderers can swap in a
+        // human-readable label instead of leaking it as text in the table.
+        isUnlinkSentinel(v) {
+            return typeof v === 'string' && v === '__LINKWISE_UNLINK__';
         },
 
         // Tiny escape so v-html-rendered action lines can't bleed user content
