@@ -94,8 +94,9 @@ class OutboundController extends CpController
         // Optimistic locking check on the source entry (for outbound the
         // single source is shared across all insertions, so one hash check
         // covers the whole batch — fail-fast 409 before dispatch).
+        // Skipped for revert flows (per-entry conflicts → skips, not abort).
         $expectedHash = $request->input('content_hash', '');
-        if ($expectedHash) {
+        if ($expectedHash && empty($validated['reverts'])) {
             $entry = Entry::find($entryId);
             if ($entry && SafeEntrySaver::hash($entry) !== $expectedHash) {
                 return response()->json([

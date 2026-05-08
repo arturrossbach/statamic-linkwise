@@ -260,18 +260,21 @@ class UrlChangerController extends CpController
         // Verify hashes upfront — fail-fast 409 if any conflict before we
         // dispatch the heavy job. Better than 169 individual conflicts inside
         // the loop with a confusing aggregate error.
+        // Skipped for revert flows (per-entry conflicts → skips, not abort).
         $allHashes = $validated['entry_hashes'] ?? [];
-        $replacementEntryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
-        $relevantHashes = array_intersect_key($allHashes, $replacementEntryIds);
-        $conflicts = SafeEntrySaver::verifyHashes($relevantHashes);
-        if (! empty($conflicts)) {
-            $title = reset($conflicts);
+        if (empty($validated['reverts'])) {
+            $replacementEntryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
+            $relevantHashes = array_intersect_key($allHashes, $replacementEntryIds);
+            $conflicts = SafeEntrySaver::verifyHashes($relevantHashes);
+            if (! empty($conflicts)) {
+                $title = reset($conflicts);
 
-            return response()->json([
-                'error' => 'conflict',
-                'message' => 'Entry "'.$title.'" was modified by another editor. Please reload and try again.',
-                'entry_id' => array_key_first($conflicts),
-            ], 409);
+                return response()->json([
+                    'error' => 'conflict',
+                    'message' => 'Entry "'.$title.'" was modified by another editor. Please reload and try again.',
+                    'entry_id' => array_key_first($conflicts),
+                ], 409);
+            }
         }
 
         // Owner-Tracking: surface WHO started this job so other editors who

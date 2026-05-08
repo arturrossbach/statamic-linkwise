@@ -34,16 +34,16 @@
                 <table data-size="sm" class="data-table w-full text-sm">
                     <thead>
                         <tr>
-                            <th scope="col" class="text-left">When</th>
-                            <th scope="col" class="text-left">Operation</th>
-                            <th scope="col" class="text-left">Started by</th>
-                            <th scope="col" class="text-left">Entries affected</th>
+                            <SortableHeader label="When" :active="sortField === 'started_at'" :direction="sortDirection" @sort="toggleSort('started_at')" />
+                            <SortableHeader label="Operation" :active="sortField === 'kind'" :direction="sortDirection" @sort="toggleSort('kind')" />
+                            <SortableHeader label="Started by" :active="sortField === 'started_by'" :direction="sortDirection" @sort="toggleSort('started_by')" />
+                            <SortableHeader label="Entries affected" :active="sortField === 'entry_count_total'" :direction="sortDirection" @sort="toggleSort('entry_count_total')" />
                             <th scope="col" class="text-left">Details</th>
                             <th scope="col" class="text-right"></th>
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="snap in snapshots" :key="snap.id">
+                        <tr v-for="snap in sortedSnapshots" :key="snap.id">
                             <td class="whitespace-nowrap text-xs text-gray-600 dark:text-gray-400" v-tooltip="snap.started_at || ''">
                                 {{ formatRelative(snap.started_at) }}
                             </td>
@@ -185,12 +185,9 @@
                         <table data-size="sm" class="data-table w-full text-sm">
                             <thead>
                                 <tr>
-                                    <th scope="col" class="text-left">
-                                        <div class="inline-flex items-center gap-1">
-                                            {{ entryColumnLabel }}
-                                            <HelpIcon :tooltip="entryColumnTooltip" />
-                                        </div>
-                                    </th>
+                                    <SortableHeader :label="entryColumnLabel" :active="drawerSortField === 'title'" :direction="drawerSortDirection" @sort="toggleDrawerSort('title')">
+                                        <HelpIcon :tooltip="entryColumnTooltip" />
+                                    </SortableHeader>
                                     <th v-if="extraColumnLabel" scope="col" class="text-left">
                                         <div class="inline-flex items-center gap-1">
                                             {{ extraColumnLabel }}
@@ -203,16 +200,13 @@
                                             <HelpIcon tooltip="The sentence around the link as it was when the bulk ran — anchor text highlighted. Captures what the editor saw, not the current state of the entry." />
                                         </div>
                                     </th>
-                                    <th scope="col" class="text-left">
-                                        <div class="inline-flex items-center gap-1">
-                                            Status since bulk
-                                            <HelpIcon tooltip="Compares the entry's current content to its state right after the bulk. 'Unchanged' means no edits since. 'Edited' means a user touched the entry — Revert would skip it. 'Deleted' means the entry no longer exists. '—' (legacy) means this snapshot was recorded before post-hash tracking shipped, so the comparison isn't possible." />
-                                        </div>
-                                    </th>
+                                    <SortableHeader label="Status since bulk" :active="drawerSortField === 'status'" :direction="drawerSortDirection" @sort="toggleDrawerSort('status')">
+                                        <HelpIcon tooltip="Compares the entry's current content to its state right after the bulk. 'Unchanged' means no edits since. 'Edited' means a user touched the entry — Revert would skip it. 'Deleted' means the entry no longer exists. '—' (legacy) means this snapshot was recorded before post-hash tracking shipped, so the comparison isn't possible." />
+                                    </SortableHeader>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="e in detail.entries" :key="e.id">
+                                <tr v-for="e in sortedDetailEntries" :key="e.id">
                                     <td>
                                         <a v-if="e.edit_url" :href="e.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ e.title }}</a>
                                         <span v-else>{{ e.title }}</span>
@@ -256,12 +250,16 @@
 <script>
 import LinkwiseLayout from '../LinkwiseLayout.vue';
 import HelpIcon from '../shared/HelpIcon.vue';
+import SortableHeader from '../shared/SortableHeader.vue';
+import { sortableMixin } from '../shared/sortable.js';
 import { Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal } from '@statamic/cms/ui';
 import { isReversible, nonReversibleReason as computeNonReversibleReason, buildRevertRequest } from '../../services/revertHelper.js';
 import { setHeavyState } from '../../services/bulkOperationService.js';
 
 export default {
-    components: { LinkwiseLayout, HelpIcon, Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal },
+    components: { LinkwiseLayout, HelpIcon, SortableHeader, Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal },
+
+    mixins: [sortableMixin],
 
     props: {
         snapshots: { type: Array, default: () => [] },
@@ -279,6 +277,14 @@ export default {
             detailLoading: false,
             confirmRevert: false,
             reverting: false,
+            // Listing sort — newest first by default (matches the file-mtime
+            // order the backend ships).
+            sortField: 'started_at',
+            sortDirection: 'desc',
+            // Drawer sort — separate state so listing-sort isn't disturbed
+            // when the user re-orders rows inside an open drawer.
+            drawerSortField: 'title',
+            drawerSortDirection: 'asc',
         };
     },
 
@@ -286,6 +292,56 @@ export default {
         detailTitle() {
             if (!this.detail) return '';
             return this.kindLabel(this.detail.snapshot) + ' details';
+        },
+
+        /** Listing rows sorted by the active header. Mutates a copy so the
+         *  original snapshots prop isn't reordered (Inertia treats it as
+         *  immutable). */
+        sortedSnapshots() {
+            const f = this.sortField;
+            const dir = this.sortDirection === 'asc' ? 1 : -1;
+            return [...this.snapshots].sort((a, b) => {
+                let av, bv;
+                if (f === 'kind') { av = this.kindLabel(a); bv = this.kindLabel(b); }
+                else if (f === 'started_by') { av = a.started_by || ''; bv = b.started_by || ''; }
+                else if (f === 'entry_count_total') { av = a.entry_count_total || 0; bv = b.entry_count_total || 0; }
+                else { av = a.started_at || ''; bv = b.started_at || ''; }
+                if (av < bv) return -1 * dir;
+                if (av > bv) return 1 * dir;
+                return 0;
+            });
+        },
+
+        /** Drawer rows sorted by drawerSortField. Same shape as the original
+         *  Suggestion / Detail modals — separate state so the listing's sort
+         *  isn't clobbered. */
+        sortedDetailEntries() {
+            if (!this.detail?.entries) return [];
+            const f = this.drawerSortField;
+            const dir = this.drawerSortDirection === 'asc' ? 1 : -1;
+            return [...this.detail.entries].sort((a, b) => {
+                let av, bv;
+                if (f === 'collection') { av = a.collection || ''; bv = b.collection || ''; }
+                else if (f === 'status') { av = a.status || ''; bv = b.status || ''; }
+                else { av = (a.title || '').toLowerCase(); bv = (b.title || '').toLowerCase(); }
+                if (av < bv) return -1 * dir;
+                if (av > bv) return 1 * dir;
+                return 0;
+            });
+        },
+
+        /** Toggle for the drawer sort — the mixin's toggleSort works on
+         *  sortField, but the drawer uses drawerSortField. Inline the same
+         *  logic with the right state. */
+        toggleDrawerSort() {
+            return (field) => {
+                if (this.drawerSortField === field) {
+                    this.drawerSortDirection = this.drawerSortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.drawerSortField = field;
+                    this.drawerSortDirection = 'asc';
+                }
+            };
         },
 
         canRevert() {

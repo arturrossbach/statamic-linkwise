@@ -1055,18 +1055,24 @@ class DashboardController extends CpController
 
         // Pre-flight hash check — fail-fast 409 before dispatch instead of
         // letting the loop encounter conflicts mid-run.
+        // EXCEPTION: revert flows tolerate per-entry conflicts (modified
+        // entries are SKIPPED, not aborted). The activity-log Revert button
+        // sets `reverts: <id>`; when present we skip the fast-fail and let
+        // the command's inner per-entry hash check handle conflicts as skips.
         $allHashes = $validated['entry_hashes'] ?? [];
-        $replacementEntryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
-        $relevantHashes = array_intersect_key($allHashes, $replacementEntryIds);
-        $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($relevantHashes);
-        if (! empty($conflicts)) {
-            $title = reset($conflicts);
+        if (empty($validated['reverts'])) {
+            $replacementEntryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
+            $relevantHashes = array_intersect_key($allHashes, $replacementEntryIds);
+            $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($relevantHashes);
+            if (! empty($conflicts)) {
+                $title = reset($conflicts);
 
-            return response()->json([
-                'error' => 'conflict',
-                'message' => 'Entry "'.$title.'" was modified by another editor. Please reload and try again.',
-                'entry_id' => array_key_first($conflicts),
-            ], 409);
+                return response()->json([
+                    'error' => 'conflict',
+                    'message' => 'Entry "'.$title.'" was modified by another editor. Please reload and try again.',
+                    'entry_id' => array_key_first($conflicts),
+                ], 409);
+            }
         }
 
         $user = auth()->user();

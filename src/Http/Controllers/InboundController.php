@@ -85,15 +85,19 @@ class InboundController extends CpController
         ]);
 
         // Pre-flight hash check — fail-fast 409 before dispatch instead of
-        // letting the loop hit conflicts mid-run.
-        $conflicts = SafeEntrySaver::verifyHashes($request->input('entry_hashes', []));
-        if (! empty($conflicts)) {
-            $title = reset($conflicts);
+        // letting the loop hit conflicts mid-run. Skipped for revert flows
+        // (those tolerate per-entry conflicts as skips, see DashboardController
+        // ::detailUnlinkAsync for the rationale).
+        if (empty($validated['reverts'])) {
+            $conflicts = SafeEntrySaver::verifyHashes($request->input('entry_hashes', []));
+            if (! empty($conflicts)) {
+                $title = reset($conflicts);
 
-            return response()->json([
-                'error' => 'conflict',
-                'message' => 'Entry "'.$title.'" was modified since this page loaded. Please reload and try again.',
-            ], 409);
+                return response()->json([
+                    'error' => 'conflict',
+                    'message' => 'Entry "'.$title.'" was modified since this page loaded. Please reload and try again.',
+                ], 409);
+            }
         }
 
         $user = auth()->user();
