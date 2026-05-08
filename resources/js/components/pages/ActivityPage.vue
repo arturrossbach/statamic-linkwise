@@ -441,7 +441,13 @@ export default {
                 return `Removed <strong>${items.length}</strong> outbound link${items.length === 1 ? '' : 's'} from ${titleHtml}.`;
             }
             if (snap.kind === 'inboundinsert') {
-                const titleHtml = sum.entry_title ? `<strong>"${this.escape(sum.entry_title)}"</strong>` : '<em>the target entry</em>';
+                // For inbound: ONE shared target — surface it as a clickable
+                // link here so user can jump to it directly. The drawer
+                // table no longer carries a per-row Target column (would
+                // repeat the same value on every line). Falls back to plain
+                // strong-text when the target_id_edit_url isn't enriched
+                // yet (older snapshots, batch with no surviving items).
+                const titleHtml = this._inboundTargetLabel(items, sum);
                 return `Inserted <strong>${items.length}</strong> inbound link${items.length === 1 ? '' : 's'} pointing to ${titleHtml} — across ${n} source ${n === 1 ? 'entry' : 'entries'}.`;
             }
             if (snap.kind === 'outboundinsert') {
@@ -490,9 +496,16 @@ export default {
             if (k === 'urlchanger') {
                 return { label: 'URL change', tooltip: 'Old URL replaced by the new URL on this entry.' };
             }
-            if (k === 'inboundinsert' || k === 'outboundinsert') {
+            // Outbound = ONE source → MANY different targets, so target
+            // belongs per-row. Anchor stays because each row's anchor may
+            // differ.
+            if (k === 'outboundinsert') {
                 return { label: 'Anchor → Target', tooltip: 'The anchor text Linkwise inserted, plus the entry it now points at.' };
             }
+            // Inbound = MANY sources → ONE shared target. Target gets
+            // surfaced once in the summary header above the table; per-row
+            // it would be redundant. Anchor is highlighted in the Context
+            // column already, so we drop both per-row columns.
             // applyrule + bulkunlink + multi-rule applyrule: header carries it.
             return null;
         },
@@ -839,6 +852,26 @@ export default {
         // human-readable label instead of leaking it as text in the table.
         isUnlinkSentinel(v) {
             return typeof v === 'string' && v === '__LINKWISE_UNLINK__';
+        },
+
+        // Inbound bulks share a single target entry across all items; we
+        // pull the resolved title + edit URL off the first item (backend
+        // enrichment fills target_entry_id_title / _edit_url for any
+        // statamic://entry:: ref in the items list). Falls back to the
+        // summary's entry_title (plain text) when enrichment is missing —
+        // legacy snapshots or entries that have since been deleted.
+        _inboundTargetLabel(items, sum) {
+            const first = items?.[0];
+            if (first?.target_entry_id_title && first?.target_entry_id_edit_url) {
+                return `<a href="${this.escape(first.target_entry_id_edit_url)}" target="_blank" class="font-semibold text-blue-600 dark:text-blue-400 hover:underline">"${this.escape(first.target_entry_id_title)}"</a>`;
+            }
+            if (first?.target_entry_id_title) {
+                return `<strong>"${this.escape(first.target_entry_id_title)}"</strong>`;
+            }
+            if (sum?.entry_title) {
+                return `<strong>"${this.escape(sum.entry_title)}"</strong>`;
+            }
+            return '<em>the target entry</em>';
         },
 
         // Tiny escape so v-html-rendered action lines can't bleed user content
