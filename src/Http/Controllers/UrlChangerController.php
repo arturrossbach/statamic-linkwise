@@ -83,6 +83,11 @@ class UrlChangerController extends CpController
             'replacements.*.occurrence_index' => 'required|numeric|min:0',
             'replacements.*.new_url' => 'required|string|min:3|max:2048', // Use UrlHelper::UNLINK to unlink
             'replacements.*.search' => 'nullable|string|max:2048', // Per-item search override for batch unlink
+            // Anchor + sentence carried from preview so the activity-log
+            // drawer can show what was changed AND so an Unlink-revert can
+            // re-add the link mark on the original anchor (outbound-insert).
+            'replacements.*.anchor_text' => 'nullable|string|max:512',
+            'replacements.*.sentence_context' => 'nullable|string|max:1024',
         ]);
 
         // Mode controls URL matching semantics:
@@ -253,6 +258,11 @@ class UrlChangerController extends CpController
             'replacements.*.occurrence_index' => 'required|numeric|min:0',
             'replacements.*.new_url' => 'required|string|min:3|max:2048',
             'replacements.*.search' => 'nullable|string|max:2048',
+            // Anchor + context per item — needed by Activity-log drawer
+            // (always-visible Context column) AND by Unlink-revert routing
+            // (outbound-insert needs anchor to find the right plain-text run).
+            'replacements.*.anchor_text' => 'nullable|string|max:512',
+            'replacements.*.sentence_context' => 'nullable|string|max:1024',
             // Activity-log Revert flow — marks the new snapshot as a reverse-of-X.
             'reverts' => 'sometimes|nullable|string|max:64',
         ]);

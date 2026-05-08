@@ -65,21 +65,33 @@ export function isReversible(snapshot) {
         );
     }
 
-    // URL-Changer "unlink" action stores items with new_url=UNLINK_SENTINEL.
-    // The naive swap-revert (matched_url ↔ new_url) would search entries for
-    // the sentinel, find nothing, and report 0 replacements as "success" —
-    // the user sees a "Revert ran" toast that did literally nothing. Disable
-    // the button for these snapshots; future work can route internal-URL
-    // sentinel-items through outbound-insert (same shape as detailunlink-
-    // revert) but that's a new path with its own UX, not a V1 hot-fix.
+    // URL-Changer mixes two operation shapes that revert through different
+    // pipelines:
+    //   - replace items (new_url is a real URL): symmetric swap via url-changer apply
+    //   - unlink items (new_url=UNLINK_SENTINEL): asymmetric — needs the link
+    //     mark RE-ADDED on the original anchor; we route those through
+    //     outbound-insert. Requires anchor_text + an internal target (we can
+    //     only add a link mark if matched_url is statamic://entry::ID — for
+    //     external URLs there's no "re-link this plain text" write path yet).
+    //   Mixed snapshots are reversible if any item is swappable OR any item
+    //   is a re-link candidate.
     if (kind === 'urlchanger') {
-        const hasSwappable = snapshot.items.some(i =>
-            i?.new_url && i.new_url !== UNLINK_SENTINEL
-        );
-        return hasSwappable;
+        return snapshot.items.some(i => isUrlchangerItemReversible(i));
     }
 
     return true;
+}
+
+function isUrlchangerItemReversible(item) {
+    if (! item) return false;
+    if (item.new_url && item.new_url !== UNLINK_SENTINEL) return true; // swap path
+    if (item.new_url === UNLINK_SENTINEL
+        && typeof item.matched_url === 'string'
+        && item.matched_url.startsWith('statamic://entry::')
+        && item.anchor_text) {
+        return true; // re-link path
+    }
+    return false;
 }
 
 /**
@@ -106,10 +118,22 @@ export function nonReversibleReason(snapshot) {
         return 'Multi-rule applies are not yet revertable in V1 — use the "Find these in URL Changer" link or revert each rule individually from a single-rule activity entry.';
     }
     if (snapshot.kind === 'urlchanger') {
-        const allSentinel = Array.isArray(snapshot.items) && snapshot.items.length > 0
-            && snapshot.items.every(i => i?.new_url === UNLINK_SENTINEL);
-        if (allSentinel) {
-            return 'URL-Changer "Unlink" operations aren\'t auto-revertable in V1 — re-adding the link would need to know which target entry to point to. Use the Detail Modal on the affected entry to re-add a link manually.';
+        // None of the items are reversible — all sentinel-with-external-URL
+        // (would need a re-link write path we don't have) or all missing
+        // anchor_text (legacy snapshot from before anchor recording shipped).
+        const items = Array.isArray(snapshot.items) ? snapshot.items : [];
+        const hasUnlink = items.some(i => i?.new_url === UNLINK_SENTINEL);
+        const hasLegacy = items.some(i => i?.new_url === UNLINK_SENTINEL && ! i?.anchor_text);
+        const hasExternalUnlink = items.some(i =>
+            i?.new_url === UNLINK_SENTINEL
+            && typeof i?.matched_url === 'string'
+            && ! i.matched_url.startsWith('statamic://entry::')
+        );
+        if (hasUnlink && hasLegacy) {
+            return 'This URL-Changer "Unlink" snapshot was recorded before per-item anchor capture shipped — Linkwise can\'t reconstruct which text to re-link. Snapshots created from now on are revertable.';
+        }
+        if (hasUnlink && hasExternalUnlink) {
+            return 'URL-Changer "Unlink" of external URLs (https://…) isn\'t auto-revertable yet — re-adding the link would need a write path that wraps plain text in a new link mark, which we ship in V1.1. Internal-target unlinks ARE revertable.';
         }
     }
     if (!Array.isArray(snapshot.items) || snapshot.items.length === 0) {
@@ -231,11 +255,32 @@ export function buildRevertRequest(snapshot, endpoints) {
     }
 
     if (snapshot.kind === 'urlchanger') {
-        // Items = {entry_id, matched_url, new_url}
-        // Revert = swap matched_url ↔ new_url and re-apply.
-        const replacements = items
-            .filter(i => i.entry_id && i.matched_url && i.new_url)
-            .map(i => ({
+        // Two buckets — see isUrlchangerItemReversible:
+        //   swappable: had a real new_url → revert via url-changer apply (swap)
+        //   re-link:   new_url=sentinel + internal matched_url + anchor_text
+        //              → revert via outbound-insert (re-add the link mark)
+        // Items not in either bucket (external sentinel, missing anchor) are
+        // dropped silently; the per-item filter below mirrors isReversible
+        // so we don't ship "Revert" buttons that would do nothing.
+        //
+        // If both buckets are non-empty we prefer the swap path and let the
+        // re-link bucket lose — mixed Replace+Unlink in one bulk is rare and
+        // routing to two endpoints would need a serial-fanout that V1's
+        // single-job-per-revert UX doesn't support. The user can revert
+        // again to pick up the other bucket if they hit this.
+        const swappable = items.filter(i =>
+            i.entry_id && i.matched_url && i.new_url && i.new_url !== UNLINK_SENTINEL
+        );
+        const reLink = items.filter(i =>
+            i.new_url === UNLINK_SENTINEL
+            && i.entry_id
+            && typeof i.matched_url === 'string'
+            && i.matched_url.startsWith('statamic://entry::')
+            && i.anchor_text
+        );
+
+        if (swappable.length > 0) {
+            const replacements = swappable.map(i => ({
                 entry_id: i.entry_id,
                 matched_url: i.new_url,    // swapped
                 new_url: i.matched_url,    // swapped
@@ -243,18 +288,40 @@ export function buildRevertRequest(snapshot, endpoints) {
                 field: '',
                 field_type: '',
             }));
-        return {
-            url: endpoints.urlChangerApply,
-            payload: {
-                replacements,
-                entry_hashes: entryHashes,
-                mode: 'exact', // we know the exact URLs — no domain inference
-                action: 'apply',
-                search: '', // not needed when we send exact matched_url per item
-                reverts: snapshot.id,
-            },
-            kindLabel: 'replace',
-        };
+            return {
+                url: endpoints.urlChangerApply,
+                payload: {
+                    replacements,
+                    entry_hashes: entryHashes,
+                    mode: 'exact',
+                    action: 'apply',
+                    search: '',
+                    reverts: snapshot.id,
+                },
+                kindLabel: 'replace',
+            };
+        }
+
+        if (reLink.length > 0) {
+            const insertions = reLink.map(i => ({
+                source_entry_id: i.entry_id,
+                target_entry_id: i.matched_url.replace('statamic://entry::', ''),
+                anchor_text: i.anchor_text,
+            }));
+            return {
+                url: endpoints.outboundInsert,
+                payload: {
+                    insertions,
+                    entry_hashes: entryHashes,
+                    source_mode: 'outbound',
+                    entry_title: 'Revert: URL-Changer unlink',
+                    reverts: snapshot.id,
+                },
+                kindLabel: 're-link',
+            };
+        }
+
+        return null;
     }
 
     return null;

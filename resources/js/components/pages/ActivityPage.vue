@@ -521,12 +521,24 @@ export default {
             return rf.kind || 'previous operation';
         },
 
-        /** True when at least one item has a sentence_context — drives the
-         *  optional Context column. Snapshots from before the context-write
-         *  expansion don't have it; we just hide the column then. */
+        /** Drives the optional Context column. Per-kind: kinds whose items
+         *  carry context get a permanent column (consistent table structure
+         *  across snapshots) — empty cells render "—" instead of hiding the
+         *  whole column on legacy data. Kinds whose items never carry a
+         *  context (bulkunlink, multi-rule applyrule) keep the column hidden
+         *  so we don't render dead empty space. */
         hasContextColumn() {
-            const items = this.detail?.snapshot?.items || [];
-            return items.some(i => typeof i?.sentence_context === 'string' && i.sentence_context.length > 0);
+            const k = this.detail?.snapshot?.kind || '';
+            // Per-kind whitelist: every kind that records sentence_context
+            // in its snapshot.items going forward. Older snapshots from
+            // before the recording shipped will have empty values — we
+            // still render the column so the table layout is stable.
+            const kindsWithContext = ['applyrule', 'inboundinsert', 'outboundinsert', 'detailunlink', 'urlchanger'];
+            if (! kindsWithContext.includes(k)) return false;
+            // Multi-rule applyrule's items list rules, not entries — no per-
+            // entry context to surface, drop the column.
+            if (k === 'applyrule' && this.detail?.snapshot?.summary?.mode === 'multi-rule') return false;
+            return true;
         },
     },
 
@@ -788,7 +800,11 @@ export default {
                 }
                 if (k === 'urlchanger') {
                     if (this.isUnlinkSentinel(it.new_url)) {
-                        return `${this.targetLabel(it, 'matched_url')} <span class="text-gray-400">→</span> <em class="text-gray-500">(unlinked)</em>`;
+                        // No arrow — sentinel isn't a destination URL, the
+                        // arrow notation reads "URL → state" which is
+                        // misleading. State is shown as a tag-style suffix.
+                        const anchor = it.anchor_text ? `<span class="font-mono text-gray-700 dark:text-gray-300">"${this.escape(it.anchor_text)}"</span> on ` : '';
+                        return `${anchor}${this.targetLabel(it, 'matched_url')} <em class="text-gray-500">— link removed</em>`;
                     }
                     return `${this.targetLabel(it, 'matched_url')} <span class="text-gray-400">→</span> ${this.targetLabel(it, 'new_url')}`;
                 }

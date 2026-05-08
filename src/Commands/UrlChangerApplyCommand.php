@@ -100,6 +100,7 @@ class UrlChangerApplyCommand extends Command
             'entry_id' => $r['entry_id'] ?? '',
             'matched_url' => $r['matched_url'] ?? '',
             'new_url' => $r['new_url'] ?? '',
+            'anchor_text' => $r['anchor_text'] ?? '',
             'sentence_context' => $r['sentence_context'] ?? '',
         ], $replacements);
         $snapshotId = app(BulkSnapshotStore::class)->record(

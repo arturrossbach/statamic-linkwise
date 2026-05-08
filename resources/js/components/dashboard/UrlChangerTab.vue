@@ -558,6 +558,12 @@ export default {
                 field_type: m.field_type,
                 matched_url: m.matched_url,
                 occurrence_index: m.occurrence_index,
+                // Carried forward into the activity-log snapshot so the
+                // drawer can show "this anchor in this sentence", and
+                // revertHelper can re-add the link mark on Unlink-revert
+                // (outbound-insert needs the anchor to find the right text).
+                anchor_text: m.anchor_text || '',
+                sentence_context: m.context || '',
             };
         },
 
