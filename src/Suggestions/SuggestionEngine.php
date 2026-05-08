@@ -269,7 +269,12 @@ class SuggestionEngine
                         continue;
                     }
 
-                    $position = $this->byteToCharOffset($originalText, $m[1]);
+                    // Trim leading/trailing stopwords from the matched span
+                    // (e.g. "als gleichberechtigter Bestandteil" → "gleich-
+                    // berechtigter Bestandteil"). Middle stopwords stay.
+                    [$trimmed, $shift] = $this->trimBoundaryStopwords($anchorText);
+                    $anchorText = $trimmed;
+                    $position = $this->byteToCharOffset($originalText, $m[1]) + $shift;
                     $context = $this->extractContext($originalText, $position, mb_strlen($anchorText));
 
                     $suggestions[] = new Suggestion(
@@ -945,6 +950,66 @@ class SuggestionEngine
         }
 
         return implode(' ', $words);
+    }
+
+    /**
+     * Trim leading + trailing stopwords from a matched anchor span. Middle
+     * stopwords stay — "interne Verlinkung als Bestandteil" is a legitimate
+     * highlight where "als" connects two content words. Only the dangling
+     * boundary stopwords ("als gleichberechtigter Bestandteil" → "gleich-
+     * berechtigter Bestandteil", "interne Verlinkung als" → "interne
+     * Verlinkung") get cleaned up.
+     *
+     * Returns [trimmedAnchor, leadingOffset] — the offset is the byte/char
+     * shift the caller must add to the original match position so the
+     * trimmed anchor still points at the right span. Falls back to the
+     * original if trimming would leave fewer than 2 words.
+     *
+     * @return array{0: string, 1: int}  [trimmedText, leadingShiftChars]
+     */
+    public function trimBoundaryStopwords(string $anchor): array
+    {
+        // Preserve original whitespace/punctuation between words by working
+        // on a regex split that captures separators.
+        $parts = preg_split('/(\s+)/u', $anchor, -1, PREG_SPLIT_DELIM_CAPTURE);
+        if (! is_array($parts) || empty($parts)) {
+            return [$anchor, 0];
+        }
+        // $parts alternates: word, sep, word, sep, ...
+        // Word indexes are even (0,2,4,...).
+        $wordIndexes = [];
+        foreach ($parts as $i => $p) {
+            if ($i % 2 === 0 && $p !== '') $wordIndexes[] = $i;
+        }
+        if (count($wordIndexes) < 2) {
+            return [$anchor, 0];
+        }
+        // Walk forward, drop while leading word is a stopword.
+        $first = 0;
+        while ($first < count($wordIndexes) - 1
+            && $this->isStopword(mb_strtolower($parts[$wordIndexes[$first]]))) {
+            $first++;
+        }
+        // Walk backward, drop while trailing word is a stopword.
+        $last = count($wordIndexes) - 1;
+        while ($last > $first
+            && $this->isStopword(mb_strtolower($parts[$wordIndexes[$last]]))) {
+            $last--;
+        }
+        // Need at least 2 remaining words to keep the trim — otherwise
+        // we'd return a single content word, which is too aggressive and
+        // could break downstream filters that require min_phrase_words.
+        if ($last - $first < 1) {
+            return [$anchor, 0];
+        }
+        // Reconstruct: drop everything before parts[$wordIndexes[$first]]
+        // and after parts[$wordIndexes[$last]].
+        $startIdx = $wordIndexes[$first];
+        $endIdx = $wordIndexes[$last];
+        $leadingShift = mb_strlen(implode('', array_slice($parts, 0, $startIdx)));
+        $trimmed = implode('', array_slice($parts, $startIdx, $endIdx - $startIdx + 1));
+
+        return [$trimmed, $leadingShift];
     }
 
     protected function stripTrailingStopwords(array $words): string
