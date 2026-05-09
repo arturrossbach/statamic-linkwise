@@ -139,6 +139,7 @@ import { Card, Panel, Button, Stack, Input, Checkbox } from '@statamic/cms/ui';
 import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
 import { sortableMixin } from '../shared/sortable.js';
+import { readJson, writeJson } from '../../utils/safeStorage.js';
 
 const STATE_KEY = 'linkwise.targetkeywords.state';
 
@@ -234,28 +235,20 @@ export default {
         // Hydrate filter state from sessionStorage so the user lands on the
         // same view after a tab switch (Inertia keeps the page mounted but a
         // hard navigation away and back would otherwise reset filters).
-        try {
-            const raw = sessionStorage.getItem(STATE_KEY);
-            if (raw) {
-                const stored = JSON.parse(raw);
-                if (typeof stored.searchQuery === 'string') this.searchQuery = stored.searchQuery;
-                if (typeof stored.onlyWithoutCustom === 'boolean') this.onlyWithoutCustom = stored.onlyWithoutCustom;
-            }
-        } catch {
-            // private mode / corrupt storage — silently fall back.
+        // safeStorage swallows quota / private-mode failures.
+        const stored = readJson(STATE_KEY);
+        if (stored) {
+            if (typeof stored.searchQuery === 'string') this.searchQuery = stored.searchQuery;
+            if (typeof stored.onlyWithoutCustom === 'boolean') this.onlyWithoutCustom = stored.onlyWithoutCustom;
         }
     },
 
     methods: {
         persistState() {
-            try {
-                sessionStorage.setItem(STATE_KEY, JSON.stringify({
-                    searchQuery: this.searchQuery || '',
-                    onlyWithoutCustom: this.onlyWithoutCustom,
-                }));
-            } catch {
-                // non-critical
-            }
+            writeJson(STATE_KEY, {
+                searchQuery: this.searchQuery || '',
+                onlyWithoutCustom: this.onlyWithoutCustom,
+            });
         },
 
         editKeywords(entry) {

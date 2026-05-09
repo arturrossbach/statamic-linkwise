@@ -203,6 +203,7 @@ import { highlightAnchor } from '../../utils/highlight.js';
 import { isValidReplacementUrl } from '../../utils/urlValidation.js';
 import { errorToast } from '../../utils/toast.js';
 import { bulkState, setHeavyState } from '../../services/bulkOperationService.js';
+import { readJson, writeJson } from '../../utils/safeStorage.js';
 
 const URL_CHANGER_STATE_KEY = 'linkwise.urlchanger.state';
 
@@ -335,20 +336,16 @@ export default {
         // Hydrate from sessionStorage UNLESS the page was opened with a
         // ?search= query param (deep-link from Domains tab "Edit Links" wins
         // over a stale stored search). Storage holds {search, mode}.
+        // safeStorage swallows quota / private-mode failures silently —
+        // hydration just falls through to defaults.
         if (!this.initialSearch) {
-            try {
-                const raw = sessionStorage.getItem(URL_CHANGER_STATE_KEY);
-                if (raw) {
-                    const stored = JSON.parse(raw);
-                    if (typeof stored.search === 'string') this.search = stored.search;
-                    if (stored.mode === 'smart' || stored.mode === 'exact') {
-                        this.searchMode = stored.mode;
-                        this.previewedMode = stored.mode;
-                    }
+            const stored = readJson(URL_CHANGER_STATE_KEY);
+            if (stored) {
+                if (typeof stored.search === 'string') this.search = stored.search;
+                if (stored.mode === 'smart' || stored.mode === 'exact') {
+                    this.searchMode = stored.mode;
+                    this.previewedMode = stored.mode;
                 }
-            } catch {
-                // sessionStorage may be unavailable (private mode) or corrupt.
-                // Silently fall through to defaults.
             }
         }
 
@@ -449,14 +446,10 @@ export default {
          * a hard navigation away and back would otherwise lose state).
          */
         persistState() {
-            try {
-                sessionStorage.setItem(URL_CHANGER_STATE_KEY, JSON.stringify({
-                    search: this.search || '',
-                    mode: this.searchMode,
-                }));
-            } catch {
-                // Quota exceeded or private mode — non-critical.
-            }
+            writeJson(URL_CHANGER_STATE_KEY, {
+                search: this.search || '',
+                mode: this.searchMode,
+            });
         },
 
         highlightAnchor,

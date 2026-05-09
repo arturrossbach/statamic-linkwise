@@ -223,6 +223,7 @@ import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
 import { highlightAnchor } from '../../utils/highlight.js';
 import { sortableMixin } from '../shared/sortable.js';
+import { readJson, writeJson } from '../../utils/safeStorage.js';
 
 export default {
     components: { Link, Card, Panel, Stack, Button, Alert, HelpIcon, SortableHeader },
@@ -260,15 +261,12 @@ export default {
     },
 
     mounted() {
-        const saved = sessionStorage.getItem('linkwise:domains:filters');
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                this.searchQuery = parsed.searchQuery || '';
-                this.attributeFilter = parsed.attributeFilter || '';
-                this.sortField = parsed.sortField || 'link_count';
-                this.sortDirection = parsed.sortDirection || 'desc';
-            } catch { /* corrupt — ignore */ }
+        const parsed = readJson('linkwise:domains:filters');
+        if (parsed) {
+            this.searchQuery = parsed.searchQuery || '';
+            this.attributeFilter = parsed.attributeFilter || '';
+            this.sortField = parsed.sortField || 'link_count';
+            this.sortDirection = parsed.sortDirection || 'desc';
         }
     },
 
@@ -370,13 +368,15 @@ export default {
         },
 
         // Persist sort + filter state so it survives Inertia tab-nav.
+        // safeStorage swallows quota / private-mode failures — filters
+        // just won't survive reload (a UX nicety, not load-bearing).
         persistFilters() {
-            sessionStorage.setItem('linkwise:domains:filters', JSON.stringify({
+            writeJson('linkwise:domains:filters', {
                 searchQuery: this.searchQuery,
                 attributeFilter: this.attributeFilter,
                 sortField: this.sortField,
                 sortDirection: this.sortDirection,
-            }));
+            });
         },
 
         async triggerRescan() {

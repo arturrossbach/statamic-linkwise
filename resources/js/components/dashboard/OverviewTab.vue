@@ -285,6 +285,7 @@
 import { Card, Button, Alert } from '@statamic/cms/ui';
 import HelpIcon from '../shared/HelpIcon.vue';
 import ClickIndicator from '../shared/ClickIndicator.vue';
+import { readString, writeString } from '../../utils/safeStorage.js';
 
 // Threshold: after 7 days, suggest a re-scan
 const STALE_INDEX_DAYS = 7;
@@ -319,11 +320,10 @@ export default {
     },
 
     mounted() {
-        try {
-            this.recommendationsCollapsed = sessionStorage.getItem('linkwise:overview:recommendationsCollapsed') === '1';
-        } catch {
-            // private mode — accordion just defaults to open every load
-        }
+        // safeStorage returns null on quota / private-mode failure; the
+        // `=== '1'` comparison degrades to false → accordion just defaults
+        // to open every load.
+        this.recommendationsCollapsed = readString('linkwise:overview:recommendationsCollapsed') === '1';
     },
 
     computed: {
@@ -464,14 +464,10 @@ export default {
          */
         handleRecommendationsToggle(event) {
             this.recommendationsCollapsed = !event.target.open;
-            try {
-                sessionStorage.setItem(
-                    'linkwise:overview:recommendationsCollapsed',
-                    this.recommendationsCollapsed ? '1' : '0',
-                );
-            } catch {
-                // private mode — non-critical, choice just won't persist
-            }
+            writeString(
+                'linkwise:overview:recommendationsCollapsed',
+                this.recommendationsCollapsed ? '1' : '0',
+            );
         },
 
         /**

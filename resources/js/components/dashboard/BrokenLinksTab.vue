@@ -407,6 +407,7 @@ import { isValidReplacementUrl } from '../../utils/urlValidation.js';
 import { sortableMixin } from '../shared/sortable.js';
 import { applyUrlReplacements, UNLINK_SENTINEL } from '../shared/urlReplacer.js';
 import { buildPaginationMeta, paginateItems } from '../shared/pagination.js';
+import { readJson, writeJson } from '../../utils/safeStorage.js';
 import { bulkState } from '../../services/bulkOperationService.js';
 
 const TYPE_FILTER_OPTIONS = [
@@ -461,7 +462,7 @@ export default {
     },
 
     data() {
-        const saved = JSON.parse(sessionStorage.getItem('linkwise-broken-state') || 'null');
+        const saved = readJson('linkwise-broken-state');
         return {
             searchQuery: this.initialEntryFilter || saved?.searchQuery || '',
             typeFilter: saved?.typeFilter || '',
@@ -913,13 +914,13 @@ export default {
         },
 
         persistState() {
-            sessionStorage.setItem('linkwise-broken-state', JSON.stringify({
+            writeJson('linkwise-broken-state', {
                 searchQuery: this.searchQuery,
                 typeFilter: this.typeFilter,
                 activeStatuses: this.activeStatuses,
                 sortField: this.sortField,
                 sortDirection: this.sortDirection,
-            }));
+            });
         },
 
         promptUnlink(link) {
