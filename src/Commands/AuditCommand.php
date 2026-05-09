@@ -81,6 +81,7 @@ class AuditCommand extends Command
             'inbound'                => fn () => $this->auditInboundInsertability(),
             'outbound'               => fn () => $this->auditOutboundInsertability(),
             'suggestions-safety'     => fn () => $this->auditSuggestionsSafety(),
+            'highlight-truth'        => fn () => $this->auditHighlightTruth(),
             'suggestion-count-drift' => fn () => $this->auditSuggestionCountDrift(),
             'orphan-split-link'      => fn () => $this->auditOrphanSplitLinks(),
             'revert-completeness'    => fn () => $this->auditRevertCompleteness(),
@@ -830,6 +831,67 @@ class AuditCommand extends Command
      *
      * @return list<array{existing_href: string, linked_text: string, position: int}>
      */
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Highlight-truth. The Outbound modal renders sentence_context
+    // with the anchor word highlighted ("Weiter mit **Brauner**-Zucker-
+    // Speck-Kekse"). The user's mental model: "I'm linking THIS exact
+    // span". But BardLinkInserter operates on the entry's full Bard
+    // tree and links the FIRST word-boundary match it finds — which may
+    // be a different occurrence if the anchor appears multiple times
+    // (e.g. anchor "die" in a German entry has dozens of valid hits).
+    //
+    // For each surfaced suggestion: extract the anchor + its sentence-
+    // context as the UI shows them. Verify the anchor IS literally
+    // present in that context. If a suggestion's UI-shown context
+    // doesn't contain the anchor at all, the modal is showing the
+    // wrong sentence and the user has no way to correlate "what I
+    // see" with "what gets linked".
+    //
+    // Sentinel-marker stripping: SuggestionEngine sometimes emits
+    // \x01 / \x02 around the matched span. Cleaned before comparison.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditHighlightTruth(): void
+    {
+        $this->line('<fg=yellow>highlight-truth</> — UI-highlighted anchor really appears in the context the UI shows');
+
+        $records = $this->indexer->load();
+        $sample = array_filter($records, fn ($r) => ($r->outboundSuggestionCount ?? 0) > 0);
+
+        foreach ($sample as $record) {
+            try {
+                $raw = $this->suggestionEngine->suggest(
+                    $record->text, $records, $record->id, $record->outboundLinks
+                );
+                $grouped = OutboundSuggestionGrouper::groupAndFilter($raw, $record->id);
+            } catch (\Throwable $e) {
+                $this->recordFailure('highlight-truth', "grouping for '{$record->title}' threw: ".$e->getMessage());
+                continue;
+            }
+
+            foreach ($grouped['groups'] ?? [] as $group) {
+                $anchor = (string) ($group['anchor_text'] ?? '');
+                $context = (string) ($group['sentence_context'] ?? '');
+                if ($anchor === '' || $context === '') continue;
+
+                // Strip sentinel markers + leading/trailing ellipses
+                // ContextExtractor adds for truncation hints. The
+                // visible anchor text is what survives.
+                $cleanContext = str_replace(["\x01", "\x02"], '', $context);
+                $cleanContext = preg_replace('/^\.{3,}|\.{3,}$/u', '', $cleanContext);
+                $cleanContext = trim($cleanContext);
+
+                if (mb_stripos($cleanContext, $anchor) === false) {
+                    $this->recordFailure(
+                        'highlight-truth',
+                        "'{$anchor}' on '{$record->title}': UI context \"".mb_strimwidth($cleanContext, 0, 80, '…')."\" does NOT contain the anchor — modal would mislead the user about which span gets linked",
+                    );
+                } else {
+                    $this->pass('highlight-truth');
+                }
+            }
+        }
+    }
+
     protected function findAnchorPartialOverlapsInBard($entry, string $anchor, string $newHref): array
     {
         $hits = [];
