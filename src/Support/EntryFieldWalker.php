@@ -29,7 +29,19 @@ class EntryFieldWalker
     {
         try {
             $fields = $entry->blueprint()->fields()->all();
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            // Don't crash the caller when an entry has a malformed blueprint
+            // (schema-drift after a custom-field rename, missing fieldset
+            // include, etc.) — but DO log: a silent return-empty here makes
+            // the entry invisible to the indexer / suggestion engine without
+            // any user-visible signal. The user sees "0 outbound links" on
+            // an entry that clearly has links and has no clue why. Surfaced
+            // here, the warning lands in storage/logs/laravel.log where the
+            // user can find the entry id and fix the blueprint.
+            $entryId = method_exists($entry, 'id') ? (string) $entry->id() : '?';
+            \Illuminate\Support\Facades\Log::warning(
+                "[Linkwise] EntryFieldWalker: blueprint load failed for entry {$entryId} — entry will be skipped: ".$e->getMessage(),
+            );
             return;
         }
 
