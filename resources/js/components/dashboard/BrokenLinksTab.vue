@@ -1000,7 +1000,7 @@ export default {
                 if ((result.total_replacements ?? 0) === 0) {
                     return {
                         success: false,
-                        error: 'Link was not found in this entry — may have been removed elsewhere.',
+                        error: 'Link was not found at the scanned position — may have moved or been removed since the scan. List refreshed.',
                         missing: true,
                     };
                 }
@@ -1100,7 +1100,7 @@ export default {
                     // Remove the row locally for immediate feedback; Inertia reload
                     // re-syncs with server truth (backend already called removeLink).
                     this.removeLinkLocally(link);
-                    Statamic.$toast.info('Link was not found in this entry — may have been removed elsewhere.');
+                    Statamic.$toast.info('Link was not found at the scanned position — may have moved or been removed since the scan. List refreshed.');
                     inertiaRouter.reload({ only: ['brokenData', 'entryHashes'], preserveScroll: true });
                     this.editingLink = null;
                     return;

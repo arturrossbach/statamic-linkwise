@@ -151,84 +151,33 @@ class UrlReplacer
      */
     public function replaceNthInBard(array $bardContent, string $search, string $oldUrl, string $newUrl, int $targetIndex): array
     {
-        // Phase 1: indexed replace — try the exact occurrence_index from preview.
+        // Indexed replace — find the link at exactly $targetIndex and verify
+        // its href matches $oldUrl before mutating.
+        //
+        // Earlier versions had a Phase-2 "opportunistic" fallback that, on
+        // index miss, would scan for the FIRST link with $oldUrl anywhere in
+        // the entry and replace that. Removed 2026-05-09 — the fallback
+        // silently mutated the wrong link when:
+        //   - the user had multiple links to the same URL (one preview entry
+        //     became "remove the first one" regardless of which one the user
+        //     was looking at);
+        //   - structural shifts between scan and apply moved the target;
+        //   - Auto-Linker writes between scan and apply (no hash conflict
+        //     because we wrote it ourselves) shifted indices.
+        // Now: index miss returns (false). Caller surfaces "position changed
+        // since scan, refresh required" — user verifies the refreshed scan
+        // before clicking again. Worst case is a skip + retry; the worst
+        // case of the old behavior was silent data mutation.
         $counter = ['i' => 0, 'replaced' => false, 'actually_replaced' => false];
 
         foreach ($bardContent as $i => $node) {
             $bardContent[$i] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter);
-            if ($counter['replaced']) {
-                if ($counter['actually_replaced']) {
-                    return [$bardContent, true];
-                }
-                break; // hit target index but href didn't match — fall through to phase 2
-            }
-        }
-
-        // Phase 2: opportunistic fallback — phase 1 didn't actually do anything.
-        // Common reasons: index drift between preview and apply, multi-field
-        // entry counter mismatch, structural shifts. The user's intent is
-        // unambiguous when oldUrl is unique: just remove/replace ANY link with
-        // that href. If the user had multiple links with the same oldUrl and
-        // wanted a specific one, bad luck — running Apply again grabs the next.
-        if (! $counter['actually_replaced']) {
-            $fallbackReplaced = false;
-            foreach ($bardContent as $i => $node) {
-                $bardContent[$i] = $this->fallbackReplaceFirstByUrl($node, $oldUrl, $newUrl, $fallbackReplaced);
-                if ($fallbackReplaced) {
-                    return [$bardContent, true];
-                }
+            if ($counter['actually_replaced']) {
+                return [$bardContent, true];
             }
         }
 
         return [$bardContent, false];
-    }
-
-    /**
-     * Phase-2 fallback: find the first link with href === $oldUrl, replace it.
-     * Ignores search-mode and occurrence_index entirely. Pure "remove this URL".
-     */
-    protected function fallbackReplaceFirstByUrl(array $node, string $oldUrl, string $newUrl, bool &$replaced): array
-    {
-        if ($replaced) {
-            return $node;
-        }
-
-        if (isset($node['marks'])) {
-            foreach ($node['marks'] as $j => $mark) {
-                if (($mark['type'] ?? '') === 'link' && ($mark['attrs']['href'] ?? '') === $oldUrl) {
-                    if ($newUrl === UrlHelper::UNLINK) {
-                        array_splice($node['marks'], $j, 1);
-                        if (empty($node['marks'])) {
-                            unset($node['marks']);
-                        }
-                    } else {
-                        $node['marks'][$j]['attrs']['href'] = $newUrl;
-                    }
-                    $replaced = true;
-
-                    return $node;
-                }
-            }
-        }
-
-        if (isset($node['content'])) {
-            foreach ($node['content'] as $i => $child) {
-                $node['content'][$i] = $this->fallbackReplaceFirstByUrl($child, $oldUrl, $newUrl, $replaced);
-                if ($replaced) {
-                    return $node;
-                }
-            }
-        }
-
-        // Set-aware fallback. Without this, Phase-2's "just find ANY
-        // link with this href" branch missed in-set links — meaning the
-        // user could replace 4 of 5 occurrences (the 5th in a Peak Card
-        // never reached) without any error signal.
-        return \Arturrossbach\Linkwise\Support\BardWalker::mapSetChildren(
-            $node,
-            fn (array $child) => $this->fallbackReplaceFirstByUrl($child, $oldUrl, $newUrl, $replaced),
-            fn (): bool => $replaced,
-        );
     }
 
     protected function replaceNthInNode(array $node, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter): array
@@ -299,50 +248,12 @@ class UrlReplacer
         $counter = ['i' => 0, 'replaced' => false, 'actually_replaced' => false];
         $sets = $this->replaceNthInReplicatorRecursive($sets, $search, $oldUrl, $newUrl, $targetIndex, $counter);
 
-        if ($counter['actually_replaced']) {
-            return [$sets, true];
-        }
-
-        // Phase 2: fallback to first occurrence of oldUrl anywhere in the
-        // replicator. Same rationale as replaceNthInBard's fallback.
-        $fallbackReplaced = false;
-        $sets = $this->fallbackReplicatorReplaceFirstByUrl($sets, $oldUrl, $newUrl, $fallbackReplaced);
-
-        return [$sets, $fallbackReplaced];
+        // No Phase-2 opportunistic fallback (removed 2026-05-09, see
+        // replaceNthInBard for full rationale). Index miss returns false;
+        // caller surfaces "position changed since scan, refresh required".
+        return [$sets, $counter['actually_replaced']];
     }
 
-    protected function fallbackReplicatorReplaceFirstByUrl(array $sets, string $oldUrl, string $newUrl, bool &$replaced): array
-    {
-        foreach ($sets as $i => $set) {
-            if ($replaced || ! is_array($set)) {
-                continue;
-            }
-            foreach ($set as $key => $value) {
-                if ($replaced) {
-                    break;
-                }
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
-                    continue;
-                }
-                if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    foreach ($value as $ni => $node) {
-                        $value[$ni] = $this->fallbackReplaceFirstByUrl($node, $oldUrl, $newUrl, $replaced);
-                        if ($replaced) {
-                            $sets[$i][$key] = $value;
-                            break 2;
-                        }
-                    }
-                } elseif (isset($value[0]['type'], $value[0]['id'])) {
-                    $sets[$i][$key] = $this->fallbackReplicatorReplaceFirstByUrl($value, $oldUrl, $newUrl, $replaced);
-                    if ($replaced) {
-                        break 2;
-                    }
-                }
-            }
-        }
-
-        return $sets;
-    }
 
     protected function replaceNthInReplicatorRecursive(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter): array
     {
@@ -412,31 +323,10 @@ class UrlReplacer
             $markdown,
         );
 
-        if ($actuallyReplaced) {
-            return [$result, true];
-        }
-
-        // Phase 2: fallback — index drift, just replace the first occurrence.
-        // Same rationale as the Bard fallback: oldUrl is unambiguous.
-        $fallbackReplaced = false;
-        $result = preg_replace_callback(
-            '#\[([^\[\]]*)\]\('.$escaped.'\)#',
-            function ($match) use ($newUrl, &$fallbackReplaced) {
-                if ($fallbackReplaced) {
-                    return $match[0];
-                }
-                $fallbackReplaced = true;
-                if ($newUrl === UrlHelper::UNLINK) {
-                    return $match[1];
-                }
-
-                return '['.$match[1].']('.$newUrl.')';
-            },
-            $markdown,
-            1, // limit — only the first
-        );
-
-        return [$result, $fallbackReplaced];
+        // No Phase-2 opportunistic fallback (removed 2026-05-09, see
+        // replaceNthInBard for full rationale). Index miss leaves
+        // $result equal to the unchanged input and returns false.
+        return [$result, $actuallyReplaced];
     }
 
     /**

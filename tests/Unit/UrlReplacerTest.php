@@ -438,13 +438,17 @@ class UrlReplacerTest extends TestCase
         $this->assertSame('https://new.com', $result[1]['content'][0]['marks'][0]['attrs']['href']); // replaced
     }
 
-    public function test_replace_nth_out_of_bounds_falls_back_to_first_match(): void
+    public function test_replace_nth_out_of_bounds_returns_false_no_silent_first_match(): void
     {
-        // Phase 1 (indexed) misses (target=5 but only 1 link). Phase 2
-        // fallback kicks in: opportunistic first-match-of-oldUrl replace.
-        // This handles index drift between preview and apply (multi-field
-        // entries, structural shifts, etc.) — the user's intent is "remove
-        // this URL", not "remove the 6th link".
+        // Index miss (target=5 but only 1 link) MUST return false without
+        // mutating anything. The earlier "Phase-2 fallback" silently picked
+        // the first link with the same URL — fine for the simple case here,
+        // catastrophic for the real one: user clicks Unlink on link X with
+        // url Y, but link X was just moved/removed by another edit. With
+        // fallback the system would silent-mutate link X' (a different link
+        // that happens to share url Y). Removed 2026-05-09. The caller now
+        // surfaces "position changed since scan, refresh required" and the
+        // user verifies the refreshed scan before clicking again.
         $bard = [
             ['type' => 'paragraph', 'content' => [
                 ['type' => 'text', 'text' => 'Only', 'marks' => [['type' => 'link', 'attrs' => ['href' => 'https://old.com']]]],
@@ -452,8 +456,8 @@ class UrlReplacerTest extends TestCase
         ];
 
         [$result, $replaced] = $this->replacer->replaceNthInBard($bard, 'old.com', 'https://old.com', 'https://new.com', 5);
-        $this->assertTrue($replaced, 'fallback should have replaced the first matching link');
-        $this->assertSame('https://new.com', $result[0]['content'][0]['marks'][0]['attrs']['href']);
+        $this->assertFalse($replaced, 'index miss must NOT silent-mutate any link');
+        $this->assertSame('https://old.com', $result[0]['content'][0]['marks'][0]['attrs']['href'], 'original href must remain untouched');
     }
 
     public function test_replace_nth_out_of_bounds_with_unknown_url_does_nothing(): void
