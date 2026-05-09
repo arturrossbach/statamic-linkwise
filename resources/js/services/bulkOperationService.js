@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
 import { errorToast, warnToast } from '../utils/toast.js';
+import { readJson, writeJson, remove as removeStorage } from '../utils/safeStorage.js';
 
 /**
  * Lightweight bulk-operation service for Linkwise.
@@ -62,19 +63,11 @@ export const bulkState = reactive({
 const RECOVERY_KEY = 'linkwise.bulk.recovery';
 
 function writeRecovery(snapshot) {
-    try {
-        sessionStorage.setItem(RECOVERY_KEY, JSON.stringify(snapshot));
-    } catch {
-        // Quota/private mode — non-critical, recovery is a UX nicety.
-    }
+    writeJson(RECOVERY_KEY, snapshot);
 }
 
 function clearRecovery() {
-    try {
-        sessionStorage.removeItem(RECOVERY_KEY);
-    } catch {
-        // Same as above.
-    }
+    removeStorage(RECOVERY_KEY);
 }
 
 /**
@@ -83,19 +76,14 @@ function clearRecovery() {
  * 30 minutes (stale, probably from a previous unrelated session).
  */
 export function getInterruptedBulk() {
-    try {
-        const raw = sessionStorage.getItem(RECOVERY_KEY);
-        if (!raw) return null;
-        const data = JSON.parse(raw);
-        const ageMs = Date.now() - (data.startedAt || 0);
-        if (ageMs > 30 * 60 * 1000) {
-            clearRecovery();
-            return null;
-        }
-        return data;
-    } catch {
+    const data = readJson(RECOVERY_KEY);
+    if (!data) return null;
+    const ageMs = Date.now() - (data.startedAt || 0);
+    if (ageMs > 30 * 60 * 1000) {
+        clearRecovery();
         return null;
     }
+    return data;
 }
 
 export function clearInterruptedBulk() {
@@ -124,15 +112,13 @@ export function recordCompletion(snapshot) {
         recordedAt: Date.now(),
     };
     // Reactive copy first — drives the layout banner immediately, even if a
-    // child component (LinksReportTab) made the call.
+    // child component (LinksReportTab) made the call. sessionStorage
+    // persistence is best-effort: if Quota/Private Mode rejects the write,
+    // the reactive copy still works for the current page; recap won't
+    // survive reload but the banner DOES show. Banner is a UX bonus,
+    // not load-bearing.
     bulkState.lastCompletion = record;
-    try {
-        sessionStorage.setItem(LAST_COMPLETION_KEY, JSON.stringify(record));
-    } catch {
-        // Quota / private mode — reactive copy still works for the
-        // current page; recap won't survive reload but the banner DOES
-        // show. Banner is a UX bonus, not load-bearing.
-    }
+    writeJson(LAST_COMPLETION_KEY, record);
 }
 
 export function getLastCompletion() {
@@ -144,30 +130,21 @@ export function getLastCompletion() {
     if (bulkState.lastCompletion) {
         return bulkState.lastCompletion;
     }
-    try {
-        const raw = sessionStorage.getItem(LAST_COMPLETION_KEY);
-        if (!raw) return null;
-        const data = JSON.parse(raw);
-        // Auto-expire after 1 hour to avoid stale "yesterday's bulk" banners.
-        const ageMs = Date.now() - (data.recordedAt || 0);
-        if (ageMs > 60 * 60 * 1000) {
-            sessionStorage.removeItem(LAST_COMPLETION_KEY);
-            return null;
-        }
-        bulkState.lastCompletion = data;
-        return data;
-    } catch {
+    const data = readJson(LAST_COMPLETION_KEY);
+    if (!data) return null;
+    // Auto-expire after 1 hour to avoid stale "yesterday's bulk" banners.
+    const ageMs = Date.now() - (data.recordedAt || 0);
+    if (ageMs > 60 * 60 * 1000) {
+        removeStorage(LAST_COMPLETION_KEY);
         return null;
     }
+    bulkState.lastCompletion = data;
+    return data;
 }
 
 export function clearLastCompletion() {
     bulkState.lastCompletion = null;
-    try {
-        sessionStorage.removeItem(LAST_COMPLETION_KEY);
-    } catch {
-        // Same as above — non-critical.
-    }
+    removeStorage(LAST_COMPLETION_KEY);
 }
 
 // Backwards-compat alias used by older imports — same reactive object.

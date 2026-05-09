@@ -226,7 +226,8 @@
 import { Head, Link } from '@statamic/cms/inertia';
 import { Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal } from '@statamic/cms/ui';
 import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterruptedBulk, recordCompletion, getLastCompletion, clearLastCompletion } from '../services/bulkOperationService.js';
-import { activeLabel, shortLabel, completionLabel, completionVariant, topErrorReason } from '../services/bulkLabels.js';
+import { activeLabel, shortLabel, completionLabel, completionVariant } from '../services/bulkLabels.js';
+import { readString, writeString } from '../utils/safeStorage.js';
 
 // Hardcoded for V1 — wire from composer.json via route props once we tag a
 // release. Visible at the bottom of the dropdown to help support reproduce
@@ -488,19 +489,13 @@ export default {
         // so reloads + tab switches don't resurrect the stale-check banner
         // the user already acknowledged. The next scan invalidates this
         // because index_built_at changes and the comparison stops matching.
-        try {
-            this.staleCheckDismissedFor = sessionStorage.getItem('linkwise:staleCheck:dismissedFor');
-        } catch {
-            // private mode / quota — non-critical, banner just won't stay dismissed
-        }
+        // safeStorage swallows quota/private-mode failures — banner just
+        // won't stay dismissed across reload (a UX nicety, not load-bearing).
+        this.staleCheckDismissedFor = readString('linkwise:staleCheck:dismissedFor');
 
         // Restore collapsed/expanded state of the notifications accordion so
         // a user who collapsed it doesn't get it re-pushed open on every nav.
-        try {
-            this.notificationsCollapsed = sessionStorage.getItem('linkwise:notifications:collapsed') === '1';
-        } catch {
-            // private mode — accordion just defaults to open every load
-        }
+        this.notificationsCollapsed = readString('linkwise:notifications:collapsed') === '1';
 
         // Tick the reactive clock every 5s so bulkStuck recomputes — without
         // this the heartbeat-staleness check would never re-evaluate.
@@ -545,11 +540,7 @@ export default {
             const indexAt = this.staleCheck?.index_built_at || '';
             if (indexAt) {
                 this.staleCheckDismissedFor = indexAt;
-                try {
-                    sessionStorage.setItem('linkwise:staleCheck:dismissedFor', indexAt);
-                } catch {
-                    // Quota / private mode — non-critical.
-                }
+                writeString('linkwise:staleCheck:dismissedFor', indexAt);
             }
 
             this.checkingFromBanner = true;
@@ -590,14 +581,10 @@ export default {
          */
         handleNotificationsToggle(event) {
             this.notificationsCollapsed = !event.target.open;
-            try {
-                sessionStorage.setItem(
-                    'linkwise:notifications:collapsed',
-                    this.notificationsCollapsed ? '1' : '0',
-                );
-            } catch {
-                // private mode — non-critical, choice just won't persist
-            }
+            writeString(
+                'linkwise:notifications:collapsed',
+                this.notificationsCollapsed ? '1' : '0',
+            );
         },
 
         dismissStaleCheck() {
@@ -607,11 +594,7 @@ export default {
             // matching, so a genuinely-new staleness condition resurfaces.
             const indexAt = this.staleCheck?.index_built_at || '';
             this.staleCheckDismissedFor = indexAt;
-            try {
-                sessionStorage.setItem('linkwise:staleCheck:dismissedFor', indexAt);
-            } catch {
-                // private mode — banner just won't stay dismissed across reload
-            }
+            writeString('linkwise:staleCheck:dismissedFor', indexAt);
         },
 
         /**
@@ -846,8 +829,8 @@ export default {
                 }
                 const signature = `${status.kind}:${phase}:${status.current}:${status.total}:${status.message || ''}${kindSig}`;
                 const SEEN_KEY = 'linkwise:bulkToastShown';
-                if (sessionStorage.getItem(SEEN_KEY) === signature) return;
-                sessionStorage.setItem(SEEN_KEY, signature);
+                if (readString(SEEN_KEY) === signature) return;
+                writeString(SEEN_KEY, signature);
 
                 this.fireTerminalToast(status);
 
