@@ -136,10 +136,30 @@ class DomainReport
             mkdir($this->storagePath, 0755, true);
         }
 
-        file_put_contents(
-            $this->storagePath.'/domain-attributes.json',
-            json_encode($attributes, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
-        );
+        // Atomic write — same pattern as EntryIndexer::save and the
+        // setAttribute() per-keystroke path below. Direct file_put_contents
+        // could leave domain-attributes.json truncated on kill -9 mid-
+        // write, after which LinkwiseLinkMark would read empty + log a
+        // "not valid JSON" warning AND every external link on the public
+        // site would lose its rel attribute until the file is restored.
+        // Low-frequency call (only full-overwrite migrations / imports),
+        // but consistency with the per-key-write path matters more than
+        // the cost of one extra rename().
+        $path = $this->storagePath.'/domain-attributes.json';
+        $json = json_encode($attributes, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $tmp = $path.'.tmp.'.bin2hex(random_bytes(4));
+        if (@file_put_contents($tmp, $json) === false) {
+            \Illuminate\Support\Facades\Log::warning(
+                '[Linkwise] DomainReport::saveAttributes: could not write temp file '.$tmp,
+            );
+            return;
+        }
+        if (! @rename($tmp, $path)) {
+            // Cross-device rename failed (rare) — fall back to direct write
+            // and clean up the staging file.
+            @unlink($tmp);
+            file_put_contents($path, $json);
+        }
     }
 
     /**

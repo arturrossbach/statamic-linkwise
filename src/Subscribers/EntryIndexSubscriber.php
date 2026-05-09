@@ -35,6 +35,7 @@ class EntryIndexSubscriber
             }
 
             $records = $this->indexer->load();
+            $previous = $records[$entry->id()] ?? null;
             $record = $this->indexer->indexEntry($entry);
 
             if ($record !== null) {
@@ -51,6 +52,16 @@ class EntryIndexSubscriber
                     $corpusTokens,
                 );
 
+                // Preserve the previous record's suggestion counts +
+                // hasTitleMatch — indexEntry() returns a fresh record
+                // with default-zero counts (those fields are computed
+                // by the suggestion-engine pass, not by content
+                // walking). Without preserving here, every editor save
+                // resets that entry's dashboard counts to 0/0/false
+                // until the next full Scan Content rebuild — confusing
+                // for the user and inconsistent with how full-rebuild
+                // (EntryIndexer::enrichWithKeywords, fixed earlier today
+                // by the same defensive pattern) handles it.
                 $record = new EntryRecord(
                     id: $record->id,
                     title: $record->title,
@@ -59,6 +70,9 @@ class EntryIndexSubscriber
                     text: $record->text,
                     outboundLinks: $record->outboundLinks,
                     keywords: $keywords,
+                    inboundSuggestionCount: $previous?->inboundSuggestionCount ?? 0,
+                    outboundSuggestionCount: $previous?->outboundSuggestionCount ?? 0,
+                    hasTitleMatch: $previous?->hasTitleMatch ?? false,
                 );
 
                 $records[$record->id] = $record;
