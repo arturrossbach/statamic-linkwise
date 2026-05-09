@@ -317,6 +317,14 @@ class EntryIndexer
 
         $allKeywords = $this->keywordExtractor->extractAll($corpus);
 
+        // Preserve ALL existing EntryRecord fields — only the keyword
+        // map gets replaced. Earlier this method dropped suggestion
+        // counts + hasTitleMatch by omitting them from the constructor
+        // call, leaving the next chain stage (preserveSuggestionCounts /
+        // enrichWithSuggestionCounts) to refill them. Worked, but a
+        // refactor that broke that chain would silently reset every
+        // entry's counts to 0 with no log signal. Defensive: preserve
+        // upstream, let downstream stages override only what they own.
         $enriched = [];
         foreach ($records as $id => $record) {
             $enriched[$id] = new EntryRecord(
@@ -327,6 +335,9 @@ class EntryIndexer
                 text: $record->text,
                 outboundLinks: $record->outboundLinks,
                 keywords: $allKeywords[$id] ?? [],
+                inboundSuggestionCount: $record->inboundSuggestionCount,
+                outboundSuggestionCount: $record->outboundSuggestionCount,
+                hasTitleMatch: $record->hasTitleMatch,
             );
         }
 
@@ -413,11 +424,34 @@ class EntryIndexer
         }
 
         $data = array_map(fn (EntryRecord $r) => $r->toArray(), $records);
+        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $path = $this->getIndexPath();
 
-        file_put_contents(
-            $this->getIndexPath(),
-            json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
-        );
+        // Atomic write: stage to a temp file, then rename. POSIX rename is
+        // atomic on the same filesystem — readers either see the old
+        // index or the new one, never a half-written one. Without this,
+        // a `kill -9` mid-write left index.json truncated; load() then
+        // returned [] (JSON parse failure → silent empty), every count
+        // collapsed to 0 across the whole CP until the next full scan.
+        // The .tmp suffix puts the staging file next to the target so
+        // rename is in-filesystem (atomic). On Windows rename-with-replace
+        // semantics differ but the worst case is the same as before.
+        $tmp = $path.'.tmp.'.bin2hex(random_bytes(4));
+        if (file_put_contents($tmp, $json) === false) {
+            \Illuminate\Support\Facades\Log::warning(
+                '[Linkwise] EntryIndexer: could not write index temp file '.$tmp,
+            );
+            // Update cache anyway so callers see fresh data in-memory; the
+            // disk state is unchanged so a subsequent reload still works.
+            $this->cachedRecords = $records;
+            return;
+        }
+        if (! @rename($tmp, $path)) {
+            // Rename failed (cross-device, perms): fall back to direct
+            // write to keep behavior, then unlink the staging file.
+            @unlink($tmp);
+            file_put_contents($path, $json);
+        }
 
         // Update in-memory cache so subsequent reads see the saved state
         $this->cachedRecords = $records;
