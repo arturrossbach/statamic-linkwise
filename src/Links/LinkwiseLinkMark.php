@@ -78,8 +78,30 @@ class LinkwiseLinkMark extends LinkMark
             return [];
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        static::$domainAttributes = is_array($data) ? $data : [];
+        $raw = @file_get_contents($path);
+        if ($raw === false) {
+            // Race: file disappeared between file_exists and read. Fall
+            // back to empty, log so the user can investigate disk perms.
+            \Illuminate\Support\Facades\Log::warning(
+                '[Linkwise] LinkwiseLinkMark: could not read domain-attributes.json — domain-rel attributes (nofollow/sponsored/ugc) will not apply on the public site.',
+            );
+            static::$domainAttributes = [];
+            return [];
+        }
+        $data = json_decode($raw, true);
+        if (! is_array($data)) {
+            // Malformed JSON. Without this warning the public site silently
+            // renders without nofollow/sponsored/ugc rel attributes — SEO
+            // damage user only notices weeks later in Search Console. Cache
+            // the empty result so we don't re-parse the broken file every
+            // page render, but make the failure findable in logs.
+            \Illuminate\Support\Facades\Log::warning(
+                '[Linkwise] LinkwiseLinkMark: domain-attributes.json is not valid JSON — domain-rel attributes will not apply until the file is repaired or recreated via the CP.',
+            );
+            static::$domainAttributes = [];
+            return [];
+        }
+        static::$domainAttributes = $data;
 
         return static::$domainAttributes;
     }
