@@ -454,6 +454,8 @@ class AutoLinkApplier
     protected function bardHasLinkedKeyword(array $content, string $keyword, bool $caseSensitive): bool
     {
         foreach ($content as $node) {
+            if (! is_array($node)) continue;
+
             // Text node with link mark containing the keyword
             if (isset($node['text'], $node['marks'])) {
                 $hasLink = false;
@@ -481,7 +483,28 @@ class AutoLinkApplier
                 }
             }
 
-            // Recurse into replicator sets
+            // Bard 'set' nodes carry their fields under attrs.values. The
+            // generic-recursion below skips 'attrs' so set-nested linked
+            // content was invisible — meaning an AutoLink rule against a
+            // keyword already linked inside a Peak Card pull-quote saw
+            // 'would_link' instead of 'linked_elsewhere'. With skipIfExists
+            // disabled, that produces a duplicate. Symmetric to the
+            // nodeContainsHref + InboundEngine::bardHasLinkedText fixes
+            // 2026-05-09.
+            if (($node['type'] ?? '') === 'set' && is_array($node['attrs']['values'] ?? null)) {
+                foreach ($node['attrs']['values'] as $sk => $sv) {
+                    if ($sk === 'type' || $sk === 'enabled' || $sk === 'id') continue;
+                    if (! is_array($sv) || empty($sv)) continue;
+                    if (\Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($sv)) {
+                        if ($this->bardHasLinkedKeyword($sv, $keyword, $caseSensitive)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // Recurse into replicator sets (sibling values that aren't
+            // attrs/content/text/marks). Catches Replicator-style nesting.
             foreach ($node as $key => $value) {
                 if (in_array($key, ['type', 'id', 'enabled', 'text', 'marks', 'content', 'attrs'], true)) {
                     continue;
@@ -522,6 +545,23 @@ class AutoLinkApplier
             foreach ($node['content'] as $child) {
                 if ($this->nodeContainsHref($child, $href)) {
                     return true;
+                }
+            }
+        }
+
+        // Bard 'set' nodes carry their fields under attrs.values, not content.
+        // Without walking these, an href that's already linked inside a Peak
+        // Card / pull-quote / button label is invisible to entryContainsLink,
+        // so AutoLinkApplier thinks linkStatus='would_link' and schedules a
+        // duplicate insert into the main Bard field (BardLinkInserter excludes
+        // 'set' from its insert search but doesn't refuse the rule altogether).
+        // Symmetric with the read-side fix in InboundEngine 2026-05-09.
+        if (($node['type'] ?? '') === 'set' && is_array($node['attrs']['values'] ?? null)) {
+            foreach ($node['attrs']['values'] as $key => $val) {
+                if ($key === 'type' || $key === 'enabled' || $key === 'id') continue;
+                if (! is_array($val) || empty($val)) continue;
+                if (\Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($val)) {
+                    if ($this->bardContainsHref($val, $href)) return true;
                 }
             }
         }
