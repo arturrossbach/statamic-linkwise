@@ -11,6 +11,7 @@ use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\JobLock;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
+use Statamic\Facades\Entry;
 
 /**
  * Detached artisan command for the SuggestionModal's bulk "Add link" — both
@@ -236,6 +237,31 @@ class LinkInsertCommand extends Command
                     // counterpart to refresh).
                     $affectedIds[$sourceEntryId] = true;
                     if ($targetEntryId) $affectedIds[$targetEntryId] = true;
+                    // Self-edit hash advance: this insert just changed the
+                    // source entry's content → the disk-hash now diverges
+                    // from the frontend-supplied hash in $entryHashes. The
+                    // NEXT item in the same bulk that targets the same source
+                    // entry (the common Outbound case: many suggestions, one
+                    // source) would otherwise see "Modified by another editor"
+                    // and skip — even though the only "other editor" was the
+                    // PREVIOUS iteration of this same loop.
+                    //
+                    // Wrapped in its own try/catch + placed AFTER the success
+                    // counter + after appendWrittenItem on purpose: if this
+                    // refresh ever throws, the outer try would catch it and
+                    // double-count the item (1 succeeded + 1 skipped). Stale
+                    // hash → next item still skipped → recoverable. Double
+                    // count → activity-log lies forever → not recoverable.
+                    if (isset($entryHashes[$sourceEntryId])) {
+                        try {
+                            $refreshed = Entry::find($sourceEntryId);
+                            if ($refreshed) {
+                                $entryHashes[$sourceEntryId] = \Arturrossbach\Linkwise\Support\SafeEntrySaver::hash($refreshed);
+                            }
+                        } catch (\Throwable $e) {
+                            Log::warning('[Linkwise] LinkInsertCommand: hash-advance refresh failed — '.$e->getMessage());
+                        }
+                    }
                 } else {
                     $msg = 'Anchor text not found in entry';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
