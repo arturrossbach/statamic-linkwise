@@ -453,120 +453,50 @@ class AutoLinkApplier
 
     protected function bardHasLinkedKeyword(array $content, string $keyword, bool $caseSensitive): bool
     {
-        foreach ($content as $node) {
-            if (! is_array($node)) continue;
-
-            // Text node with link mark containing the keyword
-            if (isset($node['text'], $node['marks'])) {
-                $hasLink = false;
-                foreach ($node['marks'] as $mark) {
-                    if (($mark['type'] ?? '') === 'link') {
-                        $hasLink = true;
-                        break;
-                    }
-                }
-
-                if ($hasLink) {
-                    $match = $caseSensitive
-                        ? mb_strpos($node['text'], $keyword) !== false
-                        : mb_stripos($node['text'], $keyword) !== false;
-                    if ($match) {
-                        return true;
-                    }
+        return \Arturrossbach\Linkwise\Support\BardWalker::walk($content, function (array $node) use ($keyword, $caseSensitive): bool {
+            if (! isset($node['text'], $node['marks'])) {
+                return false;
+            }
+            $hasLink = false;
+            foreach ($node['marks'] as $mark) {
+                if (($mark['type'] ?? '') === 'link') {
+                    $hasLink = true;
+                    break;
                 }
             }
-
-            // Recurse into children
-            if (isset($node['content']) && is_array($node['content'])) {
-                if ($this->bardHasLinkedKeyword($node['content'], $keyword, $caseSensitive)) {
-                    return true;
-                }
+            if (! $hasLink) {
+                return false;
             }
 
-            // Bard 'set' nodes carry their fields under attrs.values. The
-            // generic-recursion below skips 'attrs' so set-nested linked
-            // content was invisible — meaning an AutoLink rule against a
-            // keyword already linked inside a Peak Card pull-quote saw
-            // 'would_link' instead of 'linked_elsewhere'. With skipIfExists
-            // disabled, that produces a duplicate. Symmetric to the
-            // nodeContainsHref + InboundEngine::bardHasLinkedText fixes
-            // 2026-05-09.
-            if (($node['type'] ?? '') === 'set' && is_array($node['attrs']['values'] ?? null)) {
-                foreach ($node['attrs']['values'] as $sk => $sv) {
-                    if ($sk === 'type' || $sk === 'enabled' || $sk === 'id') continue;
-                    if (! is_array($sv) || empty($sv)) continue;
-                    if (\Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($sv)) {
-                        if ($this->bardHasLinkedKeyword($sv, $keyword, $caseSensitive)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            // Recurse into replicator sets (sibling values that aren't
-            // attrs/content/text/marks). Catches Replicator-style nesting.
-            foreach ($node as $key => $value) {
-                if (in_array($key, ['type', 'id', 'enabled', 'text', 'marks', 'content', 'attrs'], true)) {
-                    continue;
-                }
-                if (is_array($value) && ! empty($value)) {
-                    if ($this->bardHasLinkedKeyword($value, $keyword, $caseSensitive)) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
+            return $caseSensitive
+                ? mb_strpos($node['text'], $keyword) !== false
+                : mb_stripos($node['text'], $keyword) !== false;
+        });
     }
 
     protected function bardContainsHref(array $bardContent, string $href): bool
     {
-        foreach ($bardContent as $node) {
-            if ($this->nodeContainsHref($node, $href)) {
-                return true;
+        return \Arturrossbach\Linkwise\Support\BardWalker::walk($bardContent, function (array $node) use ($href): bool {
+            if (! isset($node['marks'])) {
+                return false;
             }
-        }
-
-        return false;
-    }
-
-    protected function nodeContainsHref(array $node, string $href): bool
-    {
-        if (isset($node['marks'])) {
             foreach ($node['marks'] as $mark) {
                 if (($mark['type'] ?? '') === 'link' && ($mark['attrs']['href'] ?? '') === $href) {
                     return true;
                 }
             }
-        }
+            return false;
+        });
+    }
 
-        if (isset($node['content'])) {
-            foreach ($node['content'] as $child) {
-                if ($this->nodeContainsHref($child, $href)) {
-                    return true;
-                }
-            }
-        }
-
-        // Bard 'set' nodes carry their fields under attrs.values, not content.
-        // Without walking these, an href that's already linked inside a Peak
-        // Card / pull-quote / button label is invisible to entryContainsLink,
-        // so AutoLinkApplier thinks linkStatus='would_link' and schedules a
-        // duplicate insert into the main Bard field (BardLinkInserter excludes
-        // 'set' from its insert search but doesn't refuse the rule altogether).
-        // Symmetric with the read-side fix in InboundEngine 2026-05-09.
-        if (($node['type'] ?? '') === 'set' && is_array($node['attrs']['values'] ?? null)) {
-            foreach ($node['attrs']['values'] as $key => $val) {
-                if ($key === 'type' || $key === 'enabled' || $key === 'id') continue;
-                if (! is_array($val) || empty($val)) continue;
-                if (\Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($val)) {
-                    if ($this->bardContainsHref($val, $href)) return true;
-                }
-            }
-        }
-
-        return false;
+    /**
+     * Kept for backwards compatibility — now a thin wrapper around
+     * bardContainsHref via BardWalker. Single-node check with set-aware
+     * recursion handled by the walker.
+     */
+    protected function nodeContainsHref(array $node, string $href): bool
+    {
+        return $this->bardContainsHref([$node], $href);
     }
 
     protected function replicatorContainsHref(array $sets, string $href): bool

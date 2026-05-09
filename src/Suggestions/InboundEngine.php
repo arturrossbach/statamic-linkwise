@@ -321,73 +321,41 @@ class InboundEngine
     /**
      * Check if any word in the anchor text overlaps with linked text in Bard content.
      *
-     * Walks BOTH `$node['content']` (paragraph children, list items, table cells,
-     * etc.) AND `$node['attrs']['values']` (Bard custom-set node — Peak Card
-     * pull-quote, button label, accordion, etc.). Without the set-walk, an
-     * anchor already linked inside a Peak Card pull-quote would still appear
-     * as a suggestion in the UI — junk that confuses the user. Symmetric with
-     * TextExtractor::extractTextFromNode (which handles 'set' nodes for the
-     * read side) and BardLinkInserter::processNode (which excludes 'set' from
-     * the insert search). Real review finding 2026-05-09.
+     * Traversal lives in BardWalker — walks both nested $content and Bard
+     * 'set' attrs.values uniformly. This method's job is just the "is the
+     * visited node a linked text-node whose text shares a word with our
+     * anchor" predicate. Plain-string values inside Bard sets (button
+     * labels, headings) are handled by the parent replicatorHasLinkedAnchor
+     * which already routes them through markdownHasLinkedOverlap; BardWalker
+     * skips them on this side.
      */
     protected function bardHasLinkedText(array $content, string $anchorText): bool
     {
         $anchorWords = preg_split('/\s+/', mb_strtolower($anchorText));
 
-        foreach ($content as $node) {
-            if (! is_array($node)) {
-                continue;
+        return \Arturrossbach\Linkwise\Support\BardWalker::walk($content, function (array $node) use ($anchorWords): bool {
+            if (! isset($node['text'], $node['marks'])) {
+                return false;
             }
-            if (isset($node['text'], $node['marks'])) {
-                $hasLink = false;
-                foreach ($node['marks'] as $mark) {
-                    if (($mark['type'] ?? '') === 'link') {
-                        $hasLink = true;
-                        break;
-                    }
-                }
-                if ($hasLink) {
-                    $linkedWords = preg_split('/\s+/', mb_strtolower($node['text']));
-                    foreach ($anchorWords as $w) {
-                        if ($w !== '' && in_array($w, $linkedWords, true)) {
-                            return true;
-                        }
-                    }
+            $hasLink = false;
+            foreach ($node['marks'] as $mark) {
+                if (($mark['type'] ?? '') === 'link') {
+                    $hasLink = true;
+                    break;
                 }
             }
-
-            if (isset($node['content']) && is_array($node['content'])) {
-                if ($this->bardHasLinkedText($node['content'], $anchorText)) {
+            if (! $hasLink) {
+                return false;
+            }
+            $linkedWords = preg_split('/\s+/', mb_strtolower($node['text']));
+            foreach ($anchorWords as $w) {
+                if ($w !== '' && in_array($w, $linkedWords, true)) {
                     return true;
                 }
             }
 
-            // Bard 'set' nodes (custom replicator-style blocks embedded in
-            // Bard) carry their fields under attrs.values, not content.
-            // Walk that map: nested Bard fragments recurse via this method,
-            // plain-string values check via markdownHasLinkedOverlap (same
-            // shape Linkwise treats markdown links throughout).
-            if (($node['type'] ?? '') === 'set' && is_array($node['attrs']['values'] ?? null)) {
-                foreach ($node['attrs']['values'] as $key => $val) {
-                    if ($key === 'type' || $key === 'enabled' || $key === 'id') {
-                        continue;
-                    }
-                    if (is_string($val)) {
-                        if ($val !== '' && $this->markdownHasLinkedOverlap($val, $anchorText)) {
-                            return true;
-                        }
-                        continue;
-                    }
-                    if (is_array($val) && ! empty($val) && \Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($val)) {
-                        if ($this->bardHasLinkedText($val, $anchorText)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-
-        return false;
+            return false;
+        });
     }
 
     /**

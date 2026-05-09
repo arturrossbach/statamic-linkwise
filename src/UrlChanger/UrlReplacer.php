@@ -220,6 +220,23 @@ class UrlReplacer
             }
         }
 
+        // Set-aware fallback. Without this, Phase-2's "just find ANY
+        // link with this href" branch missed in-set links — meaning the
+        // user could replace 4 of 5 occurrences (the 5th in a Peak Card
+        // never reached) without any error signal.
+        foreach (\Arturrossbach\Linkwise\Support\BardWalker::setChildren($node) as $key => $bardFragment) {
+            $newFragment = $bardFragment;
+            foreach ($bardFragment as $i => $child) {
+                if (! is_array($child)) continue;
+                $newFragment[$i] = $this->fallbackReplaceFirstByUrl($child, $oldUrl, $newUrl, $replaced);
+                if ($replaced) {
+                    $node['attrs']['values'][$key] = $newFragment;
+                    return $node;
+                }
+            }
+            $node['attrs']['values'][$key] = $newFragment;
+        }
+
         return $node;
     }
 
@@ -265,6 +282,24 @@ class UrlReplacer
                     return $node;
                 }
             }
+        }
+
+        // Set-aware Nth recursion. Counter is shared so the Nth match
+        // is consistent with findInNode's count (which now also walks
+        // sets). A target_index that points at an in-set occurrence
+        // would previously fall to Phase-2 fallback and silently rewrite
+        // a different occurrence; now it rewrites the right one.
+        foreach (\Arturrossbach\Linkwise\Support\BardWalker::setChildren($node) as $key => $bardFragment) {
+            $newFragment = $bardFragment;
+            foreach ($bardFragment as $i => $child) {
+                if (! is_array($child)) continue;
+                $newFragment[$i] = $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+                if ($counter['replaced']) {
+                    $node['attrs']['values'][$key] = $newFragment;
+                    return $node;
+                }
+            }
+            $node['attrs']['values'][$key] = $newFragment;
         }
 
         return $node;
@@ -722,6 +757,21 @@ class UrlReplacer
                 $this->findInNode($child, $search, $occurrences, $counter);
             }
         }
+
+        // Bard 'set' nodes (Peak Card, pull-quote, button) carry their
+        // fields under attrs.values. Without walking these, URLs linked
+        // inside set-nested Bard fragments were invisible to URL-Changer:
+        // preview showed N occurrences, apply rewrote N occurrences,
+        // user thought "all good" — but the URLs inside Peak Cards
+        // remained at the old href, silently. Symmetric set-walk added
+        // here AND in replace*InNode below so find/replace stay in sync.
+        foreach (\Arturrossbach\Linkwise\Support\BardWalker::setChildren($node) as $bardFragment) {
+            foreach ($bardFragment as $child) {
+                if (is_array($child)) {
+                    $this->findInNode($child, $search, $occurrences, $counter);
+                }
+            }
+        }
     }
 
     /**
@@ -753,6 +803,20 @@ class UrlReplacer
             foreach ($node['content'] as $i => $child) {
                 $node['content'][$i] = $this->replaceInNode($child, $search, $replace);
             }
+        }
+
+        // Set-aware recursion: rewrite URLs inside Bard set children
+        // too, mirroring findInNode above so find/replace counts stay
+        // consistent when Peak Cards / pull-quotes / button labels
+        // contain URLs the user wants changed.
+        foreach (\Arturrossbach\Linkwise\Support\BardWalker::setChildren($node) as $key => $bardFragment) {
+            $newFragment = $bardFragment;
+            foreach ($bardFragment as $i => $child) {
+                if (is_array($child)) {
+                    $newFragment[$i] = $this->replaceInNode($child, $search, $replace);
+                }
+            }
+            $node['attrs']['values'][$key] = $newFragment;
         }
 
         return $node;
