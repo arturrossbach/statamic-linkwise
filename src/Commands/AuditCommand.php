@@ -377,25 +377,42 @@ class AuditCommand extends Command
                 continue;
             }
 
-            // Walk the entry; check the broken URL is actually still there.
+            // Walk the entry via BardWalker (set-aware) and collect every
+            // link-mark href — internal AND external. The earlier impl used
+            // TextExtractor::externalLinksFromBard + linksFromBard, but the
+            // latter returns UUIDs (not full hrefs), so a match against
+            // $rec->url like "statamic://entry::UUID" was never possible →
+            // every internal-link broken-link record falsely flagged as
+            // "no longer in content". TextExtractor's walker is also not
+            // set-aware, so even external-link matches inside Bard sets
+            // were silently missed.
             $found = false;
             EntryFieldWalker::walk(
                 $entry,
                 function (array $bard) use ($rec, &$found) {
-                    foreach (TextExtractor::externalLinksFromBard($bard) as $link) {
-                        if (($link['url'] ?? '') === $rec->url) {
-                            $found = true;
-
-                            return;
-                        }
+                    if ($found) {
+                        return;
                     }
-                    foreach (TextExtractor::linksFromBard($bard) as $href) {
-                        if ($href === $rec->url) {
-                            $found = true;
-
-                            return;
+                    BardWalker::walk($bard, function (array $node) use ($rec, &$found): bool {
+                        foreach ($node['marks'] ?? [] as $mark) {
+                            if (! is_array($mark) || ($mark['type'] ?? '') !== 'link') {
+                                continue;
+                            }
+                            $href = (string) ($mark['attrs']['href'] ?? '');
+                            // Empty-href guard: an entry with a malformed mark
+                            // (no href at all) shouldn't accidentally "find"
+                            // a record whose url is also '' — that would mask
+                            // the corruption.
+                            if ($href === '') {
+                                continue;
+                            }
+                            if ($href === $rec->url) {
+                                $found = true;
+                                return true; // stop walking this entry
+                            }
                         }
-                    }
+                        return false;
+                    });
                 },
                 function (string $md) use ($rec, &$found) {
                     if (str_contains($md, $rec->url)) {
