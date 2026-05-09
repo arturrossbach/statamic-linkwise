@@ -117,6 +117,19 @@ export default {
         this.fetchStats();
     },
 
+    watch: {
+        // Re-fetch when the publish container swaps to a different entry
+        // mid-mount (e.g. user navigating between entries via a Statamic
+        // Inertia route without remounting the fieldtype). Without the
+        // watcher, the sidebar widget keeps showing the previous entry's
+        // stats — confusing, especially for the orphaned-warning panel.
+        entryId(newId, oldId) {
+            if (newId && newId !== oldId) {
+                this.fetchStats();
+            }
+        },
+    },
+
     methods: {
         async fetchStats() {
             const id = this.entryId;

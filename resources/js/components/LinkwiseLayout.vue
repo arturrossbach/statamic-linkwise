@@ -226,6 +226,7 @@
 import { Head, Link } from '@statamic/cms/inertia';
 import { Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal } from '@statamic/cms/ui';
 import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterruptedBulk, recordCompletion, getLastCompletion, clearLastCompletion } from '../services/bulkOperationService.js';
+import { activeLabel, shortLabel, completionLabel, completionVariant, topErrorReason } from '../services/bulkLabels.js';
 
 // Hardcoded for V1 — wire from composer.json via route props once we tag a
 // release. Visible at the bottom of the dropdown to help support reproduce
@@ -385,196 +386,38 @@ export default {
             return Math.round((this.tickClock / 1000) - a.heartbeat);
         },
 
-        /**
-         * Variant for the completion banner — green for success, yellow for
-         * cancelled / partial, red for error. Mirrors fireTerminalToast logic
-         * but produces a persistent visual instead of a fading toast.
-         */
+        // Variant signal for the persistent completion banner. Delegates
+        // to the shared bulkLabels module — same logic now drives toast
+        // colour AND banner colour from one place.
         completionBannerVariant() {
             const c = this.lastCompletion;
             if (!c) return 'default';
-            if (c.phase === 'error') return 'error';
-            if (c.phase === 'cancelled') return 'warning';
-            // Done — was anything actually done?
-            const e = c.extra || {};
-            const skipped = e.skipped || 0;
-            const succeeded = e.succeeded ?? e.links_added ?? e.total_links_added ?? 0;
-            if (succeeded === 0 && skipped > 0) return 'warning';
-            return 'success';
+            return completionVariant(c.kind, c.phase, c.extra || {});
         },
 
-        /**
-         * Human-readable summary of the completed bulk. Mirrors fireTerminalToast
-         * messages but rendered into the persistent banner instead of toasted.
-         */
+        // Past-tense summary of the completed bulk. Same source of truth
+        // as the terminal toast (fireTerminalToast also delegates to
+        // completionLabel) so banner and toast can never drift in copy.
         completionBannerLabel() {
             const c = this.lastCompletion;
             if (!c) return '';
-            const e = c.extra || {};
-            const phase = c.phase;
-            const kind = c.kind;
-
-            if (phase === 'cancelled') {
-                return `${c.label || 'Operation'} cancelled.`;
-            }
-            if (phase === 'error') {
-                return e.message || `${c.label || 'Operation'} failed.`;
-            }
-            // phase === 'done'
-            if (kind === 'scan') {
-                return `Scanned ${e.entries_count || 0} entries in ${e.duration || 0}s.`;
-            }
-            if (kind === 'check') {
-                return 'Broken-link check complete.';
-            }
-            if (kind === 'applyrule') {
-                if (e.total_rules && e.total_rules > 1) {
-                    const total = e.total_links_added || 0;
-                    return total > 0
-                        ? `${total} link(s) added across ${e.total_rules} rule(s).`
-                        : `No new links to add for ${e.total_rules} rule(s).`;
-                }
-                const n = e.links_added || 0;
-                const kw = e.rule_keyword ? ` for "${e.rule_keyword}"` : '';
-                return n > 0 ? `${n} link(s) added${kw}.` : `No new links to add${kw}.`;
-            }
-            if (kind === 'bulkunlink') {
-                const n = e.succeeded || 0;
-                const skipped = e.skipped || 0;
-                const reason = this.topErrorReason(e.errors);
-                if (n > 0 && skipped === 0) return `${n} link(s) removed.`;
-                if (n > 0) return `${n} link(s) removed, ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
-                return `Could not remove any links — ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
-            }
-            if (kind === 'urlchanger') {
-                const n = e.succeeded || 0;
-                const skipped = e.skipped || 0;
-                const verb = e.action === 'unlink' ? 'unlinked' : 'replaced';
-                const reason = this.topErrorReason(e.errors);
-                if (n > 0 && skipped === 0) return `${n} URL(s) ${verb}.`;
-                if (n > 0) return `${n} URL(s) ${verb}, ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
-                return `Could not ${e.action || 'change'} any URLs — ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
-            }
-            if (kind === 'detailunlink') {
-                const n = e.succeeded || 0;
-                const skipped = e.skipped || 0;
-                const direction = e.source_mode === 'outbound' ? 'outbound' : 'inbound';
-                const t = e.entry_title ? ` for "${e.entry_title}"` : '';
-                const reason = this.topErrorReason(e.errors);
-                if (n > 0 && skipped === 0) return `${n} ${direction} link(s) removed${t}.`;
-                if (n > 0) return `${n} ${direction} link(s) removed${t}, ${skipped} skipped${reason ? ` (${reason})` : ''}.`;
-                // 0 succeeded — surface the top error reason from the
-                // command's per-item errors map (same pattern as inboundinsert).
-                // Without this, the user sees "X skipped" with no idea why.
-                const errs = e.errors || {};
-                const reasons = Object.entries(errs).sort((a, b) => b[1] - a[1]);
-                const topReason = reasons[0]?.[0] || 'links not found in entry content';
-                return `Could not remove any ${direction} links${t} — ${topReason}.`;
-            }
-            if (kind === 'inboundinsert' || kind === 'outboundinsert') {
-                const direction = kind === 'inboundinsert' ? 'inbound' : 'outbound';
-                const n = e.succeeded || 0;
-                const skipped = e.skipped || 0;
-                const t = e.entry_title ? ` for "${e.entry_title}"` : '';
-                if (n > 0 && skipped === 0) return `${n} ${direction} link(s) added${t}.`;
-                if (n > 0) return `${n} ${direction} link(s) added${t}, ${skipped} skipped (anchor not found — re-scan content if recently edited).`;
-                // 0 succeeded — surface the top error reason from the
-                // command's per-item errors map, same pattern as URL-Changer.
-                const errs = e.errors || {};
-                const reasons = Object.entries(errs).sort((a, b) => b[1] - a[1]);
-                const topReason = reasons[0]?.[0] || 'anchor text not found';
-                return `Could not add any ${direction} links${t} — ${topReason}. Re-scan content and retry.`;
-            }
-            return `${c.label || 'Operation'} complete.`;
+            return completionLabel(c.kind, c.phase, c.extra || {}, c.label || 'Operation');
         },
 
+        // Live banner — what's running RIGHT NOW. Pure delegation.
         bulkBannerLabel() {
             const a = this.activeBulk;
             if (!a) return '';
-            const ctx = a.context || {};
-            const title = ctx.entryTitle ? `"${ctx.entryTitle}"` : '';
-
-            switch (a.kind) {
-                case 'inboundinsert':
-                    return title
-                        ? `Adding inbound links to ${title}`
-                        : 'Adding inbound links';
-                case 'outboundinsert':
-                    return title
-                        ? `Adding outbound links from ${title}`
-                        : 'Adding outbound links';
-                case 'detail-unlink':
-                    if (ctx.mode === 'inbound') return title ? `Removing inbound links to ${title}` : 'Removing inbound links';
-                    if (ctx.mode === 'outbound') return title ? `Removing outbound links from ${title}` : 'Removing outbound links';
-                    return 'Removing links';
-                case 'scan':
-                    return 'Scanning content';
-                case 'check':
-                    return 'Checking links';
-                case 'bulkunlink':
-                    return 'Removing broken links';
-                case 'applyrule': {
-                    // Two modes: single-rule (ruleKeyword) and multi-rule
-                    // (ruleIndex of totalRules). Multi-rule shows the current
-                    // rule's keyword PLUS the (X of Y) outer progress.
-                    if (ctx.totalRules && ctx.totalRules > 1) {
-                        const inner = ctx.ruleKeyword ? `"${ctx.ruleKeyword}"` : '...';
-                        return `Applying rule ${inner} (${ctx.ruleIndex || 1} of ${ctx.totalRules})`;
-                    }
-                    return ctx.ruleKeyword
-                        ? `Applying rule "${ctx.ruleKeyword}"`
-                        : 'Applying auto-link rule';
-                }
-                case 'urlchanger': {
-                    // Heavy URL Changer job — action+search+startedBy come via
-                    // context (set by the poller from the status payload's
-                    // `extra`). Owner-Tracking: if started_by present, append
-                    // "(by NAME)" so editors see whose run is blocking them.
-                    const action = ctx.action || 'apply';
-                    const verb = action === 'unlink' ? 'Unlinking' : 'Replacing';
-                    const base = ctx.search
-                        ? `${verb} URLs matching "${ctx.search}"`
-                        : `${verb} URLs`;
-                    return ctx.startedBy ? `${base} (by ${ctx.startedBy})` : base;
-                }
-                case 'detailunlink': {
-                    // Per-entry detail-modal bulk-unlink. Banner reflects the
-                    // semantic context (which entry, inbound vs outbound).
-                    const tStr = ctx.entryTitle ? `"${ctx.entryTitle}"` : '';
-                    const verb = ctx.sourceMode === 'outbound'
-                        ? `Removing outbound links from ${tStr}`
-                        : `Removing inbound links to ${tStr}`;
-                    return ctx.startedBy ? `${verb.trim()} (by ${ctx.startedBy})` : verb.trim();
-                }
-                default:
-                    return 'Working';
-            }
+            return activeLabel(a.kind, a.context || {});
         },
 
-        // Recovery-banner label: same kind→sentence mapping as the live
-        // banner, but reads from the persisted snapshot (interruptedBulk),
-        // not state.active. Kept inline so the two stay in sync visually.
+        // Recovery banner after mid-operation reload. Different shape from
+        // active because we only persist (kind, ruleKeyword, search) —
+        // no live counters or owner info available.
         interruptedBulkLabel() {
             const a = this.interruptedBulk;
             if (!a) return '';
-            const ctx = a.context || {};
-            switch (a.kind) {
-                case 'inboundinsert': return 'Adding inbound links';
-                case 'outboundinsert': return 'Adding outbound links';
-                case 'detail-unlink': return 'Removing links';
-                case 'scan': return 'Scanning content';
-                case 'check': return 'Checking links';
-                case 'bulkunlink': return 'Removing broken links';
-                case 'applyrule': return ctx.ruleKeyword ? `Applying rule "${ctx.ruleKeyword}"` : 'Applying auto-link rule';
-                case 'urlchanger-apply': return ctx.search ? `Replacing URLs matching "${ctx.search}"` : 'Replacing URLs';
-                case 'urlchanger-unlink': return ctx.search ? `Unlinking URLs matching "${ctx.search}"` : 'Unlinking URLs';
-                case 'urlchanger': {
-                    const action = ctx.action || 'apply';
-                    const verb = action === 'unlink' ? 'Unlinking' : 'Replacing';
-                    return ctx.search ? `${verb} URLs matching "${ctx.search}"` : `${verb} URLs`;
-                }
-                default: return a.label || 'Bulk operation';
-            }
+            return shortLabel(a.kind, { ...(a.context || {}), label: a.label });
         },
     },
 
@@ -681,17 +524,6 @@ export default {
     },
 
     methods: {
-        /** Pick the most-frequent error reason from a {message: count} map.
-         *  Surfaced in completion toasts so the user knows WHY items were
-         *  skipped instead of guessing. Returns '' when the map is empty. */
-        topErrorReason(errors) {
-            if (! errors || typeof errors !== 'object') return '';
-            const entries = Object.entries(errors);
-            if (entries.length === 0) return '';
-            entries.sort((a, b) => (b[1] || 0) - (a[1] || 0));
-            return entries[0][0] || '';
-        },
-
         /**
          * Banner CTA: kick off a broken-link check. Reuses the existing
          * /linkwise/check-links endpoint so the unified bulk-status poller
@@ -1067,81 +899,39 @@ export default {
             }
         },
 
+        /**
+         * Render the terminal toast for a completed bulk. Delegates the
+         * full label-construction + variant-selection to the shared
+         * bulkLabels module, then maps the variant onto Statamic's toast
+         * API. Same module drives the persistent completion banner —
+         * banner copy and toast copy can never drift out of sync.
+         *
+         * Long-message-bias: errors carry a 12s duration so the user has
+         * time to read multi-clause failure reasons before the toast fades.
+         */
         fireTerminalToast(status) {
-            const phase = status.phase;
-            const kind = status.kind;
-            const extra = status.extra || {};
+            const message = completionLabel(
+                status.kind,
+                status.phase,
+                status.extra || {},
+                status.label || 'Task',
+            );
+            const variant = completionVariant(status.kind, status.phase, status.extra || {});
 
-            if (phase === 'done') {
-                if (kind === 'scan') {
-                    Statamic.$toast.success(`Scanned ${extra.entries_count || 0} entries in ${extra.duration || 0}s.`);
-                } else if (kind === 'applyrule') {
-                    // Multi-rule: total_links_added + total_rules in payload
-                    if (extra.total_rules && extra.total_rules > 1) {
-                        const total = extra.total_links_added || 0;
-                        if (total > 0) Statamic.$toast.success(`${total} link(s) added across ${extra.total_rules} rule(s).`);
-                        else Statamic.$toast.info(`No new links to add for ${extra.total_rules} rule(s).`);
-                    } else {
-                        const n = extra.links_added || 0;
-                        const kw = extra.rule_keyword ? ` for "${extra.rule_keyword}"` : '';
-                        if (n > 0) Statamic.$toast.success(`${n} link(s) added${kw}.`);
-                        else Statamic.$toast.info(`No new links to add${kw}.`);
-                    }
-                } else if (kind === 'bulkunlink') {
-                    const n = extra.succeeded || 0;
-                    const skipped = extra.skipped || 0;
-                    if (n > 0 && skipped === 0) Statamic.$toast.success(`${n} link(s) removed.`);
-                    else if (n > 0) Statamic.$toast.success(`${n} link(s) removed, ${skipped} skipped.`);
-                    else Statamic.$toast.error(`Could not remove any links — ${skipped} skipped.`);
-                } else if (kind === 'detailunlink') {
-                    const n = extra.succeeded || 0;
-                    const skipped = extra.skipped || 0;
-                    const verb = extra.source_mode === 'outbound' ? 'outbound' : 'inbound';
-                    const t = extra.entry_title ? ` for "${extra.entry_title}"` : '';
-                    if (n > 0 && skipped === 0) Statamic.$toast.success(`${n} ${verb} link(s) removed${t}.`);
-                    else if (n > 0) Statamic.$toast.success(`${n} ${verb} link(s) removed${t}, ${skipped} skipped.`);
-                    else Statamic.$toast.error(`Could not remove any ${verb} links${t} — ${skipped} skipped.`);
-                } else if (kind === 'inboundinsert' || kind === 'outboundinsert') {
-                    const direction = kind === 'inboundinsert' ? 'inbound' : 'outbound';
-                    const n = extra.succeeded || 0;
-                    const skipped = extra.skipped || 0;
-                    const t = extra.entry_title ? ` for "${extra.entry_title}"` : '';
-                    if (n > 0 && skipped === 0) {
-                        Statamic.$toast.success(`${n} ${direction} link(s) added${t}.`);
-                    } else if (n > 0) {
-                        Statamic.$toast.success(`${n} ${direction} link(s) added${t}, ${skipped} skipped (anchor not found — re-scan if recently edited).`);
-                    } else {
-                        const errs = extra.errors || {};
-                        const reasons = Object.entries(errs).sort((a, b) => b[1] - a[1]);
-                        const topReason = reasons[0]?.[0] || 'anchor text not found';
-                        Statamic.$toast.error(`Could not add any ${direction} links${t} — ${topReason}. Re-scan content and retry.`, { duration: 12000 });
-                    }
-                } else if (kind === 'check') {
-                    Statamic.$toast.success('Broken-link check complete.');
-                } else if (kind === 'urlchanger') {
-                    const action = extra.action || 'apply';
-                    const verb = action === 'unlink' ? 'unlinked' : 'replaced';
-                    const succeeded = extra.succeeded || 0;
-                    const skipped = extra.skipped || 0;
-                    if (succeeded > 0 && skipped === 0) {
-                        Statamic.$toast.success(`${succeeded} URL(s) ${verb}.`);
-                    } else if (succeeded > 0) {
-                        Statamic.$toast.success(`${succeeded} URL(s) ${verb}, ${skipped} skipped.`);
-                    } else {
-                        // 0 succeeded — surface the top error reason so the
-                        // user sees WHY (e.g. stale index, conflicts).
-                        const errors = extra.errors || {};
-                        const reasons = Object.entries(errors).sort((a, b) => b[1] - a[1]);
-                        const topReason = reasons[0]?.[0] || 'unknown error';
-                        Statamic.$toast.error(`Could not ${action} URLs: ${topReason}`, { duration: 12000 });
-                    }
-                } else {
-                    Statamic.$toast.success(`${status.label || 'Task'} complete.`);
-                }
-            } else if (phase === 'cancelled') {
-                Statamic.$toast.info(`${status.label || 'Task'} cancelled.`);
-            } else if (phase === 'error') {
-                Statamic.$toast.error(extra.message || `${status.label || 'Task'} failed.`);
+            switch (variant) {
+                case 'success':
+                    Statamic.$toast.success(message);
+                    break;
+                case 'warning':
+                    // 'warning' -> info. Statamic.$toast lacks a 'warning'
+                    // channel; the banner colour conveys severity.
+                    Statamic.$toast.info(message);
+                    break;
+                case 'error':
+                    Statamic.$toast.error(message, { duration: 12000 });
+                    break;
+                default:
+                    Statamic.$toast.info(message);
             }
         },
 
