@@ -29,6 +29,11 @@ class EntryRecordTest extends TestCase
             'inbound_suggestion_count' => 0,
             'outbound_suggestion_count' => 0,
             'has_title_match' => false,
+            // Pre-tokenized title+text used by EntryIndexSubscriber to skip
+            // per-save full-corpus re-tokenization. Empty when the record
+            // was constructed without explicit tokens — indexEntry() fills
+            // them on every Scan Content.
+            'tokens' => [],
         ], $record->toArray());
     }
 

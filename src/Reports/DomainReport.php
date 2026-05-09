@@ -112,13 +112,11 @@ class DomainReport
      */
     public function loadAttributes(): array
     {
-        $path = $this->storagePath.'/domain-attributes.json';
-
-        if (! file_exists($path)) {
-            return [];
-        }
-
-        $data = json_decode(file_get_contents($path), true);
+        $data = \Arturrossbach\Linkwise\Support\JsonFileStore::load(
+            $this->storagePath.'/domain-attributes.json',
+            [],
+            'DomainReport::loadAttributes',
+        );
 
         return is_array($data) ? $data : [];
     }

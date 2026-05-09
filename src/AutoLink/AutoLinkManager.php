@@ -16,13 +16,11 @@ class AutoLinkManager
      */
     public function loadRules(): array
     {
-        $path = $this->getPath();
-
-        if (! file_exists($path)) {
-            return [];
-        }
-
-        $data = json_decode(file_get_contents($path), true);
+        $data = \Arturrossbach\Linkwise\Support\JsonFileStore::load(
+            $this->getPath(),
+            [],
+            'AutoLinkManager::loadRules',
+        );
 
         if (! is_array($data)) {
             return [];

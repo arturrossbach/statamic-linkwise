@@ -39,12 +39,21 @@ class EntryIndexSubscriber
             $record = $this->indexer->indexEntry($entry);
 
             if ($record !== null) {
-                // Re-extract keywords for the saved entry against the existing corpus
+                // Re-extract keywords for the saved entry against the existing
+                // corpus. Read pre-tokenized tokens from each EntryRecord
+                // (stored by indexEntry on the last full Scan Content) — saves
+                // the O(N) re-tokenize-everything that used to land in every
+                // editor save and made saves lag 3-10s on 1000-entry sites.
+                // Fallback to on-the-fly tokenize for legacy index entries
+                // written before the tokens field shipped (empty array). Once
+                // a Scan Content runs after the upgrade, the fallback path
+                // never fires again.
                 $corpusTokens = [];
                 foreach ($records as $id => $existing) {
-                    if ($id !== $record->id) {
-                        $corpusTokens[$id] = $this->extractor->tokenize($existing->title.' '.$existing->text);
-                    }
+                    if ($id === $record->id) continue;
+                    $corpusTokens[$id] = ! empty($existing->tokens)
+                        ? $existing->tokens
+                        : $this->extractor->tokenize($existing->title.' '.$existing->text);
                 }
 
                 $keywords = $this->extractor->extractSingle(
@@ -73,6 +82,11 @@ class EntryIndexSubscriber
                     inboundSuggestionCount: $previous?->inboundSuggestionCount ?? 0,
                     outboundSuggestionCount: $previous?->outboundSuggestionCount ?? 0,
                     hasTitleMatch: $previous?->hasTitleMatch ?? false,
+                    // Forward tokens from the freshly-indexed $record, NOT
+                    // from $previous — title/text just changed, the previous
+                    // tokens are stale. indexEntry already tokenized using
+                    // the current title+text via the standard pipeline.
+                    tokens: $record->tokens,
                 );
 
                 $records[$record->id] = $record;

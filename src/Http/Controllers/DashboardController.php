@@ -914,7 +914,32 @@ class DashboardController extends CpController
             'replacements.*.field_type' => 'nullable|string|max:40',
             'replacements.*.occurrence_index' => 'nullable|integer',
             'replacements.*.search' => 'nullable|string|max:2048',
+            // Pre-flight hash check — same defensive pattern the other 6
+            // bulk write paths (DetailUnlink, LinkInsert, UrlChangerApply,
+            // ApplyRule, etc.) enforce. Optional because the legacy
+            // broken-links-cleanup workflow doesn't always carry hashes;
+            // when present, we fail-fast 409 on conflicts before dispatch
+            // instead of silently overwriting an entry the user just
+            // edited. Memory: feedback_bulk_writepath_standard.md.
+            'entry_hashes' => 'sometimes|array|max:50000',
         ]);
+
+        // Pre-flight conflict detection. Skipped when no hashes shipped
+        // (legacy frontend / scripted callers) so we don't break those.
+        $allHashes = $validated['entry_hashes'] ?? [];
+        if (! empty($allHashes)) {
+            $entryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
+            $relevant = array_intersect_key($allHashes, $entryIds);
+            $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($relevant);
+            if (! empty($conflicts)) {
+                $title = reset($conflicts);
+                return response()->json([
+                    'error' => 'conflict',
+                    'message' => 'Entry "'.$title.'" was modified by another editor since the broken-links scan ran. Re-run the scan and try again.',
+                    'entry_id' => array_key_first($conflicts),
+                ], 409);
+            }
+        }
 
         $user = auth()->user();
         $validated['started_by'] = $user?->name() ?? $user?->email() ?? null;

@@ -47,16 +47,11 @@ class BrokenLinkReport
         // Lazy one-time migration from pre-consolidated format (separate ignored-links.json)
         $this->migrateLegacyIgnoredFileIfExists();
 
-        $path = $this->getPath();
-
-        if (! file_exists($path)) {
-            return [
-                'metadata' => null,
-                'broken_links' => [],
-            ];
-        }
-
-        $data = json_decode(file_get_contents($path), true);
+        $data = \Arturrossbach\Linkwise\Support\JsonFileStore::load(
+            $this->getPath(),
+            null,
+            'BrokenLinkReport::load',
+        );
 
         if (! is_array($data)) {
             return [
@@ -105,7 +100,11 @@ class BrokenLinkReport
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
+        $data = \Arturrossbach\Linkwise\Support\JsonFileStore::load(
+            $path,
+            null,
+            'BrokenLinkReport::addRecord',
+        );
         if (! is_array($data)) {
             $this->save([$record]);
 
@@ -223,7 +222,11 @@ class BrokenLinkReport
             return;
         }
 
-        $ignoredData = json_decode(file_get_contents($ignoredPath), true);
+        $ignoredData = \Arturrossbach\Linkwise\Support\JsonFileStore::load(
+            $ignoredPath,
+            null,
+            'BrokenLinkReport::ignored',
+        );
         if (! is_array($ignoredData) || empty($ignoredData)) {
             @unlink($ignoredPath);
 
@@ -231,12 +234,12 @@ class BrokenLinkReport
         }
 
         $brokenPath = $this->getPath();
-        if (file_exists($brokenPath)) {
-            $brokenData = json_decode(file_get_contents($brokenPath), true);
-            if (! is_array($brokenData)) {
-                $brokenData = ['metadata' => null, 'broken_links' => []];
-            }
-        } else {
+        $brokenData = \Arturrossbach\Linkwise\Support\JsonFileStore::load(
+            $brokenPath,
+            ['metadata' => null, 'broken_links' => []],
+            'BrokenLinkReport::loadForMerge',
+        );
+        if (! is_array($brokenData)) {
             $brokenData = ['metadata' => null, 'broken_links' => []];
         }
 

@@ -85,13 +85,11 @@ class TargetKeywordManager
      */
     public function loadAll(): array
     {
-        $path = $this->getPath();
-
-        if (! file_exists($path)) {
-            return [];
-        }
-
-        $data = json_decode(file_get_contents($path), true);
+        $data = \Arturrossbach\Linkwise\Support\JsonFileStore::load(
+            $this->getPath(),
+            [],
+            'TargetKeywordManager::loadAll',
+        );
 
         return is_array($data) ? $data : [];
     }

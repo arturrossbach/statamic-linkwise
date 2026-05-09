@@ -6,6 +6,12 @@ class EntryRecord
 {
     /**
      * @param  array<string, float>  $keywords  TF-IDF keyword scores (term => score)
+     * @param  list<string>  $tokens  Pre-tokenized title+text used by EntryIndexSubscriber
+     *   to skip the per-save full-corpus re-tokenization. Computed during
+     *   buildIndex via KeywordExtractor::tokenize. Empty for legacy index
+     *   entries written before this field shipped — callers fall back to
+     *   on-demand tokenize when missing. Re-computed on every Scan Content
+     *   so language/stopwords config changes propagate.
      */
     public function __construct(
         public readonly string $id,
@@ -18,6 +24,7 @@ class EntryRecord
         public readonly int $inboundSuggestionCount = 0,
         public readonly int $outboundSuggestionCount = 0,
         public readonly bool $hasTitleMatch = false,
+        public readonly array $tokens = [],
     ) {}
 
     /** Return a copy with an updated inbound suggestion count. */
@@ -34,6 +41,7 @@ class EntryRecord
             inboundSuggestionCount: $count,
             outboundSuggestionCount: $this->outboundSuggestionCount,
             hasTitleMatch: $this->hasTitleMatch,
+            tokens: $this->tokens,
         );
     }
 
@@ -51,6 +59,7 @@ class EntryRecord
             inboundSuggestionCount: $this->inboundSuggestionCount,
             outboundSuggestionCount: $count,
             hasTitleMatch: $this->hasTitleMatch,
+            tokens: $this->tokens,
         );
     }
 
@@ -67,6 +76,7 @@ class EntryRecord
             'inbound_suggestion_count' => $this->inboundSuggestionCount,
             'outbound_suggestion_count' => $this->outboundSuggestionCount,
             'has_title_match' => $this->hasTitleMatch,
+            'tokens' => $this->tokens,
         ];
     }
 
@@ -98,6 +108,7 @@ class EntryRecord
             inboundSuggestionCount: (int) ($data['inbound_suggestion_count'] ?? 0),
             outboundSuggestionCount: (int) ($data['outbound_suggestion_count'] ?? 0),
             hasTitleMatch: (bool) ($data['has_title_match'] ?? false),
+            tokens: isset($data['tokens']) && is_array($data['tokens']) ? array_values(array_filter($data['tokens'], 'is_string')) : [],
         );
     }
 }

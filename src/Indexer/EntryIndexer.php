@@ -107,6 +107,7 @@ class EntryIndexer
                 inboundSuggestionCount: $old?->inboundSuggestionCount ?? 0,
                 outboundSuggestionCount: $old?->outboundSuggestionCount ?? 0,
                 hasTitleMatch: $old?->hasTitleMatch ?? false,
+                tokens: $record->tokens,
             );
         }
 
@@ -234,6 +235,7 @@ class EntryIndexer
                 inboundSuggestionCount: $inboundCounts[$id] ?? 0,
                 outboundSuggestionCount: $outboundCounts[$id] ?? 0,
                 hasTitleMatch: $hasTitleMatch[$id] ?? false,
+                tokens: $record->tokens,
             );
         }
 
@@ -287,6 +289,7 @@ class EntryIndexer
                     inboundSuggestionCount: $inboundCount,
                     outboundSuggestionCount: $outboundCount,
                     hasTitleMatch: $record->hasTitleMatch,
+                    tokens: $record->tokens,
                 );
                 $changed = true;
             }
@@ -338,6 +341,7 @@ class EntryIndexer
                 inboundSuggestionCount: $record->inboundSuggestionCount,
                 outboundSuggestionCount: $record->outboundSuggestionCount,
                 hasTitleMatch: $record->hasTitleMatch,
+                tokens: $record->tokens,
             );
         }
 
@@ -402,13 +406,21 @@ class EntryIndexer
             }
         }
 
+        // Pre-tokenize so EntryIndexSubscriber can skip the per-save full-
+        // corpus re-tokenization. Real perf win on medium/large sites:
+        // an editor save on a 1000-entry site went from O(N) tokenize
+        // calls to O(1) hash lookups via $existing->tokens.
+        $cleanText = trim($text);
+        $tokens = $this->keywordExtractor->tokenize($title.' '.$cleanText);
+
         return new EntryRecord(
             id: $entry->id(),
             title: $title,
             url: $entry->url(),
             collection: $entry->collectionHandle(),
-            text: trim($text),
+            text: $cleanText,
             outboundLinks: array_unique($links),
+            tokens: $tokens,
         );
     }
 
@@ -455,13 +467,17 @@ class EntryIndexer
             return $this->cachedRecords;
         }
 
-        $path = $this->getIndexPath();
-
-        if (! file_exists($path)) {
-            return [];
-        }
-
-        $data = json_decode(file_get_contents($path), true);
+        // JsonFileStore handles missing-file (legitimate fresh state),
+        // unreadable-file, and corrupt-JSON branches with consistent
+        // warning logs. Missing/empty/corrupt → returns [] so we serve
+        // an empty index rather than crash the CP — same outcome as
+        // before but the "corrupt index.json" case now lands in logs
+        // for the operator to investigate.
+        $data = \Arturrossbach\Linkwise\Support\JsonFileStore::load(
+            $this->getIndexPath(),
+            [],
+            'EntryIndexer::load',
+        );
 
         if (! is_array($data)) {
             return [];
