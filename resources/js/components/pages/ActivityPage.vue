@@ -420,7 +420,20 @@ export default {
                 snap.kind === 'detailunlink' ? 're-link' :
                 'unlink the inserted links';
 
-            const parts = [`Linkwise will ${verb} for ${willRevert} item${willRevert === 1 ? '' : 's'}. You'll see progress in the banner at the top of the screen — you can navigate away and come back, the operation continues in the background.`];
+            // Outbound bulks place N inserts on the SAME source entry — the
+            // table below lists 1 entry while willRevert lists N items, which
+            // looks like a counter contradiction. Make both visible when they
+            // diverge so the user sees "2 links across 1 entry" instead of
+            // "2 items" + only-1-row-in-the-table.
+            const affectedEntryCount = new Set(
+                items.slice(0, revertableItems).map(it => it.source_entry_id ?? it.entry_id),
+            ).size;
+            const itemLabel = `${willRevert} item${willRevert === 1 ? '' : 's'}`;
+            const itemAndEntryLabel = (affectedEntryCount > 0 && affectedEntryCount !== willRevert)
+                ? `${itemLabel} across ${affectedEntryCount} ${affectedEntryCount === 1 ? 'entry' : 'entries'}`
+                : itemLabel;
+
+            const parts = [`Linkwise will ${verb} for ${itemAndEntryLabel}. You'll see progress in the banner at the top of the screen — you can navigate away and come back, the operation continues in the background.`];
             if (skippable > 0) {
                 parts.push(`${skippable} entr${skippable === 1 ? 'y was' : 'ies were'} edited or deleted since this bulk and will be skipped.`);
             } else {
