@@ -27,7 +27,7 @@ class UrlReplacer
      */
     public function preview(string $search, string $replace): array
     {
-        return $this->process($search, $replace, apply: false);
+        return $this->process($search, $replace);
     }
 
     /**
@@ -563,7 +563,18 @@ class UrlReplacer
 
     // ─── Core Process ──────────────────────────────────────────────────────────
 
-    protected function process(string $search, string $replace, bool $apply): array
+    /**
+     * Preview-only: walk every entry, count matches, do NOT save.
+     *
+     * The previously-supported `apply: true` mode bypassed every safety
+     * layer (ContentSafetyValidator, SafeEntrySaver hash-check, cascade-
+     * guard) by calling $entry->save() directly — see commit history. It
+     * was dead code (only preview() called process), but the latent
+     * write-path was a regression risk for any future caller. Removed
+     * 2026-05-09. All actual writes must go through applySelected which
+     * uses SafeEntrySaver::save and inherits the full safety stack.
+     */
+    protected function process(string $search, string $replace): array
     {
         $entries = Entry::all();
         $result = [
@@ -574,7 +585,7 @@ class UrlReplacer
         ];
 
         foreach ($entries as $entry) {
-            $entryResult = $this->processEntry($entry, $search, $replace, $apply);
+            $entryResult = $this->processEntry($entry, $search, $replace);
 
             if (! empty($entryResult['occurrences'])) {
                 $result['entries'][] = $entryResult;
@@ -585,7 +596,7 @@ class UrlReplacer
         return $result;
     }
 
-    protected function processEntry($entry, string $search, string $replace, bool $apply): array
+    protected function processEntry($entry, string $search, string $replace): array
     {
         $entryResult = [
             'id' => $entry->id(),
@@ -622,8 +633,9 @@ class UrlReplacer
             }
         }
 
-        $modified = false;
-
+        // Preview-only walker — no save. Apply path is applySelected (which
+        // routes through SafeEntrySaver). See process() docblock above for
+        // why the apply branch was removed in 2026-05-09.
         foreach ($fields as $handle => $field) {
             $value = $entry->get($handle);
 
@@ -633,42 +645,26 @@ class UrlReplacer
                     fn ($o) => array_merge($o, ['field' => $handle, 'field_type' => 'bard']),
                     $occurrences,
                 ));
-
-                if ($apply && ! empty($occurrences)) {
-                    $value = $this->replaceInBard($value, $search, $replace);
-                    $entry->set($handle, $value);
-                    $modified = true;
-                }
             } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
                 $occurrences = $this->findInReplicator($value, $search);
                 $entryResult['occurrences'] = array_merge($entryResult['occurrences'], array_map(
                     fn ($o) => array_merge($o, ['field' => $handle, 'field_type' => 'replicator']),
                     $occurrences,
                 ));
-
-                if ($apply && ! empty($occurrences)) {
-                    $value = $this->replaceInReplicator($value, $search, $replace);
-                    $entry->set($handle, $value);
-                    $modified = true;
-                }
             } elseif ($field->type() === 'markdown' && is_string($value) && ! empty($value)) {
                 $occurrences = $this->findInMarkdown($value, $search);
                 $entryResult['occurrences'] = array_merge($entryResult['occurrences'], array_map(
                     fn ($o) => array_merge($o, ['field' => $handle, 'field_type' => 'markdown']),
                     $occurrences,
                 ));
-
-                if ($apply && ! empty($occurrences)) {
-                    $value = $this->replaceInMarkdown($value, $search, $replace);
-                    $entry->set($handle, $value);
-                    $modified = true;
-                }
             }
         }
 
-        if ($modified) {
-            $entry->save();
-        }
+        // The unused $replace param is kept in the signature so existing
+        // callers don't need to change. process() forwards both so the
+        // preview result correctly carries 'search' + 'replace' for the
+        // UI to render the diff side-by-side without recomputing.
+        unset($replace);
 
         // Add context for occurrences that don't have it yet (Bard/Replicator)
         $anchorOccurrences = [];
