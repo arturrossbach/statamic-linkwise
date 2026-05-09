@@ -13,6 +13,7 @@ use Arturrossbach\Linkwise\Suggestions\InboundEngine;
 use Arturrossbach\Linkwise\Suggestions\OutboundSuggestionGrouper;
 use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\BardWalker;
 use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\EntryFieldWalker;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
@@ -82,6 +83,9 @@ class AuditCommand extends Command
             'outbound'               => fn () => $this->auditOutboundInsertability(),
             'suggestions-safety'     => fn () => $this->auditSuggestionsSafety(),
             'highlight-truth'        => fn () => $this->auditHighlightTruth(),
+            'xss-safe-href'          => fn () => $this->auditXssSafeHref(),
+            'dangling-internal-link' => fn () => $this->auditDanglingInternalLinks(),
+            'internal-link-target-published' => fn () => $this->auditInternalLinkTargetPublished(),
             'suggestion-count-drift' => fn () => $this->auditSuggestionCountDrift(),
             'orphan-split-link'      => fn () => $this->auditOrphanSplitLinks(),
             'revert-completeness'    => fn () => $this->auditRevertCompleteness(),
@@ -888,6 +892,231 @@ class AuditCommand extends Command
                 } else {
                     $this->pass('highlight-truth');
                 }
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: XSS-safe href. Public-site renderer (LinkwiseLinkMark) emits
+    // every link mark's href verbatim into <a href="..."> on the page.
+    // A href containing javascript:, data:, or unescaped angle brackets
+    // is a stored XSS surface — the editor pastes a malicious "URL" once,
+    // every public-site visitor executes it. ContentSafetyValidator
+    // enforces this on writes through SafeEntrySaver but a hand-edited
+    // YAML file or a non-Linkwise save path could land bad data.
+    //
+    // For each entry, walk every link mark in every Bard field. Flag
+    // hrefs starting with javascript: or data:, or containing < / >.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditXssSafeHref(): void
+    {
+        $this->line('<fg=yellow>xss-safe-href</> — no link mark hrefs that would XSS the public site');
+
+        $records = $this->indexer->load();
+        foreach ($records as $record) {
+            $entry = Entry::find($record->id);
+            if (! $entry) {
+                continue;
+            }
+
+            $unsafe = [];
+            EntryFieldWalker::walk($entry, function (array $bardContent) use (&$unsafe) {
+                BardWalker::walk($bardContent, function (array $node) use (&$unsafe): bool {
+                    foreach ($node['marks'] ?? [] as $mark) {
+                        if (! is_array($mark) || ($mark['type'] ?? '') !== 'link') {
+                            continue;
+                        }
+                        $href = (string) ($mark['attrs']['href'] ?? '');
+                        $reason = $this->classifyUnsafeHref($href);
+                        if ($reason !== null) {
+                            $unsafe[] = ['href' => $href, 'reason' => $reason];
+                        }
+                    }
+                    return false;
+                });
+            });
+
+            if (empty($unsafe)) {
+                $this->pass('xss-safe-href');
+                continue;
+            }
+            foreach ($unsafe as $issue) {
+                $this->recordFailure(
+                    'xss-safe-href',
+                    "'$record->title': href contains XSS-relevant chars — \"".mb_strimwidth($issue['href'], 0, 80, '…').'" (reason: '.$issue['reason'].')',
+                );
+            }
+        }
+    }
+
+    protected function classifyUnsafeHref(string $href): ?string
+    {
+        if ($href === '') {
+            return null;
+        }
+        $lower = mb_strtolower(trim($href));
+        if (str_starts_with($lower, 'javascript:')) {
+            return 'javascript: scheme';
+        }
+        if (str_starts_with($lower, 'data:')) {
+            return 'data: scheme';
+        }
+        if (str_starts_with($lower, 'vbscript:')) {
+            return 'vbscript: scheme';
+        }
+        if (str_contains($href, '<') || str_contains($href, '>')) {
+            return 'contains < or >';
+        }
+        if (str_contains($href, '"')) {
+            return 'contains unescaped "';
+        }
+        return null;
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Dangling internal-link. Linkwise's broken-links audit covers
+    // the BrokenLinkChecker's scan results, which run on a schedule and
+    // can miss links inside structures the checker doesn't reach (Bard
+    // sets, indirect refs). This audit walks EVERY link mark in EVERY
+    // entry's content directly via BardWalker (which IS set-aware) and
+    // verifies each statamic://entry::ID target exists in the index —
+    // catching the "user manually deleted target entry, BrokenLinkChecker
+    // hasn't re-scanned yet" case before the public site renders dead
+    // anchors.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditDanglingInternalLinks(): void
+    {
+        $this->line('<fg=yellow>dangling-internal-link</> — every statamic://entry::ID target still exists in the index');
+
+        $records = $this->indexer->load();
+        $knownIds = array_flip(array_keys($records));
+
+        foreach ($records as $record) {
+            $entry = Entry::find($record->id);
+            if (! $entry) {
+                continue;
+            }
+
+            $dangling = [];
+            EntryFieldWalker::walk($entry, function (array $bardContent) use ($knownIds, &$dangling) {
+                BardWalker::walk($bardContent, function (array $node) use ($knownIds, &$dangling): bool {
+                    if (($node['type'] ?? '') !== 'text') {
+                        return false;
+                    }
+                    foreach ($node['marks'] ?? [] as $mark) {
+                        $targetId = $this->extractInternalEntryId($mark);
+                        if ($targetId !== null && ! isset($knownIds[$targetId])) {
+                            $dangling[] = [
+                                'target' => $targetId,
+                                'anchor' => (string) ($node['text'] ?? ''),
+                            ];
+                        }
+                    }
+                    return false;
+                });
+            });
+
+            if (empty($dangling)) {
+                $this->pass('dangling-internal-link');
+                continue;
+            }
+            foreach ($dangling as $issue) {
+                $this->recordFailure(
+                    'dangling-internal-link',
+                    "'$record->title': link to non-existent entry ".$issue['target'].' — anchor "'.mb_strimwidth($issue['anchor'], 0, 40, '…').'"',
+                );
+            }
+        }
+    }
+
+    /**
+     * Returns the entry-id of a `statamic://entry::ID` link mark, or null when
+     * the mark isn't a link, has no href, or points outside this scheme.
+     */
+    protected function extractInternalEntryId(mixed $mark): ?string
+    {
+        if (! is_array($mark) || ($mark['type'] ?? '') !== 'link') {
+            return null;
+        }
+        $href = (string) ($mark['attrs']['href'] ?? '');
+        if (! preg_match('#^statamic://entry::([a-zA-Z0-9-]+)$#', $href, $m)) {
+            return null;
+        }
+        return $m[1];
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Internal-link target published. A statamic://entry::ID target
+    // that is not visible to public-site visitors renders as a 404 — the
+    // editor never knows. Different failure mode from "dangling": the
+    // target entry EXISTS in the database but is hidden.
+    //
+    // Statamic's status() (not published()) is the right contract here:
+    // - 'draft'      → unpublished  → 404
+    // - 'scheduled'  → future date in a private-future collection → 404
+    // - 'expired'    → past date in a private-past collection → 404
+    // - 'published'  → live for visitors → OK
+    //
+    // published() returns true for scheduled/expired entries even though
+    // they're invisible — using that would silently miss those failures.
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditInternalLinkTargetPublished(): void
+    {
+        $this->line('<fg=yellow>internal-link-target-published</> — every statamic://entry::ID target is currently published');
+
+        $records = $this->indexer->load();
+
+        foreach ($records as $record) {
+            $entry = Entry::find($record->id);
+            if (! $entry) {
+                continue;
+            }
+
+            $unpublished = [];
+            EntryFieldWalker::walk($entry, function (array $bardContent) use (&$unpublished) {
+                BardWalker::walk($bardContent, function (array $node) use (&$unpublished): bool {
+                    if (($node['type'] ?? '') !== 'text') {
+                        return false;
+                    }
+                    foreach ($node['marks'] ?? [] as $mark) {
+                        $targetId = $this->extractInternalEntryId($mark);
+                        if ($targetId === null) {
+                            continue;
+                        }
+                        $target = Entry::find($targetId);
+                        if (! $target) {
+                            continue; // covered by dangling-internal-link
+                        }
+                        // status() — not published() — is the visitor-visibility
+                        // contract. published() returns true for scheduled/expired
+                        // entries which DO render as 404s in private-future/past
+                        // collections.
+                        if (! method_exists($target, 'status')) {
+                            continue;
+                        }
+                        $status = $target->status();
+                        if ($status === 'published') {
+                            continue;
+                        }
+                        $unpublished[] = [
+                            'target' => $targetId,
+                            'target_title' => (string) ($target->get('title') ?? $targetId),
+                            'status' => $status,
+                        ];
+                    }
+                    return false;
+                });
+            });
+
+            if (empty($unpublished)) {
+                $this->pass('internal-link-target-published');
+                continue;
+            }
+            foreach ($unpublished as $issue) {
+                $this->recordFailure(
+                    'internal-link-target-published',
+                    "'$record->title': link target '".$issue['target_title']."' (id ".$issue['target'].') has status='.$issue['status'].' — public-site visitor sees broken link',
+                );
             }
         }
     }
