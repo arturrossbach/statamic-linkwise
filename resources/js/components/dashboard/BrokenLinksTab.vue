@@ -187,7 +187,7 @@
                             v-for="link in paginatedLinks"
                             :key="`${link.post_id}-${link.url}`"
                             :class="{
-                                'bg-green-50 dark:bg-green-900/10 opacity-60 pointer-events-none': link._fixed,
+                                'bg-green-50 dark:bg-green-900/10': link._fixed,
                                 'bg-gray-100 dark:bg-gray-800/40 opacity-60': link.ignored && !link._fixed,
                                 'opacity-60 pointer-events-none': link._applying,
                             }"
@@ -261,9 +261,26 @@
                                     </form>
                                 </template>
                                 <template v-else>
-                                    <span v-if="link._fixed === 'fixed' && link._newUrl" class="text-xs break-all">
-                                        <span class="line-through text-gray-400">{{ truncateUrl(link.url) }}</span>
-                                        <div class="text-green-600 dark:text-green-400 mt-0.5">→ {{ truncateUrl(link._newUrl) }}</div>
+                                    <span v-if="link._fixed === 'fixed'" class="text-xs break-all">
+                                        <span v-if="link._originalUrl && link._originalUrl !== link.url" class="line-through text-gray-400 block">
+                                            {{ truncateUrl(link._originalUrl) }}
+                                        </span>
+                                        <span class="inline-flex items-center">
+                                            <a :href="link.url" target="_blank" rel="noopener" class="text-green-600 dark:text-green-400 hover:underline break-all">
+                                                {{ link._originalUrl && link._originalUrl !== link.url ? '→ ' : '' }}{{ truncateUrl(link.url) }}
+                                            </a>
+                                            <Button
+                                                v-if="applyUrl"
+                                                variant="ghost"
+                                                size="sm"
+                                                icon="pencil"
+                                                class="ml-1 align-middle"
+                                                aria-label="Edit URL"
+                                                :disabled="applying || !!link._applying"
+                                                v-tooltip="'Edit URL — recover from a typo in the replacement'"
+                                                @click="startReplace(link)"
+                                            />
+                                        </span>
                                     </span>
                                     <span v-else-if="link._fixed === 'unlinked'" class="text-xs break-all line-through text-gray-400">
                                         {{ truncateUrl(link.url) }}
@@ -1011,6 +1028,18 @@ export default {
         markAsReplaced(link, newUrl) {
             link._fixed = 'fixed';
             link._newUrl = newUrl;
+            // Capture the original-broken URL for the "before → after"
+            // display (line-through → green). Only set on the FIRST fix
+            // so subsequent edits keep showing the true origin, not an
+            // intermediate state.
+            if (!link._originalUrl) {
+                link._originalUrl = link.url;
+            }
+            // Sync the canonical URL field so a subsequent edit (typo
+            // recovery: "https://www.spiegel.de#" → "https://www.spiegel.de")
+            // targets the URL that's actually in the entry now, not the
+            // original-broken URL the row was created from.
+            link.url = newUrl;
         },
 
         refreshHashes(result) {
