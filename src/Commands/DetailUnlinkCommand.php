@@ -185,13 +185,18 @@ class DetailUnlinkCommand extends Command
             try {
                 // applySelected handles per-entry hash check and atomic save.
                 // Search arg is empty — we use exact match per replacement
-                // via the matched_url. Inject the UNLINK sentinel as new_url
+                // via the matched_url. Force the UNLINK sentinel as new_url
                 // so applySelected → replaceNthInBard / Markdown / Replicator
-                // fall into the "remove the link mark" branches instead of
-                // hitting an undefined `new_url` index. The DetailModal UI
-                // never sends new_url because the action is purely a removal.
+                // fall into the "remove the link mark" branch. Detail-unlink
+                // is purely a removal — any incoming new_url would either
+                // be ignored or corrupt the result. array_merge (not the +
+                // operator) so an incoming new_url='' from a misbehaving
+                // caller doesn't slip past and produce empty-href marks
+                // that ContentSafetyValidator rejects with a confusing
+                // "introduce new corruption" error. Real bug found via
+                // roundtrip test 2026-05-09.
                 $entryRepsForCall = array_map(
-                    fn (array $r) => $r + ['new_url' => UrlHelper::UNLINK],
+                    fn (array $r) => array_merge($r, ['new_url' => UrlHelper::UNLINK]),
                     $entryReps,
                 );
                 $result = $this->replacer->applySelected('', $entryRepsForCall);
