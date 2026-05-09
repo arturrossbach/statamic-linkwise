@@ -149,7 +149,7 @@ import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
 import SuggestedPhrase from '../shared/SuggestedPhrase.vue';
 import { applyUrlReplacements, UNLINK_SENTINEL } from '../shared/urlReplacer.js';
-import { bulkState, setHeavyState } from '../../services/bulkOperationService.js';
+import { bulkState, setHeavyState, runBulkOperation } from '../../services/bulkOperationService.js';
 import { errorToast } from '../../utils/toast.js';
 
 export default {
@@ -334,7 +334,6 @@ export default {
             }
 
             this.unlinking = true;
-            this.unlinkProgress = '';
 
             try {
                 const response = await fetch(this.cp_url('linkwise/detail-unlink-async'), {
@@ -394,48 +393,88 @@ export default {
             setTimeout(() => stop(), 30 * 60 * 1000);
         },
 
+        /**
+         * Re-link selected items whose anchor was edited via SuggestedPhrase.
+         * Per item runs unlink-then-insert as a chain. Routed through the
+         * shared runBulkOperation wrapper so the user gets the standard
+         * Linkwise UX:
+         *   - Tab-spanning banner with X / N progress + Cancel button
+         *   - Survives modal close + tab navigation (loop continues, mutations
+         *     are guarded against an unmounted modal)
+         *   - Single completion toast (variant chosen via final state)
+         *   - beforeunload guard against accidental tab close
+         *   - Concurrency guard against parallel bulks
+         *
+         * Old implementation was a raw `for (item of items) { await fetch }`
+         * loop directly in the component. Closing the modal mid-run left the
+         * loop continuing to write `item._anchor = ...` against a now-detached
+         * Vue instance — exactly the bug class the bulkOperationService
+         * docstring exists to prevent.
+         */
         async executeRelink() {
-            this.relinking = true;
+            if (bulkState.active) {
+                Statamic.$toast.info('Another bulk operation is running — wait for it to finish.');
+                return;
+            }
+
+            // Snapshot everything we need BEFORE dispatch — the loop may
+            // outlive the modal/tab. We can't reach back into them.
             const items = [...this.modifiedSelected];
-            let succeeded = 0;
-            let failed = 0;
-
+            if (items.length === 0) return;
+            const mode = this.modal.mode;
+            const sourceEntryId = this.modal.entryId;
+            const entryTitle = this.modal.entryTitle || '';
+            const insertUrl = mode === 'outbound' ? this.outboundInsertUrl : this.inboundInsertUrl;
             const csrfToken = Statamic.$config.get('csrfToken');
-            const insertUrl = this.modal.mode === 'outbound' ? this.outboundInsertUrl : this.inboundInsertUrl;
+            // Capture entry-ref array so post-completion `item._unlinked` etc.
+            // mutations skip cleanly if the modal has unmounted in between.
+            const entriesRef = this.entries;
+            const modalAlive = () => this.modal !== null;
 
-            for (const item of items) {
-                const entryId = this.modal.mode === 'outbound'
-                    ? this.modal.entryId
-                    : item.id;
-                const entryHash = this.getEntryHash(entryId);
+            this.relinking = true;
 
-                try {
-                    // Step 1: Unlink old anchor
-                    const unlinkResult = await applyUrlReplacements(
-                        this.applyUrl,
-                        item.url,
-                        [{
-                            entry_id: entryId,
-                            field: '',
-                            field_type: '',
-                            matched_url: item.url,
-                            occurrence_index: item.occurrence_index ?? 0,
-                            new_url: UNLINK_SENTINEL,
-                        }],
-                        entryHash ? { [entryId]: entryHash } : {},
-                    );
+            await runBulkOperation({
+                kind: 'detail-relink',
+                label: 're-link',
+                context: { entryTitle, mode },
+                items,
+                perItem: async (item) => {
+                    const entryId = mode === 'outbound' ? sourceEntryId : item.id;
+                    const entryHash = this.getEntryHash(entryId);
 
-                    // Update hash after unlink
-                    if (unlinkResult?.updated_hashes) {
+                    // Step 1 — unlink current anchor at its known position.
+                    let unlinkResult;
+                    try {
+                        unlinkResult = await applyUrlReplacements(
+                            this.applyUrl,
+                            item.url,
+                            [{
+                                entry_id: entryId,
+                                field: '',
+                                field_type: '',
+                                matched_url: item.url,
+                                occurrence_index: item.occurrence_index ?? 0,
+                                new_url: UNLINK_SENTINEL,
+                            }],
+                            entryHash ? { [entryId]: entryHash } : {},
+                        );
+                    } catch (e) {
+                        return { success: false, error: `unlink failed: ${e?.message || 'unknown'}` };
+                    }
+
+                    // Refresh entry hash post-unlink so the insert below uses
+                    // the just-saved state. Skipped silently if the entries
+                    // ref no longer points at our payload (modal unmounted).
+                    if (unlinkResult?.updated_hashes && Array.isArray(entriesRef)) {
                         for (const [eid, newHash] of Object.entries(unlinkResult.updated_hashes)) {
-                            const e = this.entries.find(x => x.id === eid);
+                            const e = entriesRef.find(x => x.id === eid);
                             if (e) e.content_hash = newHash;
                         }
                     }
 
-                    // Step 2: Insert new link with modified anchor
+                    // Step 2 — re-insert with the modified anchor.
                     const targetEntryId = item.url.replace('statamic://entry::', '');
-                    const body = this.modal.mode === 'outbound'
+                    const body = mode === 'outbound'
                         ? {
                             entry_id: entryId,
                             content_hash: this.getEntryHash(entryId),
@@ -446,39 +485,50 @@ export default {
                             insertions: [{ source_entry_id: entryId, target_entry_id: targetEntryId, anchor_text: item._anchor, sentence_context: item.sentence_context || '' }],
                         };
 
-                    const response = await fetch(insertUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': csrfToken,
-                            'X-Requested-With': 'XMLHttpRequest',
-                        },
-                        body: JSON.stringify(body),
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.results?.[0]?.success) {
-                            item._unlinked = false;
-                            item._originalAnchor = item._anchor;
-                            item.anchor_text = item._anchor;
-                            succeeded++;
-                        } else {
-                            failed++;
-                        }
-                    } else {
-                        failed++;
+                    let response;
+                    try {
+                        response = await fetch(insertUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': csrfToken,
+                                'X-Requested-With': 'XMLHttpRequest',
+                            },
+                            body: JSON.stringify(body),
+                        });
+                    } catch (e) {
+                        return { success: false, error: `insert failed: ${e?.message || 'network error'}` };
                     }
-                } catch {
-                    failed++;
-                }
-            }
+                    if (! response.ok) {
+                        return { success: false, error: `HTTP ${response.status}` };
+                    }
+                    let data;
+                    try {
+                        data = await response.json();
+                    } catch {
+                        return { success: false, error: 'invalid server response' };
+                    }
+                    if (! data.results?.[0]?.success) {
+                        return { success: false, error: data.results?.[0]?.error || 'insert reported no success' };
+                    }
 
-            this.selected = [];
+                    // Mutate the row only when the modal is still alive — a
+                    // user who closed mid-run shouldn't get state writes
+                    // against a detached component instance.
+                    if (modalAlive()) {
+                        item._unlinked = false;
+                        item._originalAnchor = item._anchor;
+                        item.anchor_text = item._anchor;
+                    }
+                    return { success: true };
+                },
+            });
+
+            // runBulkOperation already fired the completion toast (single
+            // unified line, not 2 separate success/error toasts). Reset
+            // local UI state — selected list cleared, button re-enabled.
             this.relinking = false;
-
-            if (succeeded > 0) Statamic.$toast.success(`${succeeded} link(s) re-linked.`);
-            if (failed > 0) Statamic.$toast.error(`${failed} re-link(s) failed.`);
+            if (modalAlive()) this.selected = [];
         },
 
         getEntryHash(entryId) {
