@@ -1,6 +1,7 @@
 import { reactive } from 'vue';
 import { errorToast, warnToast } from '../utils/toast.js';
 import { readJson, writeJson, remove as removeStorage } from '../utils/safeStorage.js';
+import { topErrorReason } from './bulkLabels.js';
 
 /**
  * Lightweight bulk-operation service for Linkwise.
@@ -272,10 +273,9 @@ export async function runBulkOperation({ kind, label, context, items, perItem, o
             warnToast(`${final.succeeded} ${label}, ${final.skipped} skipped.`);
         } else if (final.succeeded === 0 && final.skipped > 0) {
             // Surface the most-frequent error reason so the user has a clue
-            // why nothing worked. final.errors is { reason: count, ... }.
-            const reasons = Object.entries(final.errors || {});
-            reasons.sort((a, b) => b[1] - a[1]);
-            const topReason = reasons[0]?.[0] || 'unknown error';
+            // why nothing worked. Shared with the bulkLabels module so
+            // toast + persistent banner surface the same root cause.
+            const topReason = topErrorReason(final.errors) || 'unknown error';
             errorToast(`Could not complete: 0 of ${final.total} succeeded. ${topReason}`);
         }
 

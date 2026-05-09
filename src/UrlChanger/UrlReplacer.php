@@ -224,20 +224,11 @@ class UrlReplacer
         // link with this href" branch missed in-set links — meaning the
         // user could replace 4 of 5 occurrences (the 5th in a Peak Card
         // never reached) without any error signal.
-        foreach (\Arturrossbach\Linkwise\Support\BardWalker::setChildren($node) as $key => $bardFragment) {
-            $newFragment = $bardFragment;
-            foreach ($bardFragment as $i => $child) {
-                if (! is_array($child)) continue;
-                $newFragment[$i] = $this->fallbackReplaceFirstByUrl($child, $oldUrl, $newUrl, $replaced);
-                if ($replaced) {
-                    $node['attrs']['values'][$key] = $newFragment;
-                    return $node;
-                }
-            }
-            $node['attrs']['values'][$key] = $newFragment;
-        }
-
-        return $node;
+        return \Arturrossbach\Linkwise\Support\BardWalker::mapSetChildren(
+            $node,
+            fn (array $child) => $this->fallbackReplaceFirstByUrl($child, $oldUrl, $newUrl, $replaced),
+            fn (): bool => $replaced,
+        );
     }
 
     protected function replaceNthInNode(array $node, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter): array
@@ -289,20 +280,11 @@ class UrlReplacer
         // sets). A target_index that points at an in-set occurrence
         // would previously fall to Phase-2 fallback and silently rewrite
         // a different occurrence; now it rewrites the right one.
-        foreach (\Arturrossbach\Linkwise\Support\BardWalker::setChildren($node) as $key => $bardFragment) {
-            $newFragment = $bardFragment;
-            foreach ($bardFragment as $i => $child) {
-                if (! is_array($child)) continue;
-                $newFragment[$i] = $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter);
-                if ($counter['replaced']) {
-                    $node['attrs']['values'][$key] = $newFragment;
-                    return $node;
-                }
-            }
-            $node['attrs']['values'][$key] = $newFragment;
-        }
-
-        return $node;
+        return \Arturrossbach\Linkwise\Support\BardWalker::mapSetChildren(
+            $node,
+            fn (array $child) => $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter),
+            fn (): bool => $counter['replaced'],
+        );
     }
 
     /**
@@ -809,17 +791,10 @@ class UrlReplacer
         // too, mirroring findInNode above so find/replace counts stay
         // consistent when Peak Cards / pull-quotes / button labels
         // contain URLs the user wants changed.
-        foreach (\Arturrossbach\Linkwise\Support\BardWalker::setChildren($node) as $key => $bardFragment) {
-            $newFragment = $bardFragment;
-            foreach ($bardFragment as $i => $child) {
-                if (is_array($child)) {
-                    $newFragment[$i] = $this->replaceInNode($child, $search, $replace);
-                }
-            }
-            $node['attrs']['values'][$key] = $newFragment;
-        }
-
-        return $node;
+        return \Arturrossbach\Linkwise\Support\BardWalker::mapSetChildren(
+            $node,
+            fn (array $child) => $this->replaceInNode($child, $search, $replace),
+        );
     }
 
     // ─── Replicator ────────────────────────────────────────────────────────────

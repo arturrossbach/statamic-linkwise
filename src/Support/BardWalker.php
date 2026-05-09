@@ -70,6 +70,17 @@ class BardWalker
                 return true;
             }
 
+            // Hot-path fast-out: leaf text nodes have neither nested
+            // content nor a 'set' attrs.values map. Skipping the
+            // recursiveChildren generator setup for them avoids
+            // ~one Generator allocation per text node visited — and
+            // text nodes outnumber containers in any real Bard tree.
+            $hasContent = isset($node['content']) && is_array($node['content']);
+            $isSet = ($node['type'] ?? '') === 'set';
+            if (! $hasContent && ! $isSet) {
+                continue;
+            }
+
             foreach (self::recursiveChildren($node) as $children) {
                 if (self::walk($children, $visitor)) {
                     return true;
@@ -128,13 +139,27 @@ class BardWalker
      */
     public static function setChildren(array $node): iterable
     {
+        // Hot-path fast-out: the vast majority of nodes a mutation
+        // walker visits are NOT set nodes (paragraph, text, list, …).
+        // Returning an empty array short-circuits the foreach in the
+        // caller without paying for a Generator allocation per visit.
         if (($node['type'] ?? '') !== 'set') {
-            return;
+            return [];
         }
         if (! is_array($node['attrs']['values'] ?? null)) {
-            return;
+            return [];
         }
-        foreach ($node['attrs']['values'] as $key => $val) {
+        return self::yieldSetChildren($node['attrs']['values']);
+    }
+
+    /**
+     * Generator body extracted so setChildren() can early-return a
+     * cheap empty array on the common non-set case without paying for
+     * a generator. Generators in PHP allocate even when never iterated.
+     */
+    private static function yieldSetChildren(array $values): iterable
+    {
+        foreach ($values as $key => $val) {
             if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) {
                 continue;
             }
@@ -145,5 +170,50 @@ class BardWalker
                 yield $key => $val;
             }
         }
+    }
+
+    /**
+     * Mutation helper for callers that need to recurse into a node's
+     * Bard 'set' children, mutate each child, and write the mutated
+     * fragment back to $node['attrs']['values'][$key].
+     *
+     * Replaces the four near-identical "iterate setChildren → recurse →
+     * write back, with optional early-stop" blocks UrlReplacer used to
+     * carry around. Adding a fifth caller becomes one method-call
+     * instead of an eight-line copy-paste.
+     *
+     * The optional $shouldStop predicate (called after each child is
+     * processed) lets early-stopping mutators (replaceNthInNode,
+     * fallbackReplaceFirstByUrl) bail as soon as their counter trips —
+     * see UrlReplacer for the per-call pattern.
+     *
+     * @param  array  $node  Bard node to walk (mutated in place via the
+     *   returned copy — caller assigns it back, e.g.
+     *   `$node = BardWalker::mapSetChildren($node, ...)`).
+     * @param  callable(array $child): array  $childMapper  Per-child
+     *   transformer. Receives one node at a time, returns the mutated
+     *   form. Side-effects on shared counters/refs are the caller's
+     *   responsibility.
+     * @param  ?callable(): bool  $shouldStop  Early-stop predicate. When
+     *   present and returning true after a mapper run, the helper writes
+     *   back the partially-mutated fragment and returns $node immediately.
+     */
+    public static function mapSetChildren(array $node, callable $childMapper, ?callable $shouldStop = null): array
+    {
+        foreach (self::setChildren($node) as $key => $bardFragment) {
+            $newFragment = $bardFragment;
+            foreach ($bardFragment as $i => $child) {
+                if (! is_array($child)) {
+                    continue;
+                }
+                $newFragment[$i] = $childMapper($child);
+                if ($shouldStop !== null && $shouldStop()) {
+                    $node['attrs']['values'][$key] = $newFragment;
+                    return $node;
+                }
+            }
+            $node['attrs']['values'][$key] = $newFragment;
+        }
+        return $node;
     }
 }

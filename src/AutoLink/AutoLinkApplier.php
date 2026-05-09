@@ -489,15 +489,6 @@ class AutoLinkApplier
         });
     }
 
-    /**
-     * Kept for backwards compatibility — now a thin wrapper around
-     * bardContainsHref via BardWalker. Single-node check with set-aware
-     * recursion handled by the walker.
-     */
-    protected function nodeContainsHref(array $node, string $href): bool
-    {
-        return $this->bardContainsHref([$node], $href);
-    }
 
     protected function replicatorContainsHref(array $sets, string $href): bool
     {

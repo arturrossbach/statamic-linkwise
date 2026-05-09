@@ -102,8 +102,6 @@ export function shortLabel(kind, ctx = {}) {
         case 'check': return 'Checking links';
         case 'bulkunlink': return 'Removing broken links';
         case 'applyrule': return ctx.ruleKeyword ? `Applying rule "${ctx.ruleKeyword}"` : 'Applying auto-link rule';
-        case 'urlchanger-apply': return ctx.search ? `Replacing URLs matching "${ctx.search}"` : 'Replacing URLs';
-        case 'urlchanger-unlink': return ctx.search ? `Unlinking URLs matching "${ctx.search}"` : 'Unlinking URLs';
         case 'urlchanger': {
             const action = ctx.action || 'apply';
             const verb = action === 'unlink' ? 'Unlinking' : 'Replacing';

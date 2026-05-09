@@ -424,36 +424,21 @@ class EntryIndexer
         }
 
         $data = array_map(fn (EntryRecord $r) => $r->toArray(), $records);
-        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-        $path = $this->getIndexPath();
 
-        // Atomic write: stage to a temp file, then rename. POSIX rename is
-        // atomic on the same filesystem — readers either see the old
-        // index or the new one, never a half-written one. Without this,
-        // a `kill -9` mid-write left index.json truncated; load() then
-        // returned [] (JSON parse failure → silent empty), every count
-        // collapsed to 0 across the whole CP until the next full scan.
-        // The .tmp suffix puts the staging file next to the target so
-        // rename is in-filesystem (atomic). On Windows rename-with-replace
-        // semantics differ but the worst case is the same as before.
-        $tmp = $path.'.tmp.'.bin2hex(random_bytes(4));
-        if (file_put_contents($tmp, $json) === false) {
-            \Illuminate\Support\Facades\Log::warning(
-                '[Linkwise] EntryIndexer: could not write index temp file '.$tmp,
-            );
-            // Update cache anyway so callers see fresh data in-memory; the
-            // disk state is unchanged so a subsequent reload still works.
-            $this->cachedRecords = $records;
-            return;
-        }
-        if (! @rename($tmp, $path)) {
-            // Rename failed (cross-device, perms): fall back to direct
-            // write to keep behavior, then unlink the staging file.
-            @unlink($tmp);
-            file_put_contents($path, $json);
-        }
+        // Atomic write via shared helper — kill -9 mid-write leaves
+        // either the old index or the new one on disk, never a
+        // truncated half-write that load() would silently parse as
+        // empty. See AtomicJsonWriter for the staging-and-rename
+        // pattern; same writer is used by DomainReport::saveAttributes.
+        \Arturrossbach\Linkwise\Support\AtomicJsonWriter::write(
+            $this->getIndexPath(),
+            $data,
+            'EntryIndexer::save',
+        );
 
         // Update in-memory cache so subsequent reads see the saved state
+        // even when the disk write returned false (the in-memory copy
+        // remains useful for the rest of the request).
         $this->cachedRecords = $records;
     }
 
