@@ -84,7 +84,7 @@
                 <Icon name="warning" class="size-4 shrink-0 mt-0.5" />
                 <div class="flex-1 text-sm">
                     <p class="font-medium">Conflict — entry was modified elsewhere</p>
-                    <p class="mt-0.5 text-xs">{{ conflictBanner }} Hashes refreshed. Try again.</p>
+                    <p class="mt-0.5 text-xs">{{ conflictBanner }} The list below has been refreshed with the current scan state — review the row's anchor + context before clicking again, the link may have moved or been replaced.</p>
                 </div>
                 <Button
                     @click="conflictBanner = null"
@@ -696,7 +696,14 @@ export default {
          */
         handleConflict(message) {
             this.conflictBanner = message || 'Entry was modified by someone else.';
-            inertiaRouter.reload({ only: ['entryHashes'], preserveScroll: true });
+            // Reload the broken-links scan data too, not just hashes. Without
+            // this, the row keeps showing the OLD anchor + context after the
+            // refresh — so when the user clicks "try again" they're acting on
+            // stale information. With brokenData refreshed, the row updates
+            // to the current scan state (different anchor, different sentence
+            // context, or gone entirely if the link was removed elsewhere)
+            // and the user can VERIFY before clicking again.
+            inertiaRouter.reload({ only: ['brokenData', 'entryHashes'], preserveScroll: true });
         },
 
         toggleSelect(link) {
