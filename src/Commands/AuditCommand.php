@@ -91,6 +91,7 @@ class AuditCommand extends Command
             'revert-completeness'    => fn () => $this->auditRevertCompleteness(),
             'post-hash-coverage'     => fn () => $this->auditPostHashCoverage(),
             'apply-counter-honesty'  => fn () => $this->auditApplyCounterHonesty(),
+            'mutator-parity'         => fn () => $this->auditMutatorParity(),
             'snapshot-self-consistency' => fn () => $this->auditSnapshotSelfConsistency(),
             'stale-job-locks'        => fn () => $this->auditStaleJobLocks(),
             'domains'                => fn () => $this->auditDomainParity(),
@@ -1629,6 +1630,142 @@ class AuditCommand extends Command
                 $this->pass('apply-counter-honesty');
             }
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Mutator parity. Linkwise has THREE separate write-paths for
+    // link mutations — Bard (BardWalker), Markdown (preg_replace_callback),
+    // Replicator (set-aware Bard nested in container). Each has its own
+    // code (replaceNthInBard, replaceNthInMarkdown, replaceNthInReplicator)
+    // with its own bug surface. Without parity guarantees, a fix in one
+    // path silently leaves the other paths broken — manual user testing
+    // would have to cover every mutator × every field-type combination.
+    //
+    // This audit asserts: for a battery of synthetic test cases, all 3
+    // mutators produce semantically identical results. If they ever
+    // diverge — e.g. Bard skips on anchor mismatch but Markdown still
+    // mutates — the audit fails with a clear diff between paths.
+    //
+    // Test corpus is synthetic (no entry/disk dependency) so this audit
+    // runs deterministically against any site. Each test case lives in
+    // a small array and is replayed in 3 variants:
+    //   - Bard: simple ProseMirror tree
+    //   - Markdown: equivalent [text](url) syntax
+    //   - Replicator: same Bard tree wrapped in one set
+    // The replicator variant catches set-traversal bugs that Bard-only
+    // tests would miss (real bug history: Bug B / partial-overlap split).
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditMutatorParity(): void
+    {
+        $this->line('<fg=yellow>mutator-parity</> — Bard, Markdown, Replicator behave identically for the same operation');
+
+        $replacer = new \Arturrossbach\Linkwise\UrlChanger\UrlReplacer();
+        $unlink = \Arturrossbach\Linkwise\Support\UrlHelper::UNLINK;
+        $oldUrl = 'https://example.com/parity';
+        $newUrl = 'https://example.com/replaced';
+
+        // Each case = (label, what to call, expected (replaced, contentChanged)).
+        // contentChanged: did the body actually mutate? (replaced=false should
+        // imply contentChanged=false — that's the safety contract.)
+        $cases = [
+            // Case 1: index + anchor + url all match → must replace.
+            ['match-anchor-and-index', 'OnlyAnchor', $oldUrl, $newUrl, 0, 'OnlyAnchor', true, true],
+            // Case 2: index out-of-bounds → must skip (no Phase-2 fallback).
+            ['index-out-of-bounds', 'OnlyAnchor', $oldUrl, $newUrl, 5, null, false, false],
+            // Case 3: anchor mismatch → must skip (anchor-fingerprint guard).
+            ['anchor-mismatch', 'WrongAnchor', $oldUrl, $newUrl, 0, 'ScannedAnchor', false, false],
+            // Case 4: anchor explicitly matches → must replace.
+            ['anchor-matches-explicitly', 'KnownAnchor', $oldUrl, $newUrl, 0, 'KnownAnchor', true, true],
+            // Case 5: UNLINK sentinel → mark removed, text preserved.
+            ['unlink-removes-mark-keeps-text', 'KeepMyText', $oldUrl, $unlink, 0, 'KeepMyText', true, true],
+            // Case 6: legacy call without expectedAnchor → still works.
+            ['legacy-no-anchor-arg', 'AnyAnchor', $oldUrl, $newUrl, 0, null, true, true],
+        ];
+
+        foreach ($cases as $case) {
+            [$label, $anchorInDoc, $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor, $expectReplaced, $expectChanged] = $case;
+
+            $bard = $this->parityBuildBard($anchorInDoc, $oldUrl);
+            $md = $this->parityBuildMarkdown($anchorInDoc, $oldUrl);
+            $replicator = $this->parityBuildReplicator($anchorInDoc, $oldUrl);
+
+            [$bardOut, $bardReplaced] = $replacer->replaceNthInBard($bard, 'example.com', $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
+            [$mdOut, $mdReplaced] = $replacer->replaceNthInMarkdown($md, $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
+            [$repOut, $repReplaced] = $replacer->replaceNthInReplicator($replicator, 'example.com', $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
+
+            $bardChanged = $bard !== $bardOut;
+            $mdChanged = $md !== $mdOut;
+            $repChanged = $replicator !== $repOut;
+
+            $bardOk = $bardReplaced === $expectReplaced && $bardChanged === $expectChanged;
+            $mdOk = $mdReplaced === $expectReplaced && $mdChanged === $expectChanged;
+            $repOk = $repReplaced === $expectReplaced && $repChanged === $expectChanged;
+
+            if ($bardOk && $mdOk && $repOk) {
+                $this->pass('mutator-parity');
+                continue;
+            }
+
+            // At least one path diverges — emit one failure per misbehaving
+            // path so the report points directly at the file to fix.
+            $expected = sprintf('replaced=%s, changed=%s', $expectReplaced ? 'true' : 'false', $expectChanged ? 'true' : 'false');
+            if (! $bardOk) {
+                $this->recordFailure('mutator-parity', "case '{$label}': BARD diverged — got replaced=".($bardReplaced ? 'true' : 'false').", changed=".($bardChanged ? 'true' : 'false').", expected {$expected}");
+            }
+            if (! $mdOk) {
+                $this->recordFailure('mutator-parity', "case '{$label}': MARKDOWN diverged — got replaced=".($mdReplaced ? 'true' : 'false').", changed=".($mdChanged ? 'true' : 'false').", expected {$expected}");
+            }
+            if (! $repOk) {
+                $this->recordFailure('mutator-parity', "case '{$label}': REPLICATOR diverged — got replaced=".($repReplaced ? 'true' : 'false').", changed=".($repChanged ? 'true' : 'false').", expected {$expected}");
+            }
+        }
+    }
+
+    /**
+     * Build a minimal Bard doc with one paragraph wrapping $anchor in a
+     * link mark pointing at $url. The text-node text equals $anchor exactly
+     * so the anchor-fingerprint guard's match works the same as the
+     * Markdown variant.
+     */
+    protected function parityBuildBard(string $anchor, string $url): array
+    {
+        return [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Before. '],
+                    ['type' => 'text', 'text' => $anchor, 'marks' => [['type' => 'link', 'attrs' => ['href' => $url]]]],
+                    ['type' => 'text', 'text' => '. After.'],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Markdown equivalent of parityBuildBard — same anchor + url so the
+     * mutator outputs are directly comparable.
+     */
+    protected function parityBuildMarkdown(string $anchor, string $url): string
+    {
+        return "Before. [{$anchor}]({$url}). After.";
+    }
+
+    /**
+     * Replicator with one set wrapping the Bard from parityBuildBard.
+     * Set-aware traversal in BardWalker::mapSetChildren is what the
+     * mutator must hit — without it, replicator-nested links are
+     * silently invisible.
+     */
+    protected function parityBuildReplicator(string $anchor, string $url): array
+    {
+        return [
+            [
+                'id' => 'set-1',
+                'type' => 'text_block',
+                'enabled' => true,
+                'body' => $this->parityBuildBard($anchor, $url),
+            ],
+        ];
     }
 
     // ──────────────────────────────────────────────────────────────────
