@@ -30,6 +30,12 @@
             "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/pre-vue-edit.sh",
             "timeout": 5,
             "statusMessage": "Checking Statamic UI…"
+          },
+          {
+            "type": "command",
+            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/pre-blast-radius-check.sh",
+            "timeout": 5,
+            "statusMessage": "Checking blast radius…"
           }
         ]
       },
