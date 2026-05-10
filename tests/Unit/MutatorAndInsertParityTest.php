@@ -124,6 +124,83 @@ class MutatorAndInsertParityTest extends TestCase
         $this->assertInsertParity('twice', 'AnchorWord', expectInserted: true, expectChanged: true);
     }
 
+    /* ─────────── context-fingerprint guard (visual truth, 2026-05-10) ─────────── */
+
+    public function test_insert_parity_context_picks_correct_occurrence_when_anchor_appears_twice(): void
+    {
+        // Two paragraphs each containing "AnchorWord". The captured
+        // sentence belongs to the SECOND paragraph. With the fingerprint
+        // guard, the wrap MUST land on the second one — not the first
+        // (which would be the silent-wrong-position bug). Same outcome
+        // required across Bard / Markdown / Replicator.
+        $href = 'https://example.com/insert-target';
+        $anchor = 'AnchorWord';
+        $context = 'cached, ohne die Invalidierungs-Strategie mitzudenken, baut AnchorWord';
+
+        $bard = [
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => "$anchor. Ein neuer Anfangssatz."],
+            ]],
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => 'cached, ohne die Invalidierungs-Strategie mitzudenken, baut '.$anchor],
+            ]],
+        ];
+        $md = "$anchor. Ein neuer Anfangssatz.\n\ncached, ohne die Invalidierungs-Strategie mitzudenken, baut $anchor";
+        $replicator = [
+            ['id' => 'set-1', 'type' => 'text_block', 'enabled' => true, 'body' => $bard],
+        ];
+
+        $bardOut = BardLinkInserter::insertLinkWithHref($bard, $anchor, $href, false, $context);
+        $mdOut = BardLinkInserter::insertLinkIntoMarkdown($md, $anchor, $href, false, $context);
+        $repOut = BardLinkInserter::processReplicatorWithHref($replicator, $anchor, $href, false, $context);
+
+        $this->assertNotNull($bardOut, 'Bard: should insert when context matches');
+        $this->assertNotNull($mdOut, 'Markdown: should insert when context matches');
+        $this->assertNotNull($repOut, 'Replicator: should insert when context matches');
+
+        // Bard: first paragraph's sole text-node should NOT have a link mark;
+        // second paragraph's wrapped node should.
+        $firstWrapped = !empty($bardOut[0]['content'][0]['marks'] ?? null);
+        $secondWrapped = false;
+        foreach ($bardOut[1]['content'] ?? [] as $c) {
+            if (($c['text'] ?? '') === $anchor && !empty($c['marks'] ?? null)) $secondWrapped = true;
+        }
+        $this->assertFalse($firstWrapped, 'Bard: first occurrence (prepended) MUST NOT be wrapped');
+        $this->assertTrue($secondWrapped, 'Bard: second occurrence (in matched sentence) MUST be wrapped');
+
+        // Markdown: scan for [AnchorWord](url) occurrences; should land in the
+        // second paragraph's text only.
+        $linkPattern = '/\['.$anchor.'\]\(' . preg_quote($href, '/') . '\)/u';
+        preg_match_all($linkPattern, $mdOut, $matches, PREG_OFFSET_CAPTURE);
+        $this->assertCount(1, $matches[0], 'Markdown: exactly one wrapping');
+        $wrappedAt = $matches[0][0][1];
+        $secondParaStart = strpos($md, 'cached');
+        $this->assertGreaterThanOrEqual($secondParaStart, $wrappedAt, 'Markdown: wrap must land in the second paragraph (matched sentence), not the first');
+    }
+
+    public function test_insert_parity_context_not_in_doc_skips(): void
+    {
+        // Captured sentence no longer present in the entry → refuse to wrap
+        // anything (= what the user wants instead of silent wrong wrap).
+        $href = 'https://example.com/insert-target';
+        $anchor = 'AnchorWord';
+        $context = 'this exact sentence does not exist anywhere in the doc';
+
+        $bard = [
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => "Lorem $anchor ipsum"],
+            ]],
+        ];
+        $md = "Lorem $anchor ipsum";
+        $replicator = [
+            ['id' => 'set-1', 'type' => 'text_block', 'enabled' => true, 'body' => $bard],
+        ];
+
+        $this->assertNull(BardLinkInserter::insertLinkWithHref($bard, $anchor, $href, false, $context), 'Bard: must skip when context absent');
+        $this->assertNull(BardLinkInserter::insertLinkIntoMarkdown($md, $anchor, $href, false, $context), 'Markdown: must skip when context absent');
+        $this->assertNull(BardLinkInserter::processReplicatorWithHref($replicator, $anchor, $href, false, $context), 'Replicator: must skip when context absent');
+    }
+
     /* ─────────── helpers ─────────── */
 
     protected function assertMutatorParity(

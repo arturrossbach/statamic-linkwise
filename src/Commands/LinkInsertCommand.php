@@ -217,6 +217,15 @@ class LinkInsertCommand extends Command
                     $sourceEntryId,
                     $anchorText,
                     $effectiveHref,
+                    caseSensitive: false,
+                    save: true,
+                    // Visual-truth guard (2026-05-10): when the suggestion's
+                    // scan captured a specific sentence context, BardLinkInserter
+                    // must wrap the anchor INSIDE that sentence, not the first
+                    // matching occurrence anywhere in the entry. Prevents
+                    // silent wrong-position writes when a parallel edit
+                    // prepended a 2nd occurrence of the anchor.
+                    expectedSentenceContext: $insertion['sentence_context'] ?? null,
                 );
 
                 if ($success) {

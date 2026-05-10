@@ -33,10 +33,20 @@ class BardLinkInserter
     /**
      * Insert a link with a custom href (for external URLs or entry references).
      */
-    public static function insertLinkWithHref(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false): ?array
+    /**
+     * @param  string|null  $expectedSentenceContext  When set, the anchor MUST
+     *   sit inside a text region whose surrounding text contains the supplied
+     *   sentence context. This is the visual-truth guard: scan captured the
+     *   anchor inside sentence X; if the user later prepended a SECOND
+     *   occurrence of the anchor at the start of the entry, the naive
+     *   "wrap first match" behaviour would silently wrap the new one. With
+     *   the guard, the wrap only happens at the position whose surrounding
+     *   text matches the captured context. Mismatch → return null.
+     */
+    public static function insertLinkWithHref(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
         foreach ($bardContent as $i => $node) {
-            $result = static::processNode($node, $anchorText, $href, $caseSensitive);
+            $result = static::processNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
             if ($result !== null) {
                 $bardContent[$i] = $result;
@@ -356,7 +366,7 @@ class BardLinkInserter
         return $modified ? $sets : null;
     }
 
-    public static function insertLinkIntoEntryWithHref(string $sourceEntryId, string $anchorText, string $href, bool $caseSensitive = false, bool $save = true): bool
+    public static function insertLinkIntoEntryWithHref(string $sourceEntryId, string $anchorText, string $href, bool $caseSensitive = false, bool $save = true, ?string $expectedSentenceContext = null): bool
     {
         [$entry, $hash] = SafeEntrySaver::load($sourceEntryId);
 
@@ -374,7 +384,7 @@ class BardLinkInserter
             $value = $entry->get($handle);
 
             if ($field->type() === 'bard' && is_array($value) && ! empty($value)) {
-                $modified = static::insertLinkWithHref($value, $anchorText, $href, $caseSensitive);
+                $modified = static::insertLinkWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                 if ($modified !== null) {
                     $entry->set($handle, $modified);
@@ -385,7 +395,7 @@ class BardLinkInserter
                     return true;
                 }
             } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
-                $modified = static::processReplicatorWithHref($value, $anchorText, $href, $caseSensitive);
+                $modified = static::processReplicatorWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                 if ($modified !== null) {
                     $entry->set($handle, $modified);
@@ -403,7 +413,7 @@ class BardLinkInserter
                 // `| markdown`. A future opt-in (`linkwise: true` in the
                 // blueprint) can re-enable per-field coverage for users who
                 // know their template renders the field as markdown.
-                $modified = static::insertLinkIntoMarkdown($value, $anchorText, $href, $caseSensitive);
+                $modified = static::insertLinkIntoMarkdown($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                 if ($modified !== null) {
                     $entry->set($handle, $modified);
@@ -520,7 +530,7 @@ class BardLinkInserter
         return $result;
     }
 
-    public static function insertLinkIntoMarkdown(string $markdown, string $anchorText, string $href, bool $caseSensitive = false): ?string
+    public static function insertLinkIntoMarkdown(string $markdown, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?string
     {
         // Check if anchor text is already linked in Markdown
         $escapedAnchor = preg_quote($anchorText, '/');
@@ -542,6 +552,22 @@ class BardLinkInserter
             foreach ($matches[0] as [$text, $byteOffset]) {
                 $charOffset = mb_strlen(substr($markdown, 0, $byteOffset));
                 $skipRanges[] = [$charOffset, $charOffset + mb_strlen($text)];
+            }
+        }
+
+        // Context-fingerprint guard — see findAndLinkInChildren for full
+        // rationale. When the scan captured the anchor in a specific
+        // sentence, the wrap MUST land inside that sentence's range,
+        // not on a different occurrence of the same anchor.
+        $contextRange = null;
+        if ($expectedSentenceContext !== null && $expectedSentenceContext !== '') {
+            $needle = trim(str_replace(['…', '...'], '', $expectedSentenceContext));
+            if ($needle !== '' && mb_strlen($needle) >= mb_strlen($anchorText)) {
+                $rangeStart = mb_stripos($markdown, $needle);
+                if ($rangeStart === false) {
+                    return null; // sentence gone — refuse to wrap blindly
+                }
+                $contextRange = ['start' => $rangeStart, 'end' => $rangeStart + mb_strlen($needle)];
             }
         }
 
@@ -569,7 +595,10 @@ class BardLinkInserter
                     }
                 }
 
-                if (! $inSkipRange) {
+                $outsideContextRange = $contextRange !== null
+                    && ($pos < $contextRange['start'] || $pos + $anchorLen > $contextRange['end']);
+
+                if (! $inSkipRange && ! $outsideContextRange) {
                     $actualText = mb_substr($markdown, $pos, $anchorLen);
                     $before = mb_substr($markdown, 0, $pos);
                     $after = mb_substr($markdown, $pos + $anchorLen);
@@ -590,7 +619,7 @@ class BardLinkInserter
      * inserts in isolation without disk-mutating an entry. Production code
      * still goes through insertLinkIntoEntryWithHref.
      */
-    public static function processReplicatorWithHref(array $sets, string $anchorText, string $href, bool $caseSensitive = false): ?array
+    public static function processReplicatorWithHref(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
         foreach ($sets as $i => $set) {
             if (! is_array($set)) {
@@ -615,7 +644,7 @@ class BardLinkInserter
                 }
 
                 if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $modified = static::insertLinkWithHref($value, $anchorText, $href, $caseSensitive);
+                    $modified = static::insertLinkWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                     if ($modified !== null) {
                         $sets[$i][$key] = $modified;
@@ -623,7 +652,7 @@ class BardLinkInserter
                         return $sets;
                     }
                 } elseif (static::looksLikeReplicatorContent($value)) {
-                    $modified = static::processReplicatorWithHref($value, $anchorText, $href, $caseSensitive);
+                    $modified = static::processReplicatorWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                     if ($modified !== null) {
                         $sets[$i][$key] = $modified;
@@ -641,7 +670,7 @@ class BardLinkInserter
      * Process a single ProseMirror node, looking for anchor text in its children.
      * Returns the modified node, or null if not found.
      */
-    protected static function processNode(array $node, string $anchorText, string $href, bool $caseSensitive = false): ?array
+    protected static function processNode(array $node, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
         // Don't recurse into nodes whose contents must stay untouched. Code blocks
         // are the obvious one — wrapping inline links inside SQL/JS code corrupts
@@ -652,7 +681,7 @@ class BardLinkInserter
 
         // Process nodes with content (paragraph, heading, etc.)
         if (isset($node['content']) && is_array($node['content'])) {
-            $result = static::findAndLinkInChildren($node['content'], $anchorText, $href, $caseSensitive);
+            $result = static::findAndLinkInChildren($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
             if ($result !== null) {
                 $node['content'] = $result;
@@ -662,7 +691,7 @@ class BardLinkInserter
 
             // Recurse into child nodes that may have their own content
             foreach ($node['content'] as $j => $child) {
-                $result = static::processNode($child, $anchorText, $href, $caseSensitive);
+                $result = static::processNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                 if ($result !== null) {
                     $node['content'][$j] = $result;
@@ -679,7 +708,7 @@ class BardLinkInserter
      * Search for anchor text across child text nodes and insert a link mark.
      * Handles text spanning across multiple text nodes and node splitting.
      */
-    protected static function findAndLinkInChildren(array $children, string $anchorText, string $href, bool $caseSensitive = false): ?array
+    protected static function findAndLinkInChildren(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
         // Build concatenated text from child text nodes
         $fullText = '';
@@ -704,6 +733,31 @@ class BardLinkInserter
             $fullText .= $text;
         }
 
+        // Context-fingerprint guard: when the caller knows the sentence the
+        // anchor was scanned in, the wrap MUST land at a position whose
+        // surrounding text contains that sentence. If the entry now has a
+        // SECOND occurrence of the anchor (e.g. user prepended one), the
+        // naive "wrap first match" would silently mutate the wrong one.
+        // We compute the allowed character range here once; positions
+        // outside it are rejected below.
+        $contextRange = null;
+        if ($expectedSentenceContext !== null && $expectedSentenceContext !== '') {
+            // The scan often returns sentence-context with a leading "…" /
+            // ellipsis (ContextExtractor truncation). Strip those before
+            // matching so a literal substring search lines up.
+            $needle = trim(str_replace(['…', '...'], '', $expectedSentenceContext));
+            if ($needle !== '' && mb_strlen($needle) >= mb_strlen($anchorText)) {
+                $rangeStart = mb_stripos($fullText, $needle);
+                if ($rangeStart === false) {
+                    // Sentence not present in current content → scan is
+                    // stale, refuse to wrap anything. Caller decides what
+                    // to do (toast: "context changed, refresh and retry").
+                    return null;
+                }
+                $contextRange = ['start' => $rangeStart, 'end' => $rangeStart + mb_strlen($needle)];
+            }
+        }
+
         $anchorLen = mb_strlen($anchorText);
         $offset = 0;
         $pos = null;
@@ -724,6 +778,18 @@ class BardLinkInserter
 
             if ($valid && str_contains(mb_substr($fullText, $found, $anchorLen), "\0")) {
                 $valid = false;
+            }
+
+            // Context-fingerprint guard — when caller supplied the captured
+            // sentence, the match must sit inside its [start, end] range.
+            // Outside-range matches (= a different occurrence of the anchor)
+            // are silently rejected, preventing the visual-truth bug where
+            // the modal hints at sentence X but the system wraps a different
+            // occurrence elsewhere in the entry.
+            if ($valid && $contextRange !== null) {
+                if ($found < $contextRange['start'] || $found + $anchorLen > $contextRange['end']) {
+                    $valid = false;
+                }
             }
 
             if ($valid) {

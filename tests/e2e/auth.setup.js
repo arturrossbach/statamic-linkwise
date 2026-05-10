@@ -5,14 +5,19 @@ const AUTH_FILE = 'test-results/.auth/user.json';
 setup('authenticate', async ({ page }) => {
     await page.goto('/cp/auth/login');
 
-    // Statamic 6's login form uses custom Vue textbox components without
-    // name=/type=/aria-label. The form has exactly two textboxes — first is
-    // email, second is password. Use positional indexing as the only stable
-    // anchor we have.
-    const textboxes = page.getByRole('textbox');
-    await textboxes.first().waitFor({ state: 'visible', timeout: 10000 });
-    await textboxes.nth(0).fill('admin@test.com');
-    await textboxes.nth(1).fill('123qweasd');
+    // Statamic 6's login form: previous positional .nth(1).fill() collapsed
+    // both values into the email box (whole "admin@test.com123qweasd" landed
+    // in one box, password box stayed empty). Now click each box explicitly
+    // before fill so focus is established, and wait for BOTH textboxes to
+    // exist so the password box isn't skipped before it renders.
+    const emailBox = page.getByRole('textbox').nth(0);
+    const passwordBox = page.getByRole('textbox').nth(1);
+    await emailBox.waitFor({ state: 'visible', timeout: 10000 });
+    await passwordBox.waitFor({ state: 'visible', timeout: 10000 });
+    await emailBox.click();
+    await emailBox.fill('admin@test.com');
+    await passwordBox.click();
+    await passwordBox.fill('123qweasd');
 
     await page.click('button:has-text("Continue")');
 
