@@ -77,6 +77,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Dev Mode (Linkwise-internal use only)
+    |--------------------------------------------------------------------------
+    |
+    | Surfaces the BARD badge in CP entry tables so the addon developer
+    | can pick out Bard-content entries vs Markdown-only ones at a glance
+    | when testing field-type-specific code paths. NOT useful to end users
+    | — leave at false. Enable via LINKWISE_DEV=true in .env.
+    |
+    */
+    'dev_mode' => env('LINKWISE_DEV', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Minimum Phrase Words
     |--------------------------------------------------------------------------
     |

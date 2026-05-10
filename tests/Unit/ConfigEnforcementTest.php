@@ -33,6 +33,7 @@ class ConfigEnforcementTest extends TestCase
             'ai.api_key',     // Sprint 16: AI feature
             'ai.model',       // Sprint 16: AI feature
             'broken_links',   // Parent key — sub-keys are checked
+            'dev_mode',       // Linkwise-internal — only consumed in ServiceProvider's Inertia::share (which the test deliberately excludes); switches the BARD badge on for the addon developer.
         ];
 
         foreach ($this->configKeys as $key) {

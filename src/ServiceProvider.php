@@ -74,7 +74,10 @@ class ServiceProvider extends AddonServiceProvider
         // Computed once per request via Inertia::share so the 8 endpoint
         // controllers don't need to thread the prop individually.
         \Inertia\Inertia::share('linkwise', function () {
-            $devMode = app()->environment('local');
+            // Opt-in via LINKWISE_DEV=true (NOT app()->environment('local')) —
+            // a customer site running locally during their dev cycle MUST NOT
+            // see the BARD badge. Only the addon developer sets the env var.
+            $devMode = (bool) config('linkwise.dev_mode', false);
             return [
                 'dev_mode' => $devMode,
                 'bard_entry_ids' => $devMode ? $this->detectBardEntryIds() : [],
