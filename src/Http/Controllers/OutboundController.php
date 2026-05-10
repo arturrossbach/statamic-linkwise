@@ -116,10 +116,17 @@ class OutboundController extends CpController
         // LinkInsertCommand expects each item to carry its own
         // source_entry_id (so its loop body works for both modes); inject
         // the fixed source here before queuing the payload.
+        //
+        // sentence_context MUST flow through — BardLinkInserter uses it
+        // as the visual-truth fingerprint to wrap the right occurrence
+        // (commit c46cce3). Forgetting it here silently disabled the
+        // entire fix; verified empirically 2026-05-10.
         $insertions = array_map(fn ($i) => [
             'source_entry_id' => $entryId,
-            'target_entry_id' => $i['target_entry_id'],
+            'target_entry_id' => $i['target_entry_id'] ?? null,
+            'href' => $i['href'] ?? null,
             'anchor_text' => $i['anchor_text'],
+            'sentence_context' => $i['sentence_context'] ?? null,
         ], $validated['insertions']);
 
         $user = auth()->user();

@@ -879,6 +879,11 @@ export default {
             const insertions = groups.map(g => ({
                 target_entry_id: g._selectedTarget,
                 anchor_text: g._anchor,
+                // Visual-truth fingerprint: BardLinkInserter wraps the anchor
+                // INSIDE this sentence, not the first match anywhere. Without
+                // it, prepending a 2nd occurrence in a parallel edit causes
+                // silent wrong-position writes (verified bug 2026-05-10).
+                sentence_context: g.sentence_context || '',
             }));
 
             // Same client-side cap as Inbound — backend cap is 200,
