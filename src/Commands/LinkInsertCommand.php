@@ -354,6 +354,10 @@ class LinkInsertCommand extends Command
             // toast carry the real numbers + reason. Real bug 2026-05-10:
             // outbound insert with succeeded=0/skipped=1 produced NO toast
             // at all because the layer-adapter saw zeroes everywhere.
+            //
+            // 'heartbeat' makes the run uniquely identifiable in the toast-
+            // signature so repeated identical-outcome runs (e.g. skipped:1
+            // on the same anchor twice) don't get dedup-suppressed.
             'extra' => [
                 'succeeded' => $succeeded,
                 'skipped' => $skipped,
@@ -362,6 +366,7 @@ class LinkInsertCommand extends Command
                 'entry_title' => $entryTitle,
                 'started_by' => $startedBy,
                 'started_by_id' => $startedById,
+                'heartbeat' => time(),
             ],
             'started_by' => $startedBy,
             'started_by_id' => $startedById,

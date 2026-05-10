@@ -826,6 +826,17 @@ export default {
                     kindSig = `:m${tExtra.source_mode || ''}:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
                 } else if (status.kind === 'bulkunlink') {
                     kindSig = `:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
+                } else if (status.kind === 'outboundinsert' || status.kind === 'inboundinsert') {
+                    // Without this branch, repeated outbound/inbound inserts
+                    // with identical succeeded/skipped numbers (very common
+                    // case: skipped:1 from anchor-not-found over and over)
+                    // produced the SAME signature and the second + every
+                    // subsequent toast got dedup-suppressed. User saw the
+                    // banner blink and nothing else. Real bug 2026-05-10.
+                    // started_by_id makes the signature unique per session/
+                    // user; combined with heartbeat (a per-run timestamp)
+                    // every actual run gets a fresh signature.
+                    kindSig = `:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}:hb${tExtra.heartbeat || tExtra.started_by_id || ''}`;
                 }
                 const signature = `${status.kind}:${phase}:${status.current}:${status.total}:${status.message || ''}${kindSig}`;
                 const SEEN_KEY = 'linkwise:bulkToastShown';
