@@ -181,6 +181,7 @@
                                 <td>
                                     <a v-if="s.source_edit_url" :href="s.source_edit_url" target="_blank" class="font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">{{ s.source_title }}</a>
                                     <span v-else class="font-medium text-gray-900 dark:text-gray-100">{{ s.source_title }}</span>
+                                    <BardBadge v-if="s.source_entry_id" :entry-id="s.source_entry_id" class="ml-1.5" />
                                     <div class="text-xs text-gray-400">{{ s.source_collection }}</div>
                                     <div v-if="s._status === 'failed' && s._error" class="text-xs text-red-500 mt-1">{{ s._error }}</div>
                                 </td>
@@ -271,6 +272,7 @@
                                         <div class="flex items-center gap-1">
                                             <a v-if="selectedTarget(group)?.target_edit_url" :href="selectedTarget(group).target_edit_url" target="_blank" class="text-xs font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">{{ selectedTarget(group)?.target_title }}</a>
                                             <span v-else class="text-xs font-medium text-gray-900 dark:text-gray-100">{{ selectedTarget(group)?.target_title }}</span>
+                                            <BardBadge v-if="selectedTarget(group)?.target_entry_id" :entry-id="selectedTarget(group).target_entry_id" />
                                             <button
                                                 v-if="group.targets.length > 1 && group._status === 'pending'"
                                                 @click="group._expanded = !group._expanded"
@@ -307,6 +309,7 @@
                                             <div class="flex-1 text-xs">
                                                 <a v-if="target.target_edit_url" :href="target.target_edit_url" target="_blank" class="font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400" @click.stop>{{ target.target_title }}</a>
                                                 <span v-else class="font-medium text-gray-900 dark:text-gray-100">{{ target.target_title }}</span>
+                                                <BardBadge v-if="target.target_entry_id" :entry-id="target.target_entry_id" class="ml-1.5" />
                                                 <span class="text-gray-400 ml-2">{{ target.target_collection }}</span>
                                             </div>
                                         </div>
@@ -326,10 +329,11 @@ import { Panel, Button, Stack, Icon, Alert } from '@statamic/cms/ui';
 import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
 import SuggestedPhrase from '../shared/SuggestedPhrase.vue';
+import BardBadge from '../shared/BardBadge.vue';
 import { bulkState } from '../../services/bulkOperationService.js';
 
 export default {
-    components: { Panel, Button, Stack, Icon, Alert, HelpIcon, SortableHeader, SuggestedPhrase },
+    components: { Panel, Button, Stack, Icon, Alert, HelpIcon, SortableHeader, SuggestedPhrase, BardBadge },
 
     props: {
         modal: { type: Object, default: null },
