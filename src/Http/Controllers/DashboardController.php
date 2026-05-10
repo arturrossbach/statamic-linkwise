@@ -914,6 +914,13 @@ class DashboardController extends CpController
             'replacements.*.field_type' => 'nullable|string|max:40',
             'replacements.*.occurrence_index' => 'nullable|integer',
             'replacements.*.search' => 'nullable|string|max:2048',
+            // Anchor-fingerprint guard. Without this validation rule
+            // Laravel strips anchor_text from $validated, the cache-payload
+            // never carries it, and BulkUnlinkCommand's applySelected call
+            // can't enforce the anchor check — the system would silently
+            // unlink the wrong link if its position-index happened to match
+            // a different link with the same URL (real bug, 2026-05-09).
+            'replacements.*.anchor_text' => 'nullable|string|max:512',
             // Pre-flight hash check — same defensive pattern the other 6
             // bulk write paths (DetailUnlink, LinkInsert, UrlChangerApply,
             // ApplyRule, etc.) enforce. Optional because the legacy

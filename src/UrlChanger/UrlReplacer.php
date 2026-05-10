@@ -77,6 +77,13 @@ class UrlReplacer
                 $index = (int) ($replacement['occurrence_index'] ?? 0);
                 // Per-replacement search allows batching items with different URLs
                 $effectiveSearch = $replacement['search'] ?? $search;
+                // Anchor-fingerprint guard: scan recorded which text the link
+                // wrapped. Pre-flight checks index + url, but if the user
+                // moved the link to wrap a different text (or another link
+                // with the same URL was added), occurrence_index alone matches
+                // the wrong link. Empty/missing → no anchor check (legacy
+                // callers that didn't capture anchor_text in the scan).
+                $expectedAnchor = ! empty($replacement['anchor_text']) ? (string) $replacement['anchor_text'] : null;
 
                 // If field/field_type provided, target that specific field.
                 // Otherwise, auto-detect by scanning all blueprint fields.
@@ -99,7 +106,7 @@ class UrlReplacer
                     $value = $entry->get($handle);
 
                     if ($fieldType === 'bard' && is_array($value)) {
-                        [$value, $replaced] = $this->replaceNthInBard($value, $effectiveSearch, $oldUrl, $newUrl, $index);
+                        [$value, $replaced] = $this->replaceNthInBard($value, $effectiveSearch, $oldUrl, $newUrl, $index, $expectedAnchor);
                         if ($replaced) {
                             $entry->set($handle, $value);
                             $modified = true;
@@ -108,7 +115,7 @@ class UrlReplacer
                             break;
                         }
                     } elseif ($fieldType === 'replicator' && is_array($value)) {
-                        [$value, $replaced] = $this->replaceNthInReplicator($value, $effectiveSearch, $oldUrl, $newUrl, $index);
+                        [$value, $replaced] = $this->replaceNthInReplicator($value, $effectiveSearch, $oldUrl, $newUrl, $index, $expectedAnchor);
                         if ($replaced) {
                             $entry->set($handle, $value);
                             $modified = true;
@@ -117,7 +124,7 @@ class UrlReplacer
                             break;
                         }
                     } elseif ($fieldType === 'markdown' && is_string($value)) {
-                        [$value, $replaced] = $this->replaceNthInMarkdown($value, $oldUrl, $newUrl, $index);
+                        [$value, $replaced] = $this->replaceNthInMarkdown($value, $oldUrl, $newUrl, $index, $expectedAnchor);
                         if ($replaced) {
                             $entry->set($handle, $value);
                             $modified = true;
@@ -145,33 +152,25 @@ class UrlReplacer
      * Replace the Nth matching link in Bard content.
      * Uses the same domain-based matching as findInBard so indices align.
      *
-     * @param  string  $search  The original search term (domain or URL) used in preview
-     * @param  string  $oldUrl  The exact href of the link to replace
+     * @param  string  $search           The original search term (domain or URL) used in preview
+     * @param  string  $oldUrl           The exact href of the link to replace
+     * @param  string|null  $expectedAnchor  When set, the link's wrapping text-node text MUST
+     *                                       equal this string. Mismatch → skip without mutation.
+     *                                       This is the anchor-fingerprint guard: scan captures
+     *                                       anchor "Original" → user moves the link to a node
+     *                                       wrapping "Different" → without this check, the index
+     *                                       still matches (occurrence_index=0 is the only URL
+     *                                       match) and the system silently unlinks the wrong
+     *                                       text. With this check, the skip + clear error
+     *                                       surfaces and the user re-scans.
      * @return array{0: array, 1: bool}
      */
-    public function replaceNthInBard(array $bardContent, string $search, string $oldUrl, string $newUrl, int $targetIndex): array
+    public function replaceNthInBard(array $bardContent, string $search, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
     {
-        // Indexed replace — find the link at exactly $targetIndex and verify
-        // its href matches $oldUrl before mutating.
-        //
-        // Earlier versions had a Phase-2 "opportunistic" fallback that, on
-        // index miss, would scan for the FIRST link with $oldUrl anywhere in
-        // the entry and replace that. Removed 2026-05-09 — the fallback
-        // silently mutated the wrong link when:
-        //   - the user had multiple links to the same URL (one preview entry
-        //     became "remove the first one" regardless of which one the user
-        //     was looking at);
-        //   - structural shifts between scan and apply moved the target;
-        //   - Auto-Linker writes between scan and apply (no hash conflict
-        //     because we wrote it ourselves) shifted indices.
-        // Now: index miss returns (false). Caller surfaces "position changed
-        // since scan, refresh required" — user verifies the refreshed scan
-        // before clicking again. Worst case is a skip + retry; the worst
-        // case of the old behavior was silent data mutation.
         $counter = ['i' => 0, 'replaced' => false, 'actually_replaced' => false];
 
         foreach ($bardContent as $i => $node) {
-            $bardContent[$i] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+            $bardContent[$i] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor);
             if ($counter['actually_replaced']) {
                 return [$bardContent, true];
             }
@@ -180,7 +179,7 @@ class UrlReplacer
         return [$bardContent, false];
     }
 
-    protected function replaceNthInNode(array $node, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter): array
+    protected function replaceNthInNode(array $node, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter, ?string $expectedAnchor = null): array
     {
         if ($counter['replaced']) {
             return $node;
@@ -190,12 +189,21 @@ class UrlReplacer
             foreach ($node['marks'] as $j => $mark) {
                 if (($mark['type'] ?? '') === 'link') {
                     $href = $mark['attrs']['href'] ?? '';
-                    // Count ALL links matching the search domain (same as findInNode)
                     if ($this->hrefMatches($href, $search)) {
                         if ($counter['i'] === $targetIndex) {
-                            if ($href === $oldUrl) {
+                            // Anchor-fingerprint guard. If the scan recorded
+                            // the link as wrapping "Original" but this node
+                            // wraps "Different", the user is looking at stale
+                            // data — refuse to mutate. occurrence_index alone
+                            // can't distinguish between "the same link, moved"
+                            // and "a different link with the same URL", which
+                            // is the same thing once the user only has ONE
+                            // link to that URL: the index matches no matter
+                            // where they moved it.
+                            $nodeText = (string) ($node['text'] ?? '');
+                            $anchorMismatch = $expectedAnchor !== null && $nodeText !== $expectedAnchor;
+                            if (! $anchorMismatch && $href === $oldUrl) {
                                 if ($newUrl === UrlHelper::UNLINK) {
-                                    // Remove the link mark, keep the text
                                     array_splice($node['marks'], $j, 1);
                                     if (empty($node['marks'])) {
                                         unset($node['marks']);
@@ -217,21 +225,16 @@ class UrlReplacer
 
         if (isset($node['content'])) {
             foreach ($node['content'] as $i => $child) {
-                $node['content'][$i] = $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+                $node['content'][$i] = $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor);
                 if ($counter['replaced']) {
                     return $node;
                 }
             }
         }
 
-        // Set-aware Nth recursion. Counter is shared so the Nth match
-        // is consistent with findInNode's count (which now also walks
-        // sets). A target_index that points at an in-set occurrence
-        // would previously fall to Phase-2 fallback and silently rewrite
-        // a different occurrence; now it rewrites the right one.
         return \Arturrossbach\Linkwise\Support\BardWalker::mapSetChildren(
             $node,
-            fn (array $child) => $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter),
+            fn (array $child) => $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor),
             fn (): bool => $counter['replaced'],
         );
     }
@@ -242,20 +245,16 @@ class UrlReplacer
      *
      * @return array{0: array, 1: bool}
      */
-    public function replaceNthInReplicator(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex): array
+    public function replaceNthInReplicator(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
     {
-        // Phase 1: indexed replace
         $counter = ['i' => 0, 'replaced' => false, 'actually_replaced' => false];
-        $sets = $this->replaceNthInReplicatorRecursive($sets, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+        $sets = $this->replaceNthInReplicatorRecursive($sets, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor);
 
-        // No Phase-2 opportunistic fallback (removed 2026-05-09, see
-        // replaceNthInBard for full rationale). Index miss returns false;
-        // caller surfaces "position changed since scan, refresh required".
         return [$sets, $counter['actually_replaced']];
     }
 
 
-    protected function replaceNthInReplicatorRecursive(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter): array
+    protected function replaceNthInReplicatorRecursive(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter, ?string $expectedAnchor = null): array
     {
         foreach ($sets as $i => $set) {
             if (! is_array($set) || $counter['replaced']) {
@@ -272,7 +271,7 @@ class UrlReplacer
 
                 if (ProseMirrorTypes::looksLikeBardContent($value)) {
                     foreach ($value as $ni => $node) {
-                        $value[$ni] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+                        $value[$ni] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor);
                         if ($counter['replaced']) {
                             $sets[$i][$key] = $value;
 
@@ -280,7 +279,7 @@ class UrlReplacer
                         }
                     }
                 } elseif (isset($value[0]['type'], $value[0]['id'])) {
-                    $sets[$i][$key] = $this->replaceNthInReplicatorRecursive($value, $search, $oldUrl, $newUrl, $targetIndex, $counter);
+                    $sets[$i][$key] = $this->replaceNthInReplicatorRecursive($value, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor);
                     if ($counter['replaced']) {
                         return $sets;
                     }
@@ -296,18 +295,21 @@ class UrlReplacer
      *
      * @return array{0: string, 1: bool}
      */
-    public function replaceNthInMarkdown(string $markdown, string $oldUrl, string $newUrl, int $targetIndex): array
+    public function replaceNthInMarkdown(string $markdown, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
     {
-        // Phase 1: indexed replace.
         $counter = 0;
         $actuallyReplaced = false;
         $escaped = preg_quote($oldUrl, '#');
 
         $result = preg_replace_callback(
             '#\[([^\[\]]*)\]\('.$escaped.'\)#',
-            function ($match) use ($newUrl, $targetIndex, &$counter, &$actuallyReplaced) {
+            function ($match) use ($newUrl, $targetIndex, $expectedAnchor, &$counter, &$actuallyReplaced) {
                 if ($counter === $targetIndex) {
                     $counter++;
+                    // Anchor-fingerprint guard. See replaceNthInBard rationale.
+                    if ($expectedAnchor !== null && $match[1] !== $expectedAnchor) {
+                        return $match[0]; // hit position, but anchor differs — skip
+                    }
                     $actuallyReplaced = true;
 
                     if ($newUrl === UrlHelper::UNLINK) {
@@ -323,9 +325,6 @@ class UrlReplacer
             $markdown,
         );
 
-        // No Phase-2 opportunistic fallback (removed 2026-05-09, see
-        // replaceNthInBard for full rationale). Index miss leaves
-        // $result equal to the unchanged input and returns false.
         return [$result, $actuallyReplaced];
     }
 

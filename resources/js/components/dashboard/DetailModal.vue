@@ -454,6 +454,7 @@ export default {
                                 field_type: '',
                                 matched_url: item.url,
                                 occurrence_index: item.occurrence_index ?? 0,
+                                anchor_text: item.anchor_text || '',
                                 new_url: UNLINK_SENTINEL,
                             }],
                             entryHash ? { [entryId]: entryHash } : {},

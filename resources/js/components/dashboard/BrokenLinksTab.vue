@@ -792,6 +792,11 @@ export default {
                 field_type: link.field_type || '',
                 matched_url: link.url,
                 occurrence_index: 0,
+                // Anchor-fingerprint guard: backend refuses to mutate if the
+                // link at occurrence_index N now wraps a different text than
+                // the scan recorded. Without this, a moved/re-anchored link
+                // gets silently unlinked because the URL alone matches.
+                anchor_text: link.anchor_text || '',
                 new_url: UNLINK_SENTINEL,
                 search: link.url,
             }));
@@ -990,6 +995,7 @@ export default {
                         field_type: link.field_type || '',
                         matched_url: link.url,
                         occurrence_index: 0,
+                        anchor_text: link.anchor_text || '',
                         new_url: UNLINK_SENTINEL,
                     }],
                     this.localHashes,
@@ -1087,6 +1093,7 @@ export default {
                         field_type: link.field_type || '',
                         matched_url: link.url,
                         occurrence_index: 0,
+                        anchor_text: link.anchor_text || '',
                         new_url: this.replaceUrl.trim(),
                     }],
                     this.localHashes,
