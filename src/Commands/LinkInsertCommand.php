@@ -347,6 +347,22 @@ class LinkInsertCommand extends Command
             'errors' => $errors,
             'source_mode' => $sourceMode,
             'entry_title' => $entryTitle,
+            // 'extra' is what LinkwiseLayout's completionLabel/completionVariant
+            // read. Without it ($status.extra || {}), succeeded/skipped/errors
+            // are invisible to the toast helper → wrong success-variant +
+            // generic copy. Mirror the top-level fields here so banner +
+            // toast carry the real numbers + reason. Real bug 2026-05-10:
+            // outbound insert with succeeded=0/skipped=1 produced NO toast
+            // at all because the layer-adapter saw zeroes everywhere.
+            'extra' => [
+                'succeeded' => $succeeded,
+                'skipped' => $skipped,
+                'errors' => $errors,
+                'source_mode' => $sourceMode,
+                'entry_title' => $entryTitle,
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+            ],
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
         ], 300);

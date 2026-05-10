@@ -627,10 +627,17 @@ export default {
                 const baseUrl = mode === 'inbound'
                     ? this.inboundSuggestionsBaseUrl
                     : this.outboundSuggestionsBaseUrl;
-                const url = baseUrl.replace('__ID__', entry.id);
+                // Cache-bust: every modal-open (including a re-open after
+                // a parallel-edit + close) MUST get fresh suggestions.
+                // Browsers and intermediate proxies sometimes cache GETs;
+                // a unique ?_ ts= param defeats both. Cheap insurance.
+                const url = baseUrl.replace('__ID__', entry.id) + (baseUrl.includes('?') ? '&' : '?') + '_ts=' + Date.now();
 
                 const response = await fetch(url, {
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Cache-Control': 'no-cache',
+                    },
                 });
 
                 if (response.ok) {
