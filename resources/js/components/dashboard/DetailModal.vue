@@ -390,12 +390,37 @@ export default {
             });
 
             // Watch for terminal phase — close modal local-state then.
+            // Snapshot what we're about to unlink so the terminal watcher
+            // can mark them _unlinked when the bulk completes. Without this,
+            // rows stay visible + interactive after a successful unlink and
+            // confuse the user into thinking the operation didn't run.
+            const itemsBeingUnlinked = items;
+
             const stop = this.$watch(
                 () => bulkState.active,
                 (current, previous) => {
                     if (previous?.kind === 'detailunlink' && current === null) {
                         stop();
                         this.unlinking = false;
+
+                        // Only mark items as _unlinked when we know the bulk
+                        // landed cleanly. Skipped > 0 means the per-item
+                        // outcome is mixed (some written, some refused) and
+                        // we cannot tell from completion stats alone WHICH
+                        // items succeeded — marking all of them as _unlinked
+                        // would lie about the skipped ones (they still
+                        // carry the link). Honest fallback: leave the rows
+                        // alone and tell the user to refresh.
+                        const completion = bulkState.lastCompletion;
+                        const skipped = completion?.kind === 'detailunlink'
+                            ? (completion?.extra?.skipped ?? 0)
+                            : 0;
+                        if (completion?.kind === 'detailunlink' && skipped === 0) {
+                            itemsBeingUnlinked.forEach(it => { it._unlinked = true; });
+                        } else if (skipped > 0) {
+                            Statamic.$toast.info(`${skipped} item(s) skipped — close + reopen the modal to see current state.`);
+                        }
+
                         if (this.modal) this.selected = [];
                     }
                 },
