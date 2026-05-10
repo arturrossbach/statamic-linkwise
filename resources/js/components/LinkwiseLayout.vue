@@ -906,15 +906,26 @@ export default {
                     Statamic.$toast.success(message);
                     break;
                 case 'warning':
-                    // 'warning' -> info. Statamic.$toast lacks a 'warning'
-                    // channel; the banner colour conveys severity.
-                    Statamic.$toast.info(message);
+                    // 'warning' -> info (Statamic.$toast lacks a warning
+                    // channel) but with extended duration so a skipped-
+                    // outcome message ("Could not add any links — anchor
+                    // not found. Re-scan and retry.") doesn't flash by.
+                    // 12s matches the error variant.
+                    Statamic.$toast.info(message, { duration: 12000 });
                     break;
                 case 'error':
                     Statamic.$toast.error(message, { duration: 12000 });
                     break;
                 default:
                     Statamic.$toast.info(message);
+            }
+
+            // Force-open the notifications <details> when a non-success
+            // outcome lands so the persistent banner is visible. Without
+            // this the user only sees a brief toast — the recap banner
+            // sits silently inside a collapsed disclosure.
+            if (variant !== 'success') {
+                this.notificationsCollapsed = false;
             }
         },
 
