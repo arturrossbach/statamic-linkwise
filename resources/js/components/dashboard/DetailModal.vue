@@ -352,8 +352,18 @@ export default {
                 });
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
-                    const reason = data?.error || data?.message || `HTTP ${response.status}`;
-                    errorToast(`Could not start: ${reason}`);
+                    if (response.status === 409) {
+                        // Backend conflict response carries a user-readable
+                        // "Entry was modified by another editor..." in
+                        // data.message; data.error is a machine code
+                        // ("conflict") that's useless as a toast. Surface
+                        // the message; align with the Re-link path which
+                        // already shows "modified" cleanly.
+                        errorToast(data?.message || 'Entry was modified by another editor — reload and try again.');
+                    } else {
+                        const reason = data?.message || data?.error || `HTTP ${response.status}`;
+                        errorToast(`Could not start: ${reason}`);
+                    }
                     this.unlinking = false;
                     return;
                 }

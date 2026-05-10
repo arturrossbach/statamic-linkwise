@@ -929,8 +929,12 @@ export default {
                 });
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
-                    const reason = data?.error || data?.message || `HTTP ${response.status}`;
-                    Statamic.$toast.error(`Could not start: ${reason}`);
+                    if (response.status === 409) {
+                        Statamic.$toast.error(data?.message || 'Entry was modified by another editor — reload and try again.');
+                    } else {
+                        const reason = data?.message || data?.error || `HTTP ${response.status}`;
+                        Statamic.$toast.error(`Could not start: ${reason}`);
+                    }
                     this.applyingAll = false;
                     return;
                 }
@@ -1554,8 +1558,12 @@ export default {
                 });
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
-                    const reason = data?.error || data?.message || `HTTP ${response.status}`;
-                    Statamic.$toast.error(`Could not start: ${reason}`);
+                    if (response.status === 409) {
+                        Statamic.$toast.error(data?.message || 'Entry was modified by another editor — reload and try again.');
+                    } else {
+                        const reason = data?.message || data?.error || `HTTP ${response.status}`;
+                        Statamic.$toast.error(`Could not start: ${reason}`);
+                    }
                     this.unlinkingFromPreview = false;
 
                     return;
