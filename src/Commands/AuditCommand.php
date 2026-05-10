@@ -92,6 +92,7 @@ class AuditCommand extends Command
             'post-hash-coverage'     => fn () => $this->auditPostHashCoverage(),
             'apply-counter-honesty'  => fn () => $this->auditApplyCounterHonesty(),
             'mutator-parity'         => fn () => $this->auditMutatorParity(),
+            'insert-parity'          => fn () => $this->auditInsertParity(),
             'snapshot-self-consistency' => fn () => $this->auditSnapshotSelfConsistency(),
             'stale-job-locks'        => fn () => $this->auditStaleJobLocks(),
             'domains'                => fn () => $this->auditDomainParity(),
@@ -1764,6 +1765,140 @@ class AuditCommand extends Command
                 'type' => 'text_block',
                 'enabled' => true,
                 'body' => $this->parityBuildBard($anchor, $url),
+            ],
+        ];
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Path: Insert parity. Companion to mutator-parity, but for the
+    // INSERT side: BardLinkInserter::insertLinkWithHref vs
+    // ::insertLinkIntoMarkdown vs ::processReplicatorWithHref. These
+    // 3 paths share the "find anchor, wrap with link" semantic but
+    // each has its own tokenisation + wrapping logic. Without parity
+    // assertion, an insert-only bug fix in Bard can silently leave
+    // Markdown + Replicator broken.
+    //
+    // Test corpus is synthetic. 4 cases:
+    // - Anchor present, no existing link → insert succeeds
+    // - Anchor missing → no insert (all return null/unchanged)
+    // - Anchor already wrapped in a link → no double-link
+    // - Multiple occurrences, single-insert API → only the first wraps
+    // ──────────────────────────────────────────────────────────────────
+    protected function auditInsertParity(): void
+    {
+        $this->line('<fg=yellow>insert-parity</> — Bard, Markdown, Replicator inserts behave identically');
+
+        $href = 'https://example.com/insert-target';
+
+        // Each case = (label, builder-config, anchor-arg, expected (insertSucceeded, contentChanged))
+        $cases = [
+            // Case 1: anchor present, no existing link → must wrap.
+            ['anchor-present-fresh-text', 'plain', 'AnchorWord', true, true],
+            // Case 2: anchor missing → must skip, no mutation.
+            ['anchor-missing', 'plain-without-anchor', 'AnchorWord', false, false],
+            // Case 3: anchor already wrapped in a link → must skip (no double-link).
+            ['anchor-already-linked', 'already-linked', 'AnchorWord', false, false],
+            // Case 4: anchor appears twice — single-insert API wraps first only.
+            // (We assert insertion happened; downstream second-occurrence behaviour
+            // is checked via "all" APIs in a future case if/when relevant.)
+            ['anchor-twice-single-insert-wraps-first', 'twice', 'AnchorWord', true, true],
+        ];
+
+        foreach ($cases as $case) {
+            [$label, $variant, $anchor, $expectInserted, $expectChanged] = $case;
+
+            $bard = $this->insertParityBuildBard($variant, $anchor, $href);
+            $md = $this->insertParityBuildMarkdown($variant, $anchor, $href);
+            $replicator = $this->insertParityBuildReplicator($variant, $anchor, $href);
+
+            $bardOut = \Arturrossbach\Linkwise\Support\BardLinkInserter::insertLinkWithHref($bard, $anchor, $href);
+            $mdOut = \Arturrossbach\Linkwise\Support\BardLinkInserter::insertLinkIntoMarkdown($md, $anchor, $href);
+            $repOut = \Arturrossbach\Linkwise\Support\BardLinkInserter::processReplicatorWithHref($replicator, $anchor, $href);
+
+            // null return = "no insertion happened" contract
+            $bardInserted = $bardOut !== null;
+            $mdInserted = $mdOut !== null;
+            $repInserted = $repOut !== null;
+
+            $bardChanged = $bardInserted && $bardOut !== $bard;
+            $mdChanged = $mdInserted && $mdOut !== $md;
+            $repChanged = $repInserted && $repOut !== $replicator;
+
+            $bardOk = $bardInserted === $expectInserted && $bardChanged === $expectChanged;
+            $mdOk = $mdInserted === $expectInserted && $mdChanged === $expectChanged;
+            $repOk = $repInserted === $expectInserted && $repChanged === $expectChanged;
+
+            if ($bardOk && $mdOk && $repOk) {
+                $this->pass('insert-parity');
+                continue;
+            }
+
+            $expected = sprintf('inserted=%s, changed=%s', $expectInserted ? 'true' : 'false', $expectChanged ? 'true' : 'false');
+            if (! $bardOk) {
+                $this->recordFailure('insert-parity', "case '$label': BARD diverged — got inserted=".($bardInserted ? 'true' : 'false').", changed=".($bardChanged ? 'true' : 'false').", expected $expected");
+            }
+            if (! $mdOk) {
+                $this->recordFailure('insert-parity', "case '$label': MARKDOWN diverged — got inserted=".($mdInserted ? 'true' : 'false').", changed=".($mdChanged ? 'true' : 'false').", expected $expected");
+            }
+            if (! $repOk) {
+                $this->recordFailure('insert-parity', "case '$label': REPLICATOR diverged — got inserted=".($repInserted ? 'true' : 'false').", changed=".($repChanged ? 'true' : 'false').", expected $expected");
+            }
+        }
+    }
+
+    /**
+     * Build a Bard doc in one of 4 variants for insert-parity testing.
+     * "plain": one paragraph containing $anchor unwrapped.
+     * "plain-without-anchor": paragraph WITHOUT the anchor word.
+     * "already-linked": paragraph with $anchor already wrapped in a link mark.
+     * "twice": paragraph with $anchor appearing twice unwrapped.
+     */
+    protected function insertParityBuildBard(string $variant, string $anchor, string $href): array
+    {
+        return match ($variant) {
+            'plain' => [
+                ['type' => 'paragraph', 'content' => [
+                    ['type' => 'text', 'text' => "Lorem $anchor ipsum dolor."],
+                ]],
+            ],
+            'plain-without-anchor' => [
+                ['type' => 'paragraph', 'content' => [
+                    ['type' => 'text', 'text' => 'Lorem ipsum dolor sit amet.'],
+                ]],
+            ],
+            'already-linked' => [
+                ['type' => 'paragraph', 'content' => [
+                    ['type' => 'text', 'text' => 'Lorem '],
+                    ['type' => 'text', 'text' => $anchor, 'marks' => [['type' => 'link', 'attrs' => ['href' => 'https://other.example/already']]]],
+                    ['type' => 'text', 'text' => ' ipsum dolor.'],
+                ]],
+            ],
+            'twice' => [
+                ['type' => 'paragraph', 'content' => [
+                    ['type' => 'text', 'text' => "Lorem $anchor ipsum $anchor dolor."],
+                ]],
+            ],
+        };
+    }
+
+    protected function insertParityBuildMarkdown(string $variant, string $anchor, string $href): string
+    {
+        return match ($variant) {
+            'plain' => "Lorem $anchor ipsum dolor.",
+            'plain-without-anchor' => 'Lorem ipsum dolor sit amet.',
+            'already-linked' => "Lorem [$anchor](https://other.example/already) ipsum dolor.",
+            'twice' => "Lorem $anchor ipsum $anchor dolor.",
+        };
+    }
+
+    protected function insertParityBuildReplicator(string $variant, string $anchor, string $href): array
+    {
+        return [
+            [
+                'id' => 'set-1',
+                'type' => 'text_block',
+                'enabled' => true,
+                'body' => $this->insertParityBuildBard($variant, $anchor, $href),
             ],
         ];
     }

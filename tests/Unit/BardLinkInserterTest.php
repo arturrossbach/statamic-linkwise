@@ -131,8 +131,15 @@ class BardLinkInserterTest extends TestCase
         $this->assertSame([['type' => 'bold']], $content[2]['marks']);
     }
 
-    public function test_replaces_different_link_on_already_linked_text(): void
+    public function test_skips_anchor_already_carrying_a_link_no_silent_overwrite(): void
     {
+        // Design decision 2026-05-10: any existing link mark on an
+        // affected text node = skip. Linkwise's USP is "kein silent
+        // overwrite". A user wanting to remap "Redis Setup Guide" from
+        // its current external href to a new internal target must first
+        // unlink (URL Changer) and then insert. Two explicit steps,
+        // never a silent URL swap. See also Markdown's symmetric
+        // test_markdown_already_linked_anywhere_returns_null.
         $bard = [
             [
                 'type' => 'paragraph',
@@ -148,10 +155,7 @@ class BardLinkInserterTest extends TestCase
 
         $result = BardLinkInserter::insertLink($bard, 'Redis Setup Guide', 'target-123');
 
-        $this->assertNotNull($result, 'Should replace existing external link with internal link');
-        $linked = $result[0]['content'][0];
-        $this->assertCount(1, $linked['marks'], 'Should have exactly 1 link mark');
-        $this->assertSame('statamic://entry::target-123', $linked['marks'][0]['attrs']['href']);
+        $this->assertNull($result, 'Already-linked anchor must NOT be silently re-targeted');
     }
 
     public function test_case_insensitive_matching(): void
@@ -213,8 +217,11 @@ class BardLinkInserterTest extends TestCase
         $this->assertSame('heading', $result[0]['type']);
     }
 
-    public function test_replaces_existing_external_link_in_single_node(): void
+    public function test_skips_when_anchor_already_externally_linked(): void
     {
+        // Same no-silent-overwrite contract — even when the existing
+        // link points to an external URL, we do not silently replace it
+        // with an internal entry reference. User must unlink first.
         $bard = [
             [
                 'type' => 'paragraph',
@@ -232,15 +239,16 @@ class BardLinkInserterTest extends TestCase
 
         $result = BardLinkInserter::insertLink($bard, 'coffee', 'target-123');
 
-        $this->assertNotNull($result, 'Should replace existing external link');
-        $linked = $result[0]['content'][0];
-        $this->assertSame('coffee', $linked['text']);
-        $this->assertCount(1, $linked['marks'], 'Should have exactly 1 link mark, not 2');
-        $this->assertSame('statamic://entry::target-123', $linked['marks'][0]['attrs']['href']);
+        $this->assertNull($result, 'Anchor with existing external link must NOT be silently re-targeted to internal entry');
     }
 
-    public function test_replaces_existing_link_across_nodes(): void
+    public function test_skips_when_match_spans_into_already_linked_node(): void
     {
+        // Cross-node anchor where part of the span hits a node that
+        // already has a link mark. Even if the unlinked portion would
+        // be safe to wrap, we cannot wrap the whole span without
+        // implicitly redirecting the linked portion's href. Skip the
+        // entire match.
         $bard = [
             [
                 'type' => 'paragraph',
@@ -260,22 +268,16 @@ class BardLinkInserterTest extends TestCase
 
         $result = BardLinkInserter::insertLink($bard, 'We all love coffee', 'target-123');
 
-        $this->assertNotNull($result);
-        $content = $result[0]['content'];
-
-        // Both nodes should have the internal link, no external link
-        foreach ($content as $node) {
-            $linkMarks = array_filter($node['marks'] ?? [], fn ($m) => ($m['type'] ?? '') === 'link');
-            if (! empty($linkMarks)) {
-                $this->assertCount(1, $linkMarks, 'Each node should have exactly 1 link mark');
-                $mark = array_values($linkMarks)[0];
-                $this->assertSame('statamic://entry::target-123', $mark['attrs']['href']);
-            }
-        }
+        $this->assertNull($result, 'Match spanning into a linked node must NOT silently redirect that link');
     }
 
-    public function test_preserves_non_link_marks_when_replacing(): void
+    public function test_skips_anchor_with_existing_link_even_if_other_marks_present(): void
     {
+        // The presence of additional non-link marks (bold, italic, etc.)
+        // does not change the no-silent-overwrite contract — if the node
+        // already has a link mark, we skip regardless of what other marks
+        // it carries. The bold mark stays untouched because we don't
+        // mutate the node at all.
         $bard = [
             [
                 'type' => 'paragraph',
@@ -294,16 +296,7 @@ class BardLinkInserterTest extends TestCase
 
         $result = BardLinkInserter::insertLink($bard, 'coffee', 'target-123');
 
-        $this->assertNotNull($result);
-        $linked = $result[0]['content'][0];
-        $this->assertCount(2, $linked['marks'], 'Should keep bold + new link');
-
-        $markTypes = array_column($linked['marks'], 'type');
-        $this->assertContains('bold', $markTypes);
-        $this->assertContains('link', $markTypes);
-
-        $linkMark = array_values(array_filter($linked['marks'], fn ($m) => $m['type'] === 'link'))[0];
-        $this->assertSame('statamic://entry::target-123', $linkMark['attrs']['href']);
+        $this->assertNull($result, 'Anchor with existing link + other marks must NOT be silently re-targeted');
     }
 
     // ─── Word-boundary iteration: must skip invalid first matches ──────────────
@@ -610,10 +603,16 @@ class BardLinkInserterTest extends TestCase
     // multi-walker (findAndLinkAllInChildren) had skipped pre-linked
     // nodes since day one — single walker now matches that contract.
     //
-    // Fully-covered linked nodes (URL-upgrade case, anchor === entire
-    // linked text) STAY replaceable — that is intentional and used by
-    // URL-Changer. See test_replaces_different_link_on_already_linked_text
-    // and the dedicated multi-node fully-covered test below.
+    // 2026-05-10 follow-up: the earlier "fully-covered URL-upgrade" carve-
+    // out (anchor === entire linked text → replace href silently) was
+    // removed alongside the no-silent-overwrite design decision. Inserts
+    // now skip on ANY existing link mark, partial OR full. Power-users
+    // who want to remap a target run URL-Changer to remove the old
+    // links first, then re-insert. See:
+    //   - test_skips_anchor_already_carrying_a_link_no_silent_overwrite
+    //   - test_bugB_fully_covers_linked_node_skips_no_silent_url_swap
+    //   - Markdown's test_markdown_already_linked_anywhere_returns_null
+    //     (which has been the symmetric reference all along)
     // ─────────────────────────────────────────────────────────────────────
 
     public function test_bugB_skips_anchor_inside_partially_covered_linked_phrase(): void
@@ -753,12 +752,14 @@ class BardLinkInserterTest extends TestCase
         $this->assertNull($result, 'Anchor that starts inside a linked node and crosses out must be skipped');
     }
 
-    public function test_bugB_fully_covers_linked_node_still_replaces(): void
+    public function test_bugB_fully_covers_linked_node_skips_no_silent_url_swap(): void
     {
-        // Preserves the URL-upgrade behavior: anchor === full linked text
-        // → existing different-href link mark is replaced with the new one.
-        // See also test_replaces_different_link_on_already_linked_text and
-        // test_replaces_existing_external_link_in_single_node.
+        // Was test_bugB_fully_covers_linked_node_still_replaces (URL-upgrade)
+        // — flipped 2026-05-10 alongside the no-silent-overwrite design
+        // decision. Even when the anchor matches the full linked phrase
+        // exactly, we now skip rather than silently swap the href. The
+        // user must use URL-Changer to remove the old link first, then
+        // insert the new one — two explicit steps, never a surprise.
         $bard = [
             [
                 'type' => 'paragraph',
@@ -776,11 +777,7 @@ class BardLinkInserterTest extends TestCase
 
         $result = BardLinkInserter::insertLink($bard, 'Redis Setup Guide', 'target-123');
 
-        $this->assertNotNull($result, 'Fully-covered different-href link should still be replaceable');
-        $this->assertSame(
-            'statamic://entry::target-123',
-            $result[0]['content'][0]['marks'][0]['attrs']['href'],
-        );
+        $this->assertNull($result, 'Fully-covered linked node must NOT get its href silently swapped');
     }
 
     public function test_bugB_invariant_existing_link_text_stays_linked(): void

@@ -118,8 +118,14 @@ class AutoLinkApplierTest extends TestCase
         $this->assertNotNull($result2);
     }
 
-    public function test_bard_replaces_link_when_different_href(): void
+    public function test_bard_skips_when_anchor_already_carries_different_href(): void
     {
+        // 2026-05-10 design change: Auto-Linker no longer silently
+        // re-targets anchors that already carry a link mark. The
+        // earlier "URL-upgrade" behaviour (rule = new truth) was
+        // dropped in favour of Linkwise's USP "kein silent overwrite".
+        // To remap an anchor to a new target, the user runs URL-Changer
+        // to remove the old links first, then triggers Apply Rule.
         $bard = [
             [
                 'type' => 'paragraph',
@@ -135,12 +141,8 @@ class AutoLinkApplierTest extends TestCase
             ],
         ];
 
-        // Should replace existing link with new href (not create duplicate)
         $result = BardLinkInserter::insertLinkWithHref($bard, 'Laravel', 'https://other-url.com');
-        $this->assertNotNull($result, 'Should replace existing link with different href');
-        $linked = $result[0]['content'][1];
-        $this->assertCount(1, $linked['marks'], 'Should have exactly 1 link mark');
-        $this->assertSame('https://other-url.com', $linked['marks'][0]['attrs']['href']);
+        $this->assertNull($result, 'Anchor with existing different-href link must NOT be silently re-targeted');
     }
 
     public function test_bard_skips_already_linked_to_same_href(): void

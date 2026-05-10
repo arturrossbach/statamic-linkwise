@@ -585,7 +585,12 @@ class BardLinkInserter
     /**
      * Process a Replicator field value with custom href.
      */
-    protected static function processReplicatorWithHref(array $sets, string $anchorText, string $href, bool $caseSensitive = false): ?array
+    /**
+     * @internal Public to allow the insert-parity audit to test replicator
+     * inserts in isolation without disk-mutating an entry. Production code
+     * still goes through insertLinkIntoEntryWithHref.
+     */
+    public static function processReplicatorWithHref(array $sets, string $anchorText, string $href, bool $caseSensitive = false): ?array
     {
         foreach ($sets as $i => $set) {
             if (! is_array($set)) {
@@ -727,46 +732,34 @@ class BardLinkInserter
                 if ($startMap['index'] === -1 || $endMap['index'] === -1) {
                     $valid = false;
                 } else {
-                    $startChild = $children[$startMap['index']];
-                    if (static::isLinkedToHref($startChild, $href)) {
-                        return null; // Already linked to this target at this occurrence — nothing to do
-                    }
-
-                    // Bug B (2026-05-08): refuse to write into a partially-
-                    // covered existing link. If the match starts mid-text-node
-                    // OR ends mid-text-node AND that node carries a (different-
-                    // href) link mark, splitSingleNode would tear the existing
-                    // link apart — original "Brauner-Zucker-Speck-Kekse" link
-                    // becomes "Brauner"=NEW + "-Zucker-Speck-Kekse"=OLD on
-                    // suggestion-add of "Brauner". The multi-walker
-                    // (findAndLinkAllInChildren) skips any pre-linked node
-                    // entirely; this brings the single walker symmetric.
+                    // Already-linked guard — REFUSE to mutate any text node
+                    // that already carries a link mark, regardless of href.
                     //
-                    // Fully-covered linked nodes (URL-upgrade case where the
-                    // anchor matches the entire linked phrase) stay valid —
-                    // see test_replaces_different_link_on_already_linked_text.
+                    // History:
+                    // - Bug B (2026-05-08): partial-overlap split would tear
+                    //   an existing link apart ("Brauner-Zucker-Speck-Kekse"
+                    //   → "Brauner"=NEW + "-Zucker-Speck-Kekse"=OLD). Caught,
+                    //   fixed for partial overlaps only — fully-covered
+                    //   matches still ran a "URL upgrade" that silently
+                    //   replaced the href.
+                    // - 2026-05-10: insert-parity audit + user feedback —
+                    //   silent URL-upgrade is the same bug-class as silent
+                    //   wrong-link unlink (the gestern-bug). USP is "kein
+                    //   silent overwrite". ANY existing link mark on an
+                    //   affected node = skip. Power-user wanting to remap
+                    //   an anchor to a new target uses URL-Changer to
+                    //   remove the old links first, then re-runs the rule.
+                    //   Two explicit steps, no surprise data loss.
                     $startIdx = $startMap['index'];
                     $endIdx = $endMap['index'];
-                    $startOffsetInChild = $startMap['offset'];
-                    $endOffsetInChild = $endMap['offset'] + 1; // exclusive
 
                     for ($idx = $startIdx; $idx <= $endIdx; $idx++) {
                         $child = $children[$idx];
-                        $hasLink = false;
                         foreach ($child['marks'] ?? [] as $m) {
                             if (($m['type'] ?? '') === 'link') {
-                                $hasLink = true;
-                                break;
+                                $valid = false;
+                                break 2;
                             }
-                        }
-                        if (! $hasLink) continue;
-
-                        $childTextLen = mb_strlen($child['text'] ?? '');
-                        $startsAtChildBeginning = $idx > $startIdx || $startOffsetInChild === 0;
-                        $endsAtChildEnd = $idx < $endIdx || $endOffsetInChild === $childTextLen;
-                        if (! ($startsAtChildBeginning && $endsAtChildEnd)) {
-                            $valid = false;
-                            break;
                         }
                     }
                 }
