@@ -447,6 +447,7 @@
                                     <td>
                                         <Link v-if="item.edit_url" :href="item.edit_url" class="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">{{ item.title }}</Link>
                                         <span v-else class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ item.title }}</span>
+                                        <BardBadge v-if="item.id" :entry-id="item.id" class="ml-1.5" />
                                     </td>
                                     <td class="text-gray-400 dark:text-gray-500 text-xs">
                                         <span v-if="item.sentence_context" v-html="highlightKeyword(item.sentence_context, previewModal.keyword)"></span>
@@ -510,6 +511,7 @@ import { Card, Panel, Button, Stack, ConfirmationModal, Modal, Dropdown, Dropdow
 import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
 import MultiSelect from '../shared/MultiSelect.vue';
+import BardBadge from '../shared/BardBadge.vue';
 import { sortableMixin } from '../shared/sortable.js';
 import { highlightKeyword } from '../../utils/highlight.js';
 import { bulkState, setHeavyState } from '../../services/bulkOperationService.js';
@@ -522,7 +524,7 @@ const PREVIEW_STATUS_OPTIONS = [
 ];
 
 export default {
-    components: { Link, Card, Panel, Button, Stack, ConfirmationModal, Modal, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Alert, Icon, Badge, HelpIcon, SortableHeader, MultiSelect },
+    components: { Link, Card, Panel, Button, Stack, ConfirmationModal, Modal, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Alert, Icon, Badge, HelpIcon, SortableHeader, MultiSelect, BardBadge },
 
     mixins: [sortableMixin],
 

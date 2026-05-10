@@ -192,6 +192,7 @@
                                     <template v-if="detailModal.type === 'posts'">
                                         <Link v-if="item.edit_url" :href="item.edit_url" class="hover:text-blue-600 dark:hover:text-blue-400">{{ item.title }}</Link>
                                         <span v-else>{{ item.title }}</span>
+                                        <BardBadge v-if="item.post_id || item.id" :entry-id="item.post_id || item.id" class="ml-1.5" />
                                     </template>
                                     <a v-else :href="item.url" target="_blank" rel="noopener noreferrer" class="text-gray-700 dark:text-gray-300 hover:underline text-xs break-all">
                                         {{ item.url }}
@@ -200,6 +201,7 @@
                                 <td v-if="detailModal.type === 'links'">
                                     <Link v-if="item.edit_url" :href="item.edit_url" class="hover:text-blue-600 dark:hover:text-blue-400 text-sm">{{ item.post_title }}</Link>
                                     <span v-else class="text-gray-500">{{ item.post_title }}</span>
+                                    <BardBadge v-if="item.post_id" :entry-id="item.post_id" class="ml-1.5" />
                                 </td>
                             </tr>
                             <tr v-if="sortedModalItems.length === 0">
@@ -221,12 +223,13 @@ import { router as inertiaRouter } from '@statamic/cms/inertia';
 import { Card, Panel, Stack, Button, Alert } from '@statamic/cms/ui';
 import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
+import BardBadge from '../shared/BardBadge.vue';
 import { highlightAnchor } from '../../utils/highlight.js';
 import { sortableMixin } from '../shared/sortable.js';
 import { readJson, writeJson } from '../../utils/safeStorage.js';
 
 export default {
-    components: { Link, Card, Panel, Stack, Button, Alert, HelpIcon, SortableHeader },
+    components: { Link, Card, Panel, Stack, Button, Alert, HelpIcon, SortableHeader, BardBadge },
 
     mixins: [sortableMixin],
 

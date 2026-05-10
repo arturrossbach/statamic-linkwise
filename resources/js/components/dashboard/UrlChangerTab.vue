@@ -156,9 +156,12 @@
                                 <Checkbox v-model="match.selected" solo size="sm" />
                             </td>
                             <td>
-                                <Link :href="match.edit_url" class="hover:text-blue-600 dark:hover:text-blue-400 block truncate" v-tooltip="match.entry_title">
-                                    {{ match.entry_title }}
-                                </Link>
+                                <div class="flex items-center gap-1.5">
+                                    <Link :href="match.edit_url" class="hover:text-blue-600 dark:hover:text-blue-400 block truncate" v-tooltip="match.entry_title">
+                                        {{ match.entry_title }}
+                                    </Link>
+                                    <BardBadge :entry-id="match.entry_id" />
+                                </div>
                                 <div class="text-xs text-gray-400">{{ match.collection }}</div>
                             </td>
                             <td class="font-medium text-gray-900 dark:text-gray-100">{{ match.anchor_text || '—' }}</td>
@@ -199,6 +202,7 @@ import { Link, router as inertiaRouter } from '@statamic/cms/inertia';
 import { Card, Panel, Button, Icon, Input, Checkbox, ConfirmationModal } from '@statamic/cms/ui';
 import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
+import BardBadge from '../shared/BardBadge.vue';
 import { highlightAnchor } from '../../utils/highlight.js';
 import { isValidReplacementUrl } from '../../utils/urlValidation.js';
 import { errorToast } from '../../utils/toast.js';
@@ -208,7 +212,7 @@ import { readJson, writeJson } from '../../utils/safeStorage.js';
 const URL_CHANGER_STATE_KEY = 'linkwise.urlchanger.state';
 
 export default {
-    components: { Link, Card, Panel, Button, Icon, Input, Checkbox, ConfirmationModal, HelpIcon, SortableHeader },
+    components: { Link, Card, Panel, Button, Icon, Input, Checkbox, ConfirmationModal, HelpIcon, SortableHeader, BardBadge },
 
     props: {
         data: { type: Object, required: true },

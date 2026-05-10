@@ -168,6 +168,7 @@
                                 <a :href="entry.edit_url" target="_blank" class="cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 break-words">
                                     {{ entry.title }}
                                 </a>
+                                <BardBadge :entry-id="entry.id" />
                             </div>
                         </td>
                         <td class="text-gray-500 dark:text-gray-400">
@@ -278,13 +279,14 @@ import HelpIcon from '../shared/HelpIcon.vue';
 import SuggestionModal from './SuggestionModal.vue';
 import DetailModal from './DetailModal.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
+import BardBadge from '../shared/BardBadge.vue';
 import { sortableMixin } from '../shared/sortable.js';
 import { buildPaginationMeta } from '../shared/pagination.js';
 import { router as inertiaRouter } from '@statamic/cms/inertia';
 import { setHeavyState, recordCompletion, bulkState } from '../../services/bulkOperationService.js';
 
 export default {
-    components: { Card, Panel, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Pagination, Icon, Input, Alert, Button, HelpIcon, SuggestionModal, DetailModal, SortableHeader },
+    components: { Card, Panel, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Pagination, Icon, Input, Alert, Button, HelpIcon, SuggestionModal, DetailModal, SortableHeader, BardBadge },
 
     mixins: [sortableMixin],
 

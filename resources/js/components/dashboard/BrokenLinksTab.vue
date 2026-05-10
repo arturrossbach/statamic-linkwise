@@ -209,6 +209,7 @@
                                     {{ link.post_title }}
                                 </Link>
                                 <span v-else class="text-gray-900 dark:text-gray-100">{{ link.post_title }}</span>
+                                <BardBadge :entry-id="link.post_id" class="ml-1.5" />
                             </td>
                             <td class="break-all">
                                 <span v-if="link.type === 'internal'" class="text-xs text-gray-500 dark:text-gray-400 break-all">
@@ -419,6 +420,7 @@ import { Panel, Button, Icon, Input, ConfirmationModal, Pagination } from '@stat
 import MultiSelect from '../shared/MultiSelect.vue';
 import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
+import BardBadge from '../shared/BardBadge.vue';
 import { highlightAnchor } from '../../utils/highlight.js';
 import { isValidReplacementUrl } from '../../utils/urlValidation.js';
 import { sortableMixin } from '../shared/sortable.js';
@@ -445,7 +447,7 @@ const STATUS_BADGE_CLASSES = {
 };
 
 export default {
-    components: { Link, Panel, Button, Icon, Input, ConfirmationModal, Pagination, MultiSelect, HelpIcon, SortableHeader },
+    components: { Link, Panel, Button, Icon, Input, ConfirmationModal, Pagination, MultiSelect, HelpIcon, SortableHeader, BardBadge },
 
     mixins: [sortableMixin],
 
