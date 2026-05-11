@@ -398,6 +398,205 @@ class SuggestionEngineTest extends TestCase
         $this->assertStringContainsString('follow the', $suggestions[0]->sentenceContext);
     }
 
+    /* ───────── Bug 4: Title-Compound 1-word matches (hyphenated identifiers) ───────── */
+
+    /**
+     * Real bug: title "Notizen aus einer CMS-Migration" had only 2 content
+     * words after stopword filter ("Notizen", "CMS-Migration"). Source text
+     * containing "CMS-Migrationen" alone (without "Notizen") missed the
+     * suggestion entirely:
+     *   - Title-phrase pathway: minPhraseWords=2, single "cms-migration"
+     *     phrase wasn't generated.
+     *   - Stem-fallback pathway: needs ≥2 stems found, only "cms-migration"
+     *     present → fail.
+     * Fix: hyphenated compounds with each token title-cased + length ≥6
+     * become valid 1-word phrase candidates with suffix-tolerant matching.
+     */
+    public function test_title_compound_matches_singular_in_text(): void
+    {
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'Notizen aus einer CMS-Migration',
+                url: '/blog/cms-migration',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        $text = 'Diese Pre-Flight-Strategie macht eine CMS-Migration deutlich angenehmer.';
+        $suggestions = $this->engine->suggest($text, $index);
+
+        $this->assertNotEmpty($suggestions, 'Compound "CMS-Migration" must produce a suggestion');
+        $this->assertSame('entry-1', $suggestions[0]->targetEntryId);
+        $this->assertStringContainsStringIgnoringCase('CMS-Migration', $suggestions[0]->anchorText);
+    }
+
+    public function test_title_compound_matches_german_plural_form(): void
+    {
+        // Source has "CMS-Migrationen" (plural with -en suffix). Title has
+        // "CMS-Migration" (singular). Suffix-tolerant pattern must match.
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'Notizen aus einer CMS-Migration',
+                url: '/blog/cms-migration',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        $text = 'CMS-Migrationen kosten immer mehr Zeit als geplant.';
+        $suggestions = $this->engine->suggest($text, $index);
+
+        $this->assertNotEmpty($suggestions, 'Plural form CMS-Migrationen must match title compound CMS-Migration');
+        $this->assertSame('entry-1', $suggestions[0]->targetEntryId);
+    }
+
+    public function test_title_compound_does_not_match_unhyphenated_text(): void
+    {
+        // Source text writes "CMS migration" (with space, no hyphen).
+        // The compound is defined by its hyphen — without hyphen the word
+        // is generic, so no compound-match should fire.
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'Notizen aus einer CMS-Migration',
+                url: '/blog/cms-migration',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        $text = 'Eine CMS migration ist ein großes Projekt.';
+        $suggestions = $this->engine->suggest($text, $index);
+
+        // May still produce a different match path, but compound path must NOT fire
+        $compoundHits = array_filter($suggestions, fn ($s) => str_contains($s->anchorText, '-'));
+        $this->assertEmpty($compoundHits, 'Unhyphenated text must not trigger compound match');
+    }
+
+    public function test_lowercase_hyphen_word_is_not_treated_as_compound(): void
+    {
+        // "co-op" / "ad-hoc" / "in-house" — both tokens lowercase. These are
+        // generic glue words, not identifiers. Title-Case filter rejects them.
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'co-op handbook for shared kitchens',
+                url: '/blog/co-op',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        $text = 'Our co-op was the first to use shared kitchens.';
+        $suggestions = $this->engine->suggest($text, $index);
+
+        $coOpHits = array_filter($suggestions, fn ($s) => str_contains($s->anchorText, 'co-op'));
+        $this->assertEmpty($coOpHits, 'Lowercase hyphen-word must not become compound anchor');
+    }
+
+    public function test_title_compound_matches_multiple_occurrences(): void
+    {
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'Notizen aus einer CMS-Migration',
+                url: '/blog/cms-migration',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        $text = 'Erste CMS-Migration. Später noch eine CMS-Migration.';
+        $suggestions = $this->engine->suggest($text, $index);
+
+        // Engine deduplicates per (target, anchor) — but BOTH positions
+        // exist as match candidates. After dedup we'd see at least 1.
+        $this->assertNotEmpty($suggestions);
+        // Compound should produce at least one anchor
+        $compoundHits = array_filter($suggestions, fn ($s) =>
+            $s->targetEntryId === 'entry-1' && stripos($s->anchorText, 'CMS-Migration') !== false
+        );
+        $this->assertNotEmpty($compoundHits);
+    }
+
+    public function test_title_compound_short_token_is_filtered(): void
+    {
+        // X-Ray (X = single char) — too short, not a real compound identifier
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'X-Ray basics for beginners',
+                url: '/blog/xray',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        $text = 'Use X-Ray to detect broken bones.';
+        $suggestions = $this->engine->suggest($text, $index);
+
+        $compoundHits = array_filter($suggestions, fn ($s) => $s->anchorText === 'X-Ray');
+        $this->assertEmpty($compoundHits, 'Compound with single-char token must not match');
+    }
+
+    public function test_title_compound_does_not_match_inside_longer_compound(): void
+    {
+        // Title A: "On-Call" — compound. Source contains "On-Call-Schedule"
+        // (a different compound). The On-Call match must NOT fire inside
+        // On-Call-Schedule, otherwise we'd suggest title-A's link with
+        // anchor "On-Call" landing visually inside another compound.
+        $index = [
+            'entry-on-call' => new EntryRecord(
+                id: 'entry-on-call',
+                title: 'Lehren aus drei Jahren On-Call',
+                url: '/blog/on-call',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        $text = 'Wir haben ein neues On-Call-Schedule eingeführt.';
+        $suggestions = $this->engine->suggest($text, $index);
+
+        $compoundHits = array_filter($suggestions, fn ($s) =>
+            $s->targetEntryId === 'entry-on-call'
+        );
+        $this->assertEmpty($compoundHits, 'Compound must not match inside a longer hyphen-extended compound');
+    }
+
+    public function test_title_compound_score_passes_min_threshold(): void
+    {
+        // Compound treated as multi-word for scoring → must pass minScore=0.4 default
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'Notizen aus einer CMS-Migration',
+                url: '/blog/cms-migration',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        // Fresh engine with DEFAULT settings (minScore from config or 0.4)
+        $defaultEngine = new SuggestionEngine;
+        $text = 'Eine reine CMS-Migration kostet Zeit.';
+        $suggestions = $defaultEngine->suggest($text, $index);
+
+        $this->assertNotEmpty($suggestions, 'Compound match must pass default minScore');
+        $this->assertGreaterThanOrEqual(0.4, $suggestions[0]->score);
+    }
+
     public function test_anchor_never_spans_sentence_boundary(): void
     {
         $index = [

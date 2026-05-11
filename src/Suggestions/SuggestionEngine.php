@@ -121,6 +121,28 @@ class SuggestionEngine
             // Tier 1: Title phrase matching (all positions)
             $matches = $this->findMatches($normalizedText, $text, $record);
 
+            // Tier 1.2: Title-compound matching (Bug 4 — 2026-05-11).
+            // Distinctive hyphenated compounds in the title (e.g. "CMS-Migration",
+            // "Pre-Flight-Checklisten") that appear ALONE in source text were
+            // missed by the regular paths: minPhraseWords=2 prevents 1-word
+            // title-phrases, and findUnorderedStemMatch needs ≥2 stems found.
+            // Compounds opt in: Title-Case per token, total len ≥6, suffix-
+            // tolerant matching catches German plurals (CMS-Migrationen).
+            $compoundMatches = $this->findTitleCompoundMatches($text, $record);
+            foreach ($compoundMatches as $cm) {
+                $dominated = false;
+                foreach ($matches as $existing) {
+                    if ($cm->position >= $existing->position &&
+                        $cm->position < $existing->position + mb_strlen($existing->anchorText)) {
+                        $dominated = true;
+                        break;
+                    }
+                }
+                if (! $dominated) {
+                    $matches[] = $cm;
+                }
+            }
+
             // Tier 1.5: Custom keyword matching — always runs, adds to matches
             // Custom keywords are user-set and should always be checked regardless of title matches
             $customKw = $allCustomKeywords[$record->id] ?? [];
@@ -319,6 +341,126 @@ class SuggestionEngine
      *
      * @param  string[]  $customKeywords  Custom keywords set by the user for this entry
      */
+    /**
+     * Bug 4 (2026-05-11): match a single hyphenated compound from the title.
+     *
+     * The default pipeline misses obvious anchors when the title's only
+     * distinctive content word is a hyphenated compound:
+     *   - generateMatchPhrases respects minPhraseWords (default 2), so a
+     *     1-word phrase like "cms-migration" is never emitted.
+     *   - findUnorderedStemMatch needs ≥2 distinct title-stems found in
+     *     source text; if the only other content word ("Notizen") doesn't
+     *     appear, the fallback fails too.
+     *
+     * Compound candidates are extracted from the title via extractTitleCompounds
+     * (Title-Case per token, total length ≥6, each token ≥2 chars). Each is
+     * matched with a suffix-tolerant pattern so German plurals/declensions
+     * land too ("CMS-Migration" matches "CMS-Migrationen"). A negative
+     * lookahead prevents the compound from over-matching inside a longer
+     * hyphen-extended compound (so "On-Call" never wraps inside
+     * "On-Call-Schedule" — that would mis-link to a different entry).
+     *
+     * Score = capped(tokens / 4); a 2-token compound = 0.5 (passes default
+     * minScore=0.4). Treated equivalently to a 2-word title-phrase match
+     * for ranking; deduplication downstream resolves overlaps.
+     *
+     * @return Suggestion[]
+     */
+    protected function findTitleCompoundMatches(string $originalText, EntryRecord $record): array
+    {
+        $compounds = $this->extractTitleCompounds($record->title);
+        if (empty($compounds)) {
+            return [];
+        }
+
+        $stemmer = new Stemmer;
+        $suggestions = [];
+
+        foreach ($compounds as $compound) {
+            $tokens = explode('-', $compound);
+            $tokenCount = count($tokens);
+
+            // Score: cap at 1.0, treat hyphen-tokens as separate words for
+            // the "how distinctive is this match" calc.
+            $score = round(min(1.0, $tokenCount / 4), 2);
+            if ($score < $this->minScore) {
+                continue;
+            }
+
+            // Pattern: literal head tokens + suffix-tolerant tail.
+            // Stem only the LAST token so "CMS-Migration" → "CMS-Migrationen"
+            // works, while head tokens stay anchored ("CMS-" never drifts).
+            $lastToken = $tokens[$tokenCount - 1];
+            $stem = $stemmer->stem(mb_strtolower($lastToken));
+            $maxSuffix = max(2, mb_strlen($lastToken) - mb_strlen($stem) + 2);
+
+            $headTokens = array_slice($tokens, 0, $tokenCount - 1);
+            $headEscaped = array_map(fn ($t) => preg_quote($t, '/'), $headTokens);
+            $head = implode('-', $headEscaped);
+
+            // Negative lookahead `(?!-\p{L})` blocks the compound from matching
+            // inside a longer hyphen-extended one (On-Call inside On-Call-Schedule).
+            $pattern = '/\b' . $head . '-' . preg_quote($stem, '/')
+                . '\w{0,' . $maxSuffix . '}\b(?!-\p{L})/iu';
+
+            if (! preg_match_all($pattern, $originalText, $matches, PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+
+            foreach ($matches[0] as $m) {
+                $anchorText = $m[0];
+                $position = $this->byteToCharOffset($originalText, $m[1]);
+                $context = $this->extractContext($originalText, $position, mb_strlen($anchorText));
+
+                $suggestions[] = new Suggestion(
+                    targetEntryId: $record->id,
+                    targetTitle: $record->title,
+                    targetUrl: $record->url,
+                    targetCollection: $record->collection,
+                    anchorText: $anchorText,
+                    position: $position,
+                    score: $score,
+                    sentenceContext: $context['text'],
+                    contextTruncatedStart: $context['truncated_start'],
+                    contextTruncatedEnd: $context['truncated_end'],
+                    matchType: 'title-compound',
+                    matchReason: "The title compound \"{$compound}\" was found directly in the text.",
+                );
+            }
+        }
+
+        return $suggestions;
+    }
+
+    /**
+     * Extract qualifying hyphenated compounds from a title (Bug 4).
+     *
+     * Filter "Mittel": each token must start with an uppercase letter
+     * (incl. German umlauts), each token ≥2 chars, total compound length
+     * ≥6 chars. Filters out generic glue words like "co-op", "ad-hoc",
+     * "X-ray" while keeping real identifiers ("CMS-Migration",
+     * "Pre-Flight-Check", "Trail-Rucksack", "Cache-Invalidierung").
+     *
+     * @return string[]  Unique compounds in their original casing
+     */
+    protected function extractTitleCompounds(string $title): array
+    {
+        $pattern = '/\b[A-ZÄÖÜ][\p{L}]+(?:-[A-ZÄÖÜ][\p{L}]+)+\b/u';
+        if (! preg_match_all($pattern, $title, $matches)) {
+            return [];
+        }
+
+        $compounds = [];
+        foreach ($matches[0] as $c) {
+            if (mb_strlen($c) < 6) {
+                continue;
+            }
+            $compounds[$c] = true;
+        }
+
+        return array_keys($compounds);
+    }
+
     /**
      * @return Suggestion[]
      */
