@@ -7,6 +7,7 @@ use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
 use Arturrossbach\Linkwise\Http\Controllers\IgnoredLinkController;
 use Arturrossbach\Linkwise\Http\Controllers\InboundController;
 use Arturrossbach\Linkwise\Http\Controllers\OutboundController;
+use Arturrossbach\Linkwise\Http\Controllers\RelinkPreviewController;
 use Arturrossbach\Linkwise\Http\Controllers\UrlChangerController;
 
 Route::middleware('can:manage linkwise')->group(function () {
@@ -112,6 +113,14 @@ Route::middleware('can:manage linkwise')->group(function () {
 
     Route::post('linkwise/inbound/insert', [InboundController::class, 'insert'])
         ->name('linkwise.inbound.insert');
+
+    // Bug 17 pre-flight: simulate Step 2 (link-insert) before Step 1
+    // (URL-Changer unlink) commits — DetailModal calls this on every
+    // re-link to refuse partial state when an expanded anchor would
+    // overlap an existing link.
+    Route::post('linkwise/relink-preview', [RelinkPreviewController::class, 'preview'])
+        ->name('linkwise.relink-preview');
+
     Route::post('linkwise/inbound/insert/cancel', [DashboardController::class, 'inboundInsertCancel'])
         ->name('linkwise.inbound.insert.cancel');
     Route::post('linkwise/outbound/insert/cancel', [DashboardController::class, 'outboundInsertCancel'])
