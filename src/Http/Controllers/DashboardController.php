@@ -626,6 +626,30 @@ class DashboardController extends CpController
             }, $snap['revert_skipped']);
         }
 
+        // Same enrichment for bulk_skipped (entries the bulk wanted to touch
+        // but couldn't — anchor not found, hash conflict, etc.). Renders in
+        // its own table in the drawer. Bug 2026-05-11: non-revert bulks
+        // previously had no per-entry skip visibility, only an aggregate
+        // skipped count in the toast/banner.
+        if (! empty($snap['bulk_skipped']) && is_array($snap['bulk_skipped'])) {
+            $snap['bulk_skipped'] = array_map(function ($row) {
+                if (! is_array($row) || empty($row['entry_id'])) return $row;
+                try {
+                    $e = \Statamic\Facades\Entry::find($row['entry_id']);
+                    if ($e) {
+                        $row['edit_url'] = cp_route(
+                            'collections.entries.edit',
+                            [$e->collectionHandle(), $row['entry_id']],
+                        );
+                        $row['collection'] = $e->collectionHandle();
+                    }
+                } catch (\Throwable) {
+                    // Deleted entry — leave the record as-is.
+                }
+                return $row;
+            }, $snap['bulk_skipped']);
+        }
+
         // Compute a deep-link to URL Changer search if we have a meaningful
         // search term. Used by the drawer's "Find these in URL Changer" button.
         $deepLinkSearch = $this->deepLinkSearchFor($snap);

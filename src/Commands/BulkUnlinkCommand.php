@@ -58,6 +58,9 @@ class BulkUnlinkCommand extends Command
         $succeeded = 0;
         $skipped = 0;
         $errors = [];
+        // Per-entry skip records for the drawer's "skipped during this run"
+        // table — Bug 2026-05-11.
+        $bulkSkippedRecords = [];
         // Source entries (entry_id) plus internal-link targets parsed from
         // the matched_url. Refreshed by finalizeIndex so suggestion counts
         // on both ends drop after the unlink.
@@ -121,6 +124,7 @@ class BulkUnlinkCommand extends Command
                     $msg = 'Link was no longer in entry';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                     $skipped++;
+                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($r['entry_id'] ?? '', 'anchor_not_found');
                 } else {
                     $succeeded++;
                     // Append-on-success: confirmed removal lands in items.
@@ -138,11 +142,17 @@ class BulkUnlinkCommand extends Command
                 $msg = 'Entry was modified — please reload';
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($r['entry_id'] ?? '', 'modified');
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($r['entry_id'] ?? '', 'error');
             }
+        }
+
+        if (! empty($bulkSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
         }
 
         // Flip to 'indexing' before finalizeIndex so the banner shows

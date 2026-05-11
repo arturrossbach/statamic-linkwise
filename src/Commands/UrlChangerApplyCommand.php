@@ -78,6 +78,8 @@ class UrlChangerApplyCommand extends Command
         // Per-entry skip records pushed back onto the ORIGINAL snapshot
         // when this run is a revert — see DetailUnlinkCommand for rationale.
         $revertSkippedRecords = [];
+        // Forward-bulk skip records (drawer's "skipped during this run" table).
+        $bulkSkippedRecords = [];
         $errors = [];
         // Source entry plus any internal targets parsed out of matched_url
         // (old) and new_url (replacement). Keeping both ends ensures
@@ -167,7 +169,9 @@ class UrlChangerApplyCommand extends Command
                     $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                     $skipped += count($entryReps);
                     $processedReplacements += count($entryReps);
-                    $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                    $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                    $revertSkippedRecords[] = $skipRec;
+                    $bulkSkippedRecords[] = $skipRec;
                     Cache::put('linkwise:urlchanger:status', [
                         'phase' => 'running',
                         'current' => $processedReplacements,
@@ -239,11 +243,14 @@ class UrlChangerApplyCommand extends Command
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
-                $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                $revertSkippedRecords[] = $skipRec;
+                $bulkSkippedRecords[] = $skipRec;
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'error');
                 Log::warning('[Linkwise] UrlChangerApplyCommand entry-error: '.$e->getMessage());
             }
 
@@ -293,6 +300,9 @@ class UrlChangerApplyCommand extends Command
         // surfaces them as a separate "skipped entries" table above the
         // main affected-entries list. See DetailUnlinkCommand for the
         // same pattern.
+        if (! empty($bulkSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
+        }
         if (! empty($revertSkippedRecords)) {
             app(BulkSnapshotStore::class)->recordRevertSkipped($snapshotId, $revertSkippedRecords);
             if ($reverts) {

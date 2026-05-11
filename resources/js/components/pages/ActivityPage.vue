@@ -87,19 +87,10 @@
                     <p v-if="summaryLabel(detail.snapshot)" class="mt-1">{{ summaryLabel(detail.snapshot) }}</p>
                 </div>
 
-                <!-- V1 read-only mode (2026-05-11): Revert action UI hidden.
-                     Snapshots are still recorded by every bulk command so the
-                     drawer below shows full per-entry detail incl. skipped
-                     reasons. The backend revert endpoint stays live — power
-                     users + support can trigger reverts via API/CLI. The
-                     full Revert UX returns in a post-V1 release once the
-                     revert-completeness audit class is stable. -->
-                <Alert v-if="detail.snapshot.completed_at !== null && !detail.snapshot.reverted_at" variant="default" class="mb-3">
-                    <p class="text-sm">
-                        <strong>Read-only in V1.</strong>
-                        This page shows what each bulk did, including any entries that were skipped (table below). The one-click Revert action is coming in a future release. If you need to undo a specific bulk now, contact support — every operation is recorded.
-                    </p>
-                </Alert>
+                <!-- Activity Log is view-only in V1 — Revert action removed from UI.
+                     Snapshots keep being recorded so the drawer shows full
+                     per-entry detail. No banner here: user just sees the
+                     recap below, no marketing about a future feature. -->
                 <!-- Still-running state: clear "wait" message, no Revert. -->
                 <Alert v-else-if="detail.snapshot.completed_at === null" variant="warning" class="mb-3">
                     <p class="text-sm">
@@ -134,6 +125,40 @@
                          reverted: "X entries were skipped during the revert".
                      The skipped rows are also EXCLUDED from sortedDetailEntries
                      so the main table doesn't show them as empty rows. -->
+                <!-- Skipped during THIS bulk run — entries the bulk wanted
+                     to touch but couldn't (anchor not found, hash mismatch,
+                     missing target, unexpected error). Distinct from
+                     revert-skipped which fires during the inverse-bulk
+                     of a revert. Bug 2026-05-11: prior to this, non-revert
+                     bulks left their skipped entries invisible beyond the
+                     toast's aggregate count. -->
+                <Alert v-if="hasSkippedDuringBulk" variant="warning" class="mb-3">
+                    <p class="text-sm font-medium mb-2">
+                        ⚠ {{ skippedDuringBulk.length }} {{ skippedDuringBulk.length === 1 ? 'entry was' : 'entries were' }} skipped during this run. Their content is intact — Linkwise refused to overwrite them or couldn't locate the anchor.
+                    </p>
+                    <div class="overflow-x-auto">
+                        <table class="data-table w-full text-xs">
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="text-left">Entry</th>
+                                    <th scope="col" class="text-left">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="row in skippedDuringBulk" :key="row.entry_id">
+                                    <td>
+                                        <a v-if="row.edit_url" :href="row.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ row.entry_title || row.entry_id }}</a>
+                                        <span v-else>{{ row.entry_title || '(deleted)' }}</span>
+                                        <BardBadge v-if="row.entry_id" :entry-id="row.entry_id" class="ml-1.5" />
+                                        <span v-if="row.collection" class="ml-2 text-xs text-gray-400">{{ row.collection }}</span>
+                                    </td>
+                                    <td class="text-gray-600 dark:text-gray-400" v-html="formatSkipReason(row)"></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </Alert>
+
                 <Alert v-if="hasSkippedDuringRevert" variant="warning" class="mb-3">
                     <p class="text-sm font-medium mb-2">
                         ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during {{ skippedScopeLabel }} because of changes made since the bulk ran. Their content is intact — Linkwise refused to overwrite them.
@@ -636,6 +661,20 @@ export default {
             return this.detail?.snapshot?.revert_skipped || [];
         },
 
+        /** Per-entry skip records written by THIS bulk run (not a revert).
+         *  Distinct bucket from revert_skipped so the drawer can render
+         *  "this bulk wanted to touch N entries, here's the M it couldn't"
+         *  separately from "during the revert of this bulk, M entries
+         *  refused to roll back". Bug 2026-05-11. */
+        hasSkippedDuringBulk() {
+            const skipped = this.detail?.snapshot?.bulk_skipped;
+            return Array.isArray(skipped) && skipped.length > 0;
+        },
+
+        skippedDuringBulk() {
+            return this.detail?.snapshot?.bulk_skipped || [];
+        },
+
         /** Wording for the skipped-table banner. "this run" when the
          *  snapshot itself is the bulk that skipped (e.g. an Apply Rule
          *  with one conflict-skipped entry, or a revert dispatch that
@@ -1056,6 +1095,18 @@ export default {
             if (! row) return '';
             if (row.reason === 'deleted') {
                 return 'Entry was deleted since this bulk ran';
+            }
+            // Bulk-run-specific reasons (Bug 2026-05-11): non-revert bulks
+            // skip for additional causes — surface them in plain English so
+            // the user knows what to fix.
+            if (row.reason === 'anchor_not_found') {
+                return 'Anchor text was not found in entry content — run a scan or edit the entry';
+            }
+            if (row.reason === 'missing_link_target') {
+                return 'Insertion payload was missing both target entry and href';
+            }
+            if (row.reason === 'error') {
+                return 'Unexpected error during write — see log for details';
             }
             // 'modified' (and unknown reason fallback): show editor + when.
             const who = row.modified_by ? `by <strong>${this.escape(row.modified_by)}</strong>` : 'by another editor';

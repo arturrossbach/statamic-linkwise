@@ -464,6 +464,42 @@ class BulkSnapshotStore
     }
 
     /**
+     * Append per-entry skip records to a snapshot's bulk_skipped list. Called
+     * by bulk commands when an entry was in the planned set but ultimately
+     * NOT written (anchor not found, hash mismatch from a parallel edit,
+     * missing payload field, unexpected throwable). Parallel to
+     * recordRevertSkipped but for forward/initial bulks rather than reverts.
+     *
+     * The activity-log drawer surfaces these in a "X entries were skipped
+     * during this run" table above the main affected-entries list — gives
+     * the user honest visibility into "of N planned, here's the M that
+     * didn't land + why" instead of just an aggregate count.
+     *
+     * Best-effort: never throws upward. Each skipped item has the shape
+     * built by buildSkipRecord(): {entry_id, entry_title, reason,
+     * modified_by?, modified_at?}.
+     */
+    public function recordBulkSkipped(string $snapshotId, array $skipped): void
+    {
+        if (empty($skipped)) return;
+        $path = $this->pathFor($snapshotId);
+        if (! file_exists($path)) return;
+        $data = $this->readFile($path);
+        if ($data === null) return;
+        $existing = $data['bulk_skipped'] ?? [];
+        if (! is_array($existing)) $existing = [];
+        $data['bulk_skipped'] = array_values(array_merge($existing, array_values($skipped)));
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::recordBulkSkipped failed — '.$e->getMessage());
+        }
+    }
+
+    /**
      * Mark a snapshot as reverted. Called by the activity-log Revert flow
      * once the inverse bulk has finished. The activity-log UI uses these
      * fields to show a "[Reverted]" badge and to disable the Revert button

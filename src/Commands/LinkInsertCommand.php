@@ -79,6 +79,13 @@ class LinkInsertCommand extends Command
         // Per-entry skip records pushed back onto the ORIGINAL snapshot
         // when this run is a revert. See DetailUnlinkCommand for rationale.
         $revertSkippedRecords = [];
+        // Per-entry skip records for the drawer's "skipped during this run"
+        // table — populated for ALL skip reasons (anchor not found, hash
+        // mismatch, missing payload field, exception), regardless of revert
+        // mode. Bug 2026-05-11: previously only revert-mode populated
+        // revert_skipped, so non-revert bulks left their skipped entries
+        // invisible to the user beyond an aggregate count.
+        $bulkSkippedRecords = [];
         $errors = [];
         // Entries whose link relationships actually changed (source +
         // target of every successful insertion). Used by finalizeIndex
@@ -164,6 +171,7 @@ class LinkInsertCommand extends Command
                     $msg = 'Insertion missing both target_entry_id and href';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                     $skipped++;
+                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'missing_link_target');
                     Cache::put($statusKey, [
                         'phase' => 'running',
                         'current' => $i + 1,
@@ -196,7 +204,9 @@ class LinkInsertCommand extends Command
                         $msg = 'Entry was modified by another editor';
                         $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                         $skipped++;
-                        $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
+                        $skipRec = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
+                        $revertSkippedRecords[] = $skipRec;
+                        $bulkSkippedRecords[] = $skipRec;
                         Cache::put($statusKey, [
                             'phase' => 'running',
                             'current' => $i + 1,
@@ -275,16 +285,20 @@ class LinkInsertCommand extends Command
                     $msg = 'Anchor text not found in entry';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                     $skipped++;
+                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'anchor_not_found');
                 }
             } catch (EntryConflictException $e) {
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
-                $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
+                $skipRec = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
+                $revertSkippedRecords[] = $skipRec;
+                $bulkSkippedRecords[] = $skipRec;
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'error');
                 Log::warning('[Linkwise] LinkInsertCommand item-error: '.$e->getMessage());
             }
 
@@ -325,6 +339,15 @@ class LinkInsertCommand extends Command
             'succeeded' => $succeeded,
             'skipped' => $skipped,
         ]);
+
+        // Persist per-entry skip records for THIS bulk run — populated for
+        // every skip reason (anchor not found, hash mismatch, missing
+        // target, exception) regardless of revert flow. Drawer renders
+        // these in a "X entries were skipped during this run" table above
+        // the main affected-entries list.
+        if (! empty($bulkSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
+        }
 
         // Persist per-entry skip records onto THIS snapshot (always) and
         // — for revert flows — also onto the ORIGINAL snapshot. Drawer

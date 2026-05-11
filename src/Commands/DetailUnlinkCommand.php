@@ -68,6 +68,9 @@ class DetailUnlinkCommand extends Command
         // snapshot — only populated when this run is itself a revert. Empty
         // for normal-flow detail-unlink.
         $revertSkippedRecords = [];
+        // Per-entry skip records for the drawer's "skipped during this run"
+        // table — populated for ALL skip reasons regardless of revert mode.
+        $bulkSkippedRecords = [];
         $errors = [];
         // Entries whose link relationships actually changed (the entry
         // being modified + the target, if the removed URL is internal).
@@ -165,7 +168,9 @@ class DetailUnlinkCommand extends Command
                     // by X on Y" — both on this snapshot AND, for revert
                     // flows, on the ORIGINAL snapshot too (recorded after
                     // the loop below).
-                    $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                    $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                    $revertSkippedRecords[] = $skipRec;
+                    $bulkSkippedRecords[] = $skipRec;
                     Cache::put('linkwise:detailunlink:status', [
                         'phase' => 'running',
                         'current' => $processedReplacements,
@@ -248,11 +253,14 @@ class DetailUnlinkCommand extends Command
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
                 // Same per-entry skip-record write as the pre-flight branch.
-                $revertSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                $revertSkippedRecords[] = $skipRec;
+                $bulkSkippedRecords[] = $skipRec;
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'error');
                 Log::warning('[Linkwise] DetailUnlinkCommand entry-error: '.$e->getMessage());
             }
 
@@ -305,6 +313,12 @@ class DetailUnlinkCommand extends Command
             'succeeded' => $succeeded,
             'skipped' => $skipped,
         ]);
+
+        // Forward-bulk skip records (= this run's own skips) for the drawer's
+        // "skipped during this run" table — distinct bucket from revert_skipped.
+        if (! empty($bulkSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
+        }
 
         // Persist per-entry skip records:
         //   1. Always onto THIS snapshot — the drawer's skipped-table
