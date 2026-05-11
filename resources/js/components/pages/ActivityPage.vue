@@ -87,28 +87,19 @@
                     <p v-if="summaryLabel(detail.snapshot)" class="mt-1">{{ summaryLabel(detail.snapshot) }}</p>
                 </div>
 
-                <!-- Revert action — when the operation is reversible (most apply / insert /
-                     URL-changer ops are), Linkwise can dispatch the inverse bulk for you.
-                     Otherwise we fall back to the manual recovery instructions. -->
-                <div v-if="canRevert" class="mb-3 rounded-md border border-blue-200 dark:border-blue-900/30 bg-blue-50 dark:bg-blue-900/10 p-3">
-                    <div class="flex items-start justify-between gap-3">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium text-blue-900 dark:text-blue-200">Revert this operation</p>
-                            <p class="text-xs text-blue-700 dark:text-blue-300 mt-0.5 leading-relaxed">
-                                {{ revertExplanation }}
-                                <span v-if="ageWarning" class="block mt-1 text-amber-700 dark:text-amber-400">{{ ageWarning }}</span>
-                            </p>
-                        </div>
-                        <Button
-                            text="Revert…"
-                            variant="primary"
-                            size="sm"
-                            :disabled="reverting || revertCount === 0"
-                            v-tooltip="revertCount === 0 ? 'No items to revert — every entry was either modified since the bulk or recorded before anchor capture shipped.' : ''"
-                            @click="confirmRevert = true"
-                        />
-                    </div>
-                </div>
+                <!-- V1 read-only mode (2026-05-11): Revert action UI hidden.
+                     Snapshots are still recorded by every bulk command so the
+                     drawer below shows full per-entry detail incl. skipped
+                     reasons. The backend revert endpoint stays live — power
+                     users + support can trigger reverts via API/CLI. The
+                     full Revert UX returns in a post-V1 release once the
+                     revert-completeness audit class is stable. -->
+                <Alert v-if="detail.snapshot.completed_at !== null && !detail.snapshot.reverted_at" variant="default" class="mb-3">
+                    <p class="text-sm">
+                        <strong>Read-only in V1.</strong>
+                        This page shows what each bulk did, including any entries that were skipped (table below). The one-click Revert action is coming in a future release. If you need to undo a specific bulk now, contact support — every operation is recorded.
+                    </p>
+                </Alert>
                 <!-- Still-running state: clear "wait" message, no Revert. -->
                 <Alert v-else-if="detail.snapshot.completed_at === null" variant="warning" class="mb-3">
                     <p class="text-sm">
