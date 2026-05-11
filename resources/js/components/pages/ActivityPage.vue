@@ -12,9 +12,7 @@
                 <div>
                     <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Activity Log</h3>
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
-                        Read-only forensic record of every Linkwise bulk operation in the last 30 days.
-                        Use this to see what changed and which entries were affected — recovery happens through your normal backup workflow
-                        (Statamic Revisions, Git, or your hosting provider's backup).
+                        Every Linkwise bulk operation from the last 30 days, with the entries it touched and any that were skipped.
                     </p>
                 </div>
                 <HelpIcon tooltip="Snapshots are written before each bulk runs. They contain entry IDs and content hashes (no entry contents). Older than 30 days are auto-deleted." />
