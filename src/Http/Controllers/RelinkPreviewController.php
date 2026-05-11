@@ -101,8 +101,8 @@ class RelinkPreviewController extends CpController
                 'anchor_not_found' => 'Der Anker-Text ist nicht (mehr) im Eintrag enthalten.',
                 'context_mismatch' => 'Der ursprüngliche Satz-Kontext ist nicht mehr im Eintrag — bitte Modal neu öffnen.',
                 'crosses_existing_link' => $blockingLabel !== null
-                    ? "Der Anker überlappt mit einem bereits bestehenden Link auf {$blockingLabel}. Erst per URL-Changer entfernen, dann erneut versuchen."
-                    : 'Der Anker überlappt mit einem bereits bestehenden Link.',
+                    ? "Der Anker überlappt mit einem bestehenden Link auf {$blockingLabel} im selben Eintrag. Bitte den Link zuerst entfernen und erneut versuchen."
+                    : 'Der Anker überlappt mit einem bestehenden Link im selben Eintrag. Bitte den Link zuerst entfernen.',
                 'already_linked_to_target' => 'Dieser Text ist bereits mit dem Ziel verlinkt.',
             ];
 
