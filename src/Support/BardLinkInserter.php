@@ -436,6 +436,55 @@ class BardLinkInserter
      * Check if a match position is at word boundaries (not inside another word).
      */
     /**
+     * Build a "flat" version of markdown where [anchor](url) collapses to
+     * just `anchor`, plus a position map raw_offset → flat_offset (or null
+     * when the raw char sits inside a [...](...) syntax fragment that's
+     * not in the flat string). Used by the insertLinkIntoMarkdown context
+     * guard so a sentence-context that SuggestionEngine generated from
+     * the NLP-flattened text can still find its anchor occurrence inside
+     * raw markdown that contains inline links (Bug 2026-05-11).
+     *
+     * @return array{0: string, 1: array<int, int|null>}
+     */
+    protected static function flattenMarkdownLinks(string $markdown): array
+    {
+        $flat = '';
+        $rawToFlat = [];
+        $rawLen = mb_strlen($markdown);
+        $i = 0;
+        while ($i < $rawLen) {
+            $remaining = mb_substr($markdown, $i);
+            // Match [anchor](url) starting at the current cursor.
+            if (preg_match('/^\[([^\[\]]*)\]\(([^)]+)\)/u', $remaining, $m)) {
+                $anchor = $m[1];
+                $anchorLen = mb_strlen($anchor);
+                $totalMatchLen = mb_strlen($m[0]);
+                // The opening '[' — not in flat.
+                $rawToFlat[$i] = null;
+                // Anchor chars: appended to flat, each mapped.
+                $flatStart = mb_strlen($flat);
+                $flat .= $anchor;
+                for ($k = 0; $k < $anchorLen; $k++) {
+                    $rawToFlat[$i + 1 + $k] = $flatStart + $k;
+                }
+                // ']', '(', URL chars, ')' — all not in flat.
+                $tailStart = $i + 1 + $anchorLen;
+                $tailLen = $totalMatchLen - 1 - $anchorLen;
+                for ($k = 0; $k < $tailLen; $k++) {
+                    $rawToFlat[$tailStart + $k] = null;
+                }
+                $i += $totalMatchLen;
+                continue;
+            }
+            // Regular char: copy to flat 1:1.
+            $rawToFlat[$i] = mb_strlen($flat);
+            $flat .= mb_substr($markdown, $i, 1);
+            $i++;
+        }
+        return [$flat, $rawToFlat];
+    }
+
+    /**
      * When the captured sentence_context spans paragraph boundaries (legacy
      * extractContext output joined paragraphs with "\n"), the needle cannot
      * be found inside any single paragraph and the wrap silently fails. This
@@ -597,10 +646,34 @@ class BardLinkInserter
             $needle = static::narrowContextToAnchorLine($needle, $anchorText);
             if ($needle !== '' && mb_strlen($needle) >= mb_strlen($anchorText)) {
                 $rangeStart = mb_stripos($markdown, $needle);
-                if ($rangeStart === false) {
-                    return null; // sentence gone — refuse to wrap blindly
+                if ($rangeStart !== false) {
+                    $contextRange = ['start' => $rangeStart, 'end' => $rangeStart + mb_strlen($needle)];
+                } else {
+                    // Fallback (Bug 2026-05-11): SuggestionEngine produces
+                    // sentence_context from the NLP-flattened text (markdown
+                    // links collapsed to their anchor text). When the
+                    // captured sentence sits adjacent to a markdown link
+                    // (e.g. "...[einem gekühlten Weißwein](url). CMS-Migration!"),
+                    // the raw-markdown haystack contains the link syntax,
+                    // and a literal mb_stripos for the flat needle returns
+                    // false. Flatten the markdown, find the needle there,
+                    // map flat-position back to raw-markdown position.
+                    [$flat, $rawToFlat] = static::flattenMarkdownLinks($markdown);
+                    $flatStart = mb_stripos($flat, $needle);
+                    if ($flatStart === false) {
+                        return null; // truly absent
+                    }
+                    $flatEnd = $flatStart + mb_strlen($needle);
+                    $rawStart = null;
+                    $rawEnd = null;
+                    foreach ($rawToFlat as $rawIdx => $flatIdx) {
+                        if ($flatIdx === null) continue;
+                        if ($rawStart === null && $flatIdx >= $flatStart) $rawStart = $rawIdx;
+                        if ($flatIdx < $flatEnd) $rawEnd = $rawIdx + 1;
+                    }
+                    if ($rawStart === null || $rawEnd === null) return null;
+                    $contextRange = ['start' => $rawStart, 'end' => $rawEnd];
                 }
-                $contextRange = ['start' => $rangeStart, 'end' => $rangeStart + mb_strlen($needle)];
             }
         }
 

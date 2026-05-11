@@ -257,6 +257,30 @@ class MutatorAndInsertParityTest extends TestCase
         $this->assertTrue($thirdWrapped, 'Captured-sentence occurrence (paragraph 3) MUST be wrapped');
     }
 
+    /**
+     * Bug 2026-05-11: SuggestionEngine produces sentence_context from
+     * NLP-flattened text. For markdown fields with inline links
+     * ([anchor](url)) inside the captured sentence, the raw-markdown
+     * needle never matched and the wrap silently skipped. The fallback
+     * flattens markdown links and maps positions back to raw.
+     */
+    public function test_insert_parity_markdown_context_with_inline_link_matches(): void
+    {
+        $href = 'https://example.com/cms-migration';
+        $anchor = 'CMS-Migration';
+        // Context is the NLP-flattened form (markdown link collapsed to its anchor).
+        $context = 'mit einem gekühlten Weißwein. CMS-Migration!';
+        // Raw markdown has the inline link preserved.
+        $md = "## Auf einen Blick\n\nSaubere Querverweise mit [einem gekühlten Weißwein](https://laravel.com/docs). CMS-Migration!";
+
+        $result = BardLinkInserter::insertLinkIntoMarkdown($md, $anchor, $href, false, $context);
+
+        $this->assertNotNull($result, 'Markdown insert must succeed when context references the flat form');
+        $this->assertStringContainsString("[$anchor]($href)", $result, 'CMS-Migration anchor should be wrapped');
+        // Ensure the existing inline link was preserved untouched.
+        $this->assertStringContainsString('[einem gekühlten Weißwein](https://laravel.com/docs)', $result);
+    }
+
     public function test_insert_parity_context_not_in_doc_skips(): void
     {
         // Captured sentence no longer present in the entry → refuse to wrap
