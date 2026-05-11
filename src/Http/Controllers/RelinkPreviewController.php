@@ -36,6 +36,12 @@ class RelinkPreviewController extends CpController
             'href' => ['nullable', 'string', 'max:2048'],
             'anchor_text' => ['required', 'string', 'max:500'],
             'sentence_context' => ['nullable', 'string', 'max:1024'],
+            // The link Step 1 will unlink before Step 2 inserts. Marks
+            // with this href are treated as post-Step-1 (= ignored) by
+            // the dry-run, so simple anchor-expansion within a same-
+            // target link does NOT trigger a false already-linked
+            // refusal. Different-target marks remain genuine blockers.
+            'original_href' => ['nullable', 'string', 'max:2048'],
         ]);
 
         if (empty($validated['target_entry_id']) && empty($validated['href'])) {
@@ -80,6 +86,7 @@ class RelinkPreviewController extends CpController
             $href,
             false,
             $validated['sentence_context'] ?? null,
+            $validated['original_href'] ?? null,
         );
 
         // Friendly German message per reason — the modal renders this

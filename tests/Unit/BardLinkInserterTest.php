@@ -1435,6 +1435,99 @@ class BardLinkInserterTest extends TestCase
         $this->assertSame('statamic://entry::thinking-post', $result['blocking_href']);
     }
 
+    public function test_bug17_simple_same_target_expansion_succeeds_with_original_href(): void
+    {
+        // Advisor-flagged regression (2026-05-11): the most common re-link
+        // case is "anchor expansion within an existing same-target link"
+        // — user has "Redis" linked to redis-target, expands the anchor
+        // to "Redis Setup Guide" with the SAME target. Without simulating
+        // Step 1, the dry-run sees the existing Redis mark and refuses
+        // with already_linked_to_target. With originalHref=redis-target,
+        // the mark is treated as post-Step-1 (= gone) and the dry-run
+        // correctly reports ok:true.
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Folgen Sie dem '],
+                [
+                    'type' => 'text',
+                    'text' => 'Redis',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::redis-target'],
+                    ]],
+                ],
+                ['type' => 'text', 'text' => ' Setup Guide für beste Ergebnisse.'],
+            ],
+        ]];
+
+        // Without originalHref — false-positive refusal (legacy / Bug 17 phase A v1)
+        $without = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::redis-target',
+        );
+        $this->assertFalse($without['ok']);
+        $this->assertSame('already_linked_to_target', $without['reason']);
+
+        // With originalHref — Step 1 simulation: existing same-target
+        // mark is ignored, dry-run reports ok.
+        $with = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::redis-target',
+            false,
+            null,
+            'statamic://entry::redis-target', // originalHref
+        );
+        $this->assertTrue($with['ok']);
+    }
+
+    public function test_bug17_original_href_does_not_unblock_different_target_link(): void
+    {
+        // Defense-in-depth: original_href only excuses marks pointing at
+        // that exact href. A different-target mark in the same span is
+        // STILL a blocker even when original_href is set — Step 1 won't
+        // unlink it, so Bug 17 would still hit at Step 2.
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Folgen Sie dem '],
+                [
+                    'type' => 'text',
+                    'text' => 'Redis',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::redis-target'],
+                    ]],
+                ],
+                ['type' => 'text', 'text' => ' '],
+                [
+                    'type' => 'text',
+                    'text' => 'Setup Guide',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::setup-guide'],
+                    ]],
+                ],
+                ['type' => 'text', 'text' => ' für beste Ergebnisse.'],
+            ],
+        ]];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::redis-target',
+            false,
+            null,
+            'statamic://entry::redis-target',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('crosses_existing_link', $result['reason']);
+        $this->assertSame('statamic://entry::setup-guide', $result['blocking_href']);
+    }
+
     public function test_bug17_repro_b_expanded_anchor_crosses_existing_soba_link(): void
     {
         $bard = [[

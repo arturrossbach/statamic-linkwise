@@ -505,6 +505,12 @@ export default {
                             content_hash: entryHash,
                             anchor_text: item._anchor,
                             sentence_context: item.sentence_context || '',
+                            // Step 1 will unlink THIS href at the known
+                            // occurrence. Telling the dry-run lets it
+                            // simulate post-Step-1 state — simple anchor
+                            // expansion within a same-target link is NOT
+                            // a false-positive refusal.
+                            original_href: item.url,
                         };
                         if (isStatamicEntryUrl) {
                             previewBody.target_entry_id = item.url.replace('statamic://entry::', '');

@@ -458,6 +458,7 @@ class BardLinkInserter
         string $href,
         bool $caseSensitive = false,
         ?string $expectedSentenceContext = null,
+        ?string $originalHref = null,
     ): array {
         [$entry] = SafeEntrySaver::load($sourceEntryId);
 
@@ -477,9 +478,9 @@ class BardLinkInserter
             $value = $entry->get($handle);
 
             if ($field->type() === 'bard' && is_array($value) && ! empty($value)) {
-                $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+                $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
             } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
-                $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+                $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
             } elseif ($field->type() === 'markdown' && is_string($value) && ! empty($value) && $handle !== 'title') {
                 // Markdown dry-run: re-use the existing walker since
                 // markdown returns a new string (pass-by-value, no
@@ -512,11 +513,11 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    public static function canInsertLinkIntoBardContent(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
+    public static function canInsertLinkIntoBardContent(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?string $originalHref = null): array
     {
         $bestFailure = null;
         foreach ($bardContent as $node) {
-            $result = static::analyzeBardNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+            $result = static::analyzeBardNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
             if ($result['ok'] ?? false) {
                 return $result;
             }
@@ -534,7 +535,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    protected static function analyzeBardNode(array $node, string $anchorText, string $href, bool $caseSensitive, ?string $expectedSentenceContext): array
+    protected static function analyzeBardNode(array $node, string $anchorText, string $href, bool $caseSensitive, ?string $expectedSentenceContext, ?string $originalHref = null): array
     {
         // Mirror the processNode skip-list — code blocks, hrs, images,
         // replicator 'set' nodes. Stay in sync if the list ever changes.
@@ -547,7 +548,7 @@ class BardLinkInserter
         }
 
         // First: this node's direct children (= the actual wrap target).
-        $direct = static::findValidMatchPosition($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+        $direct = static::findValidMatchPosition($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
         if ($direct['ok'] ?? false) {
             return $direct;
         }
@@ -555,7 +556,7 @@ class BardLinkInserter
 
         // Then: recurse into child nodes that may have their own content.
         foreach ($node['content'] as $child) {
-            $nested = static::analyzeBardNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+            $nested = static::analyzeBardNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
             if ($nested['ok'] ?? false) {
                 return $nested;
             }
@@ -570,7 +571,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    public static function canInsertLinkIntoReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
+    public static function canInsertLinkIntoReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?string $originalHref = null): array
     {
         $bestFailure = null;
 
@@ -583,9 +584,9 @@ class BardLinkInserter
                     continue;
                 }
                 if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+                    $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
                 } elseif (static::looksLikeReplicatorContent($value)) {
-                    $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+                    $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
                 } else {
                     continue;
                 }
@@ -1094,7 +1095,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, pos?:int, startNodeIndex?:int, endNodeIndex?:int, startOffset?:int, endOffset?:int, reason?:string, blocking_href?:string}
      */
-    protected static function findValidMatchPosition(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
+    protected static function findValidMatchPosition(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?string $originalHref = null): array
     {
         // Build concatenated text from child text nodes
         $fullText = '';
@@ -1235,6 +1236,18 @@ class BardLinkInserter
             // the DIFFERENT-target href as the blocker: that's the actual
             // conflict the user has to resolve, not the same-target no-op
             // they'd implicitly clear via Step 1 anyway.
+            // $originalHref simulates Step 1 of the re-link flow: the
+            // DetailModal will unlink the existing link at this anchor
+            // before Step 2 inserts. Marks whose href equals $originalHref
+            // are therefore treated as if they were already gone — they
+            // can't block Step 2 from succeeding. This is what makes the
+            // common case work: simple anchor-expansion within a
+            // same-target link (e.g. "Redis" → "Redis Setup Guide" to
+            // the same target) must NOT be refused as already_linked.
+            //
+            // Different-target marks remain blockers regardless — they're
+            // the genuine Bug 17 conflict the user has to resolve via
+            // URL-Changer first.
             $startIdx = $startMap['index'];
             $endIdx = $endMap['index'];
             $blockingHref = null;
@@ -1247,6 +1260,13 @@ class BardLinkInserter
                         continue;
                     }
                     $thisHref = $m['attrs']['href'] ?? '';
+
+                    // Skip marks that will be unlinked by Step 1 of the
+                    // re-link flow (= post-Step-1 simulation).
+                    if ($originalHref !== null && $thisHref === $originalHref) {
+                        continue;
+                    }
+
                     if ($thisHref !== $href) {
                         // Different target — strongest blocker, stop early.
                         $blockingHref = $thisHref;
