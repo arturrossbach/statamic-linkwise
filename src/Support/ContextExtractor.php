@@ -58,6 +58,22 @@ class ContextExtractor
         $start = max(0, $pos - $halfWindow);
         $end = min($textLength, $pos + $anchorLen + $halfWindow);
 
+        // Hard-stop at paragraph boundary ("\n"). TextExtractor::fromBard
+        // joins paragraphs with "\n"; without this clamp the context can
+        // include text from a neighbouring paragraph, which BardLinkInserter
+        // then cannot find when the same string is later passed back as
+        // expectedSentenceContext (silent "Anchor text not found"). Mirror
+        // of SuggestionEngine::extractContext.
+        $textBeforeAnchor = mb_substr($text, 0, $pos);
+        $lastNl = mb_strrpos($textBeforeAnchor, "\n");
+        if ($lastNl !== false) {
+            $start = max($start, $lastNl + 1);
+        }
+        $nextNl = mb_strpos($text, "\n", $pos + $anchorLen);
+        if ($nextNl !== false) {
+            $end = min($end, $nextNl);
+        }
+
         // Snap to word boundaries
         if ($start > 0) {
             $spacePos = mb_strpos($text, ' ', $start);

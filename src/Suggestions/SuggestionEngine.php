@@ -1056,6 +1056,23 @@ class SuggestionEngine
         $start = max(0, $position - $halfWindow);
         $end = min($textLength, $position + $anchorLength + $halfWindow);
 
+        // Hard-stop at paragraph boundary ("\n"). TextExtractor::fromBard
+        // joins paragraphs with "\n", so without this clamp the window can
+        // bleed into the previous/next paragraph. The resulting context
+        // string would contain a "\n" that BardLinkInserter cannot find
+        // inside any single paragraph's text — every wrap silently fails
+        // with "Anchor text not found". The context belongs to ONE
+        // paragraph; never let it cross.
+        $textBeforeAnchor = mb_substr($text, 0, $position);
+        $lastNl = mb_strrpos($textBeforeAnchor, "\n");
+        if ($lastNl !== false) {
+            $start = max($start, $lastNl + 1);
+        }
+        $nextNl = mb_strpos($text, "\n", $position + $anchorLength);
+        if ($nextNl !== false) {
+            $end = min($end, $nextNl);
+        }
+
         // Snap to word boundaries
         if ($start > 0 && $start < $textLength) {
             $spacePos = mb_strpos($text, ' ', $start);

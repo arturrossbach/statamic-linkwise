@@ -317,6 +317,87 @@ class SuggestionEngineTest extends TestCase
         $this->assertStringNotContainsString('...', $suggestions[0]->sentenceContext, 'Clean context should not contain ...');
     }
 
+    /**
+     * BUG-1 root cause: TextExtractor::fromBard joins paragraphs with "\n",
+     * so $text passed to extractContext can contain newlines. If extractContext
+     * blindly takes ±halfWindow chars, the resulting sentenceContext spans
+     * paragraph boundaries (e.g. "Heading\nFirst sentence of body"). The
+     * BardLinkInserter then searches for that needle in a SINGLE paragraph's
+     * fullText and never finds it → the wrap is silently rejected with
+     * "Anchor text not found".
+     *
+     * Invariant: sentenceContext must NEVER contain "\n" — context belongs
+     * to ONE paragraph only.
+     */
+    public function test_sentence_context_never_crosses_paragraph_boundary(): void
+    {
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'Technische Schulden',
+                url: '/blog/technische-schulden',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        // Two paragraphs joined with "\n" (mirrors TextExtractor::fromBard output).
+        // Anchor sits at the start of paragraph 2; with the old halfWindow
+        // expansion the context would reach back into paragraph 1.
+        $text = "Einleitung\ntechnische Schulden sind teuer und verzinst.";
+        $suggestions = $this->engine->suggest($text, $index);
+
+        $this->assertNotEmpty($suggestions);
+        $context = $suggestions[0]->sentenceContext;
+        $this->assertStringNotContainsString("\n", $context, "sentenceContext must stop at paragraph boundary, got: $context");
+        $this->assertStringContainsString('technische Schulden', $context);
+    }
+
+    public function test_sentence_context_anchor_at_paragraph_end_does_not_bleed_into_next(): void
+    {
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'Technische Schulden',
+                url: '/blog/technische-schulden',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        // Anchor at end of paragraph 1; halfWindow would expand into paragraph 2.
+        $text = "Lange Einführung über technische Schulden\nDanach folgt das Fazit Bla bla.";
+        $suggestions = $this->engine->suggest($text, $index);
+
+        $this->assertNotEmpty($suggestions);
+        $this->assertStringNotContainsString("\n", $suggestions[0]->sentenceContext);
+    }
+
+    public function test_sentence_context_anchor_in_middle_no_newlines_intact(): void
+    {
+        // Regression-shield: a clean single-paragraph case must keep working
+        // unchanged after the \n-stop fix.
+        $index = [
+            'entry-1' => new EntryRecord(
+                id: 'entry-1',
+                title: 'Redis Setup Guide',
+                url: '/blog/redis-setup-guide',
+                collection: 'articles',
+                text: '',
+                outboundLinks: [],
+            ),
+        ];
+
+        $text = 'When configuring your production server, you should follow the Redis Setup Guide for the best results in your deployment pipeline.';
+        $suggestions = $this->engine->suggest($text, $index);
+
+        $this->assertNotEmpty($suggestions);
+        $this->assertStringContainsString('Redis Setup Guide', $suggestions[0]->sentenceContext);
+        $this->assertStringContainsString('follow the', $suggestions[0]->sentenceContext);
+    }
+
     public function test_anchor_never_spans_sentence_boundary(): void
     {
         $index = [

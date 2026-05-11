@@ -178,6 +178,85 @@ class MutatorAndInsertParityTest extends TestCase
         $this->assertGreaterThanOrEqual($secondParaStart, $wrappedAt, 'Markdown: wrap must land in the second paragraph (matched sentence), not the first');
     }
 
+    /**
+     * Bug-1 defense-in-depth: even if a stale or third-party caller passes a
+     * sentence_context that contains "\n" (cross-paragraph block from
+     * TextExtractor::fromBard), the inserter must not silently fail. It must
+     * isolate the line containing the anchor and use that as the needle.
+     *
+     * Without this guard, ALL outbound inserts whose context happened to
+     * straddle a paragraph boundary returned null → "Anchor text not found"
+     * toast for the user, even though the anchor was clearly present.
+     */
+    public function test_insert_parity_context_with_newline_isolates_correct_line(): void
+    {
+        $href = 'https://example.com/insert-target';
+        $anchor = 'AnchorWord';
+        // Multi-line context: heading on line 1, anchor in line 2 (= what
+        // SuggestionEngine returned before the extractContext fix).
+        $context = "Einleitung\ncached, ohne die Strategie mitzudenken, baut $anchor";
+
+        $bard = [
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => 'Einleitung'],
+            ]],
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => "cached, ohne die Strategie mitzudenken, baut $anchor"],
+            ]],
+        ];
+        $md = "Einleitung\n\ncached, ohne die Strategie mitzudenken, baut $anchor";
+        $replicator = [
+            ['id' => 'set-1', 'type' => 'text_block', 'enabled' => true, 'body' => $bard],
+        ];
+
+        $bardOut = BardLinkInserter::insertLinkWithHref($bard, $anchor, $href, false, $context);
+        $mdOut = BardLinkInserter::insertLinkIntoMarkdown($md, $anchor, $href, false, $context);
+        $repOut = BardLinkInserter::processReplicatorWithHref($replicator, $anchor, $href, false, $context);
+
+        $this->assertNotNull($bardOut, 'Bard: must wrap even with multi-line context (defense-in-depth)');
+        $this->assertNotNull($mdOut, 'Markdown: must wrap even with multi-line context');
+        $this->assertNotNull($repOut, 'Replicator: must wrap even with multi-line context');
+    }
+
+    /**
+     * Bug-1 + worst-case combo: anchor exists TWICE (e.g. user prepended one)
+     * AND captured sentence_context spans paragraphs. The wrap MUST land in
+     * the second paragraph (= where the captured sentence lives), NOT the
+     * prepended first occurrence. Defense-in-depth must not weaken the
+     * fingerprint guard.
+     */
+    public function test_insert_parity_context_with_newline_picks_correct_occurrence_when_anchor_appears_twice(): void
+    {
+        $href = 'https://example.com/insert-target';
+        $anchor = 'AnchorWord';
+        // Captured sentence belongs to paragraph 2; preceded by a heading
+        // line that was joined via "\n" in TextExtractor::fromBard.
+        $context = "Heading X\ncached, ohne die Strategie mitzudenken, baut $anchor";
+
+        $bard = [
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => "$anchor. Ein neuer prepended Anfangssatz."],
+            ]],
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => 'Heading X'],
+            ]],
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => "cached, ohne die Strategie mitzudenken, baut $anchor"],
+            ]],
+        ];
+
+        $bardOut = BardLinkInserter::insertLinkWithHref($bard, $anchor, $href, false, $context);
+        $this->assertNotNull($bardOut, 'Bard: should wrap');
+
+        $firstWrapped = !empty($bardOut[0]['content'][0]['marks'] ?? null);
+        $thirdWrapped = false;
+        foreach ($bardOut[2]['content'] ?? [] as $c) {
+            if (($c['text'] ?? '') === $anchor && !empty($c['marks'] ?? null)) $thirdWrapped = true;
+        }
+        $this->assertFalse($firstWrapped, 'First (prepended) occurrence MUST NOT be wrapped');
+        $this->assertTrue($thirdWrapped, 'Captured-sentence occurrence (paragraph 3) MUST be wrapped');
+    }
+
     public function test_insert_parity_context_not_in_doc_skips(): void
     {
         // Captured sentence no longer present in the entry → refuse to wrap

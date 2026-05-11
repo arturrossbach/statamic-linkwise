@@ -435,6 +435,32 @@ class BardLinkInserter
     /**
      * Check if a match position is at word boundaries (not inside another word).
      */
+    /**
+     * When the captured sentence_context spans paragraph boundaries (legacy
+     * extractContext output joined paragraphs with "\n"), the needle cannot
+     * be found inside any single paragraph and the wrap silently fails. This
+     * helper isolates the line that actually contains the anchor so the
+     * fingerprint guard can still operate. New post-fix contexts are always
+     * single-line and pass through unchanged.
+     */
+    protected static function narrowContextToAnchorLine(string $needle, string $anchorText): string
+    {
+        if ($needle === '' || ! str_contains($needle, "\n")) {
+            return $needle;
+        }
+
+        $lines = explode("\n", $needle);
+        foreach ($lines as $line) {
+            if (mb_stripos($line, $anchorText) !== false) {
+                return trim($line);
+            }
+        }
+
+        // Anchor isn't in any line: leave needle unchanged so the caller's
+        // mb_stripos returns false → return null → no silent wrap.
+        return $needle;
+    }
+
     protected static function isAtWordBoundary(string $text, int $pos, int $length): bool
     {
         // Check character before the match
@@ -562,6 +588,13 @@ class BardLinkInserter
         $contextRange = null;
         if ($expectedSentenceContext !== null && $expectedSentenceContext !== '') {
             $needle = trim(str_replace(['…', '...'], '', $expectedSentenceContext));
+            // Defense-in-depth: stale records may carry multi-line context
+            // (cross-paragraph blob from a buggy older extractContext build).
+            // Narrow to the line containing the anchor so the search can
+            // succeed at all; otherwise mb_stripos returns false and the
+            // wrap silently skips. New contexts (post-fix extractContext)
+            // are already single-line and pass through unchanged.
+            $needle = static::narrowContextToAnchorLine($needle, $anchorText);
             if ($needle !== '' && mb_strlen($needle) >= mb_strlen($anchorText)) {
                 $rangeStart = mb_stripos($markdown, $needle);
                 if ($rangeStart === false) {
@@ -746,6 +779,11 @@ class BardLinkInserter
             // ellipsis (ContextExtractor truncation). Strip those before
             // matching so a literal substring search lines up.
             $needle = trim(str_replace(['…', '...'], '', $expectedSentenceContext));
+            // Defense-in-depth: stale records may carry multi-line context
+            // (cross-paragraph blob from a buggy older extractContext build).
+            // Narrow to the line containing the anchor so the search can
+            // succeed inside a single paragraph's $fullText.
+            $needle = static::narrowContextToAnchorLine($needle, $anchorText);
             if ($needle !== '' && mb_strlen($needle) >= mb_strlen($anchorText)) {
                 $rangeStart = mb_stripos($fullText, $needle);
                 if ($rangeStart === false) {
