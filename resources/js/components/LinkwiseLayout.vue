@@ -871,7 +871,23 @@ export default {
                 if (readString(SEEN_KEY) === signature) return;
                 writeString(SEEN_KEY, signature);
 
-                this.fireTerminalToast(status);
+                // Stale-completion guard (2026-05-11): if the bulk's done-status
+                // is older than 60s by the time polling first observes it
+                // (= user tabbed away mid-bulk and just came back), suppress
+                // the transient toast and the auto-open of the notifications
+                // disclosure. The persistent banner still hydrates from
+                // sessionStorage so the user has a recap, but they don't get
+                // surprised by a "success!" toast for a 10-minute-old action.
+                // Compares server-side heartbeat against client now; small
+                // clock drift between server/client is absorbed by the 60s
+                // threshold.
+                const heartbeat = tExtra.heartbeat || 0;
+                const ageSec = heartbeat ? Math.max(0, (Date.now() / 1000) - heartbeat) : 0;
+                const stale = ageSec > 60;
+
+                if (! stale) {
+                    this.fireTerminalToast(status);
+                }
 
                 // Persist a snapshot of the completion so a dismissible banner
                 // shows the result even if the user was off-screen for the
