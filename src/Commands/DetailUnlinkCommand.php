@@ -320,18 +320,11 @@ class DetailUnlinkCommand extends Command
             app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
         }
 
-        // Persist per-entry skip records:
-        //   1. Always onto THIS snapshot — the drawer's skipped-table
-        //      shows "during my run these were skipped" so the activity-log
-        //      reader can tell which entries the bulk left untouched.
-        //   2. For revert flows, also onto the ORIGINAL snapshot so its
-        //      drawer surfaces "of N items I tried to revert, here's the M
-        //      skipped and WHY (modified by X on Y)".
-        if (! empty($revertSkippedRecords)) {
-            app(BulkSnapshotStore::class)->recordRevertSkipped($snapshotId, $revertSkippedRecords);
-            if ($reverts) {
-                app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
-            }
+        // Revert flows only: write skip records onto the ORIGINAL snapshot.
+        // OWN snapshot uses bulk_skipped (populated above). Bug 2026-05-11:
+        // previously wrote to OWN too, producing duplicate skipped tables.
+        if (! empty($revertSkippedRecords) && $reverts) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
         }
 
         Cache::put('linkwise:detailunlink:status', [

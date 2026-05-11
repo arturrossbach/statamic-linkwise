@@ -89,8 +89,10 @@
                      Snapshots keep being recorded so the drawer shows full
                      per-entry detail. No banner here: user just sees the
                      recap below, no marketing about a future feature. -->
-                <!-- Still-running state: clear "wait" message, no Revert. -->
-                <Alert v-else-if="detail.snapshot.completed_at === null" variant="warning" class="mb-3">
+                <!-- Still-running state: clear "wait" message. The v-if (not
+                     v-else-if) is intentional — there's no preceding v-if
+                     now that the Revert card is gone. -->
+                <Alert v-if="detail.snapshot.completed_at === null" variant="warning" class="mb-3">
                     <p class="text-sm">
                         <strong>This bulk is still running.</strong>
                         Wait for it to complete — the entry will become revertable as soon as the run finishes.
@@ -157,9 +159,15 @@
                     </div>
                 </Alert>
 
-                <Alert v-if="hasSkippedDuringRevert" variant="warning" class="mb-3">
+                <!-- revert_skipped table renders ONLY when this snapshot has
+                     itself been reverted — then the table describes "of the
+                     items someone tried to revert, here are the M that were
+                     left untouched". For forward bulk runs, bulk_skipped above
+                     is the truth. Without the reverted_at guard the same skips
+                     were shown twice in the drawer (Bug 2026-05-11). -->
+                <Alert v-if="hasSkippedDuringRevert && detail.snapshot.reverted_at" variant="warning" class="mb-3">
                     <p class="text-sm font-medium mb-2">
-                        ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during {{ skippedScopeLabel }} because of changes made since the bulk ran. Their content is intact — Linkwise refused to overwrite them.
+                        ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during the revert because of changes made since the bulk ran. Their content is intact — Linkwise refused to overwrite them.
                     </p>
                     <div class="overflow-x-auto">
                         <table class="data-table w-full text-xs">

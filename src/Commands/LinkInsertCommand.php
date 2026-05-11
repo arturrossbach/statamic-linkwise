@@ -349,16 +349,14 @@ class LinkInsertCommand extends Command
             app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
         }
 
-        // Persist per-entry skip records onto THIS snapshot (always) and
-        // — for revert flows — also onto the ORIGINAL snapshot. Drawer
-        // surfaces them as a separate "skipped entries" table above the
-        // main affected-entries list. See DetailUnlinkCommand for the
-        // same pattern.
-        if (! empty($revertSkippedRecords)) {
-            app(BulkSnapshotStore::class)->recordRevertSkipped($snapshotId, $revertSkippedRecords);
-            if ($reverts) {
-                app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
-            }
+        // Revert flows only: write the skip records onto the ORIGINAL
+        // snapshot so its drawer shows "of N items someone tried to revert,
+        // here are the M that we left untouched". Bug 2026-05-11: we used
+        // to ALSO write to OWN snapshot, which produced a duplicate "skipped
+        // during this run" table next to the new bulk_skipped one (which
+        // already covers own-snapshot semantics).
+        if (! empty($revertSkippedRecords) && $reverts) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
         }
 
         Cache::put($statusKey, [

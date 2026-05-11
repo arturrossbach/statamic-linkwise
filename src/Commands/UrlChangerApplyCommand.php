@@ -303,11 +303,10 @@ class UrlChangerApplyCommand extends Command
         if (! empty($bulkSkippedRecords)) {
             app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
         }
-        if (! empty($revertSkippedRecords)) {
-            app(BulkSnapshotStore::class)->recordRevertSkipped($snapshotId, $revertSkippedRecords);
-            if ($reverts) {
-                app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
-            }
+        // Revert flows only: write skip records onto the ORIGINAL snapshot.
+        // OWN snapshot uses bulk_skipped (above). Bug 2026-05-11.
+        if (! empty($revertSkippedRecords) && $reverts) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
         }
 
         Cache::put('linkwise:urlchanger:status', [
