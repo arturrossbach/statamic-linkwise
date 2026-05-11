@@ -165,6 +165,7 @@ export default {
         applyUrl: { type: String, default: '' },
         inboundInsertUrl: { type: String, default: '' },
         outboundInsertUrl: { type: String, default: '' },
+        relinkPreviewUrl: { type: String, default: '' },
         entries: { type: Array, default: () => [] },
     },
 
@@ -465,6 +466,7 @@ export default {
             const sourceEntryId = this.modal.entryId;
             const entryTitle = this.modal.entryTitle || '';
             const insertUrl = mode === 'outbound' ? this.outboundInsertUrl : this.inboundInsertUrl;
+            const previewUrl = this.relinkPreviewUrl;
             const csrfToken = Statamic.$config.get('csrfToken');
             // Capture entry-ref array so post-completion `item._unlinked` etc.
             // mutations skip cleanly if the modal has unmounted in between.
@@ -481,6 +483,69 @@ export default {
                 perItem: async (item) => {
                     const entryId = mode === 'outbound' ? sourceEntryId : item.id;
                     const entryHash = this.getEntryHash(entryId);
+
+                    // Bug 17 pre-flight (2026-05-11): simulate Step 2
+                    // (link-insert) against the current entry state BEFORE
+                    // Step 1 (URL-Changer unlink) commits. Without this,
+                    // an expanded anchor that now spans an existing link
+                    // mark causes Step 1 to unlink, Step 2 to fail at the
+                    // already-linked guard, and the user is left with a
+                    // partial-state entry (old link gone, new link never
+                    // applied). The preview endpoint returns ok:false with
+                    // an actionable message (which existing link blocks
+                    // it) so the bulk service records the failure cleanly
+                    // and no mutation happens. If relinkPreviewUrl is
+                    // absent (older parent / pre-Bug-17 build), skip the
+                    // pre-flight and fall through to the legacy 2-step
+                    // path — backwards compat.
+                    if (previewUrl) {
+                        const isStatamicEntryUrl = (item.url || '').startsWith('statamic://entry::');
+                        const previewBody = {
+                            entry_id: entryId,
+                            content_hash: entryHash,
+                            anchor_text: item._anchor,
+                            sentence_context: item.sentence_context || '',
+                        };
+                        if (isStatamicEntryUrl) {
+                            previewBody.target_entry_id = item.url.replace('statamic://entry::', '');
+                        } else {
+                            previewBody.href = item.url;
+                        }
+                        let previewResponse;
+                        try {
+                            previewResponse = await fetch(previewUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRF-TOKEN': csrfToken,
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                },
+                                body: JSON.stringify(previewBody),
+                            });
+                        } catch (e) {
+                            return { success: false, error: `preview failed: ${e?.message || 'network error'}` };
+                        }
+                        if (! previewResponse.ok) {
+                            return { success: false, error: `preview HTTP ${previewResponse.status}` };
+                        }
+                        let previewData;
+                        try {
+                            previewData = await previewResponse.json();
+                        } catch {
+                            return { success: false, error: 'preview returned invalid JSON' };
+                        }
+                        if (previewData.ok !== true) {
+                            // Step 2 would fail — refuse the whole re-link
+                            // to prevent the partial-state hazard. The
+                            // message is the German action-oriented copy
+                            // from the controller; the bulk service shows
+                            // it in the completion toast / drawer.
+                            return {
+                                success: false,
+                                error: previewData.message || 'Re-Link würde fehlschlagen',
+                            };
+                        }
+                    }
 
                     // Step 1 — unlink current anchor at its known position.
                     let unlinkResult;
