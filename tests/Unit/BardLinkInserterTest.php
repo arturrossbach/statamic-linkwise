@@ -1374,4 +1374,104 @@ class BardLinkInserterTest extends TestCase
         $this->assertNotNull($mutating);
         $this->assertTrue($dryRun['ok']);
     }
+
+    // ─── Bug 17 explicit Repro A + B regression ─────────────────────────
+    //
+    // From memory/bug17_phase2_plan.md (verified empirically 2026-05-11):
+    //
+    // Repro A: anchor "über Erdnuss-Soba-Nudeln" is expanded by the user
+    //   to "über Erdnuss-Soba-Nudeln nachgedacht" — the new anchor spans
+    //   an existing link mark on "nachgedacht". Without the pre-flight,
+    //   Step 1 (sync URL-Changer apply unlink of the original Soba link)
+    //   committed, Step 2 (async link-insert with the expanded anchor)
+    //   failed at the already-linked guard. Final state: Soba-link gone,
+    //   "nachgedacht" link intact, no new link applied.
+    //
+    // Repro B: mirror case — "nachgedacht"-link erweitert nach links um
+    //   "Nudeln" → spans existing "Erdnuss-Soba-Nudeln" link partial.
+    //
+    // The pre-flight check (canInsertLinkIntoEntry → relink-preview
+    // endpoint) is the gate that prevents Step 1 from running when
+    // Step 2 would fail. These tests assert the dry-run names the
+    // blocking link so the toast can be actionable.
+
+    public function test_bug17_repro_a_expanded_anchor_crosses_existing_nachgedacht_link(): void
+    {
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Ich habe '],
+                [
+                    'type' => 'text',
+                    'text' => 'über Erdnuss-Soba-Nudeln',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::soba-recipe'],
+                    ]],
+                ],
+                ['type' => 'text', 'text' => ' '],
+                [
+                    'type' => 'text',
+                    'text' => 'nachgedacht',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::thinking-post'],
+                    ]],
+                ],
+                ['type' => 'text', 'text' => '.'],
+            ],
+        ]];
+
+        // User expanded the Soba anchor to include " nachgedacht". The
+        // new anchor crosses the existing "nachgedacht" link mark.
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'über Erdnuss-Soba-Nudeln nachgedacht',
+            'statamic://entry::soba-recipe',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('crosses_existing_link', $result['reason']);
+        $this->assertSame('statamic://entry::thinking-post', $result['blocking_href']);
+    }
+
+    public function test_bug17_repro_b_expanded_anchor_crosses_existing_soba_link(): void
+    {
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Ich habe '],
+                [
+                    'type' => 'text',
+                    'text' => 'über Erdnuss-Soba-Nudeln',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::soba-recipe'],
+                    ]],
+                ],
+                ['type' => 'text', 'text' => ' '],
+                [
+                    'type' => 'text',
+                    'text' => 'nachgedacht',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::thinking-post'],
+                    ]],
+                ],
+                ['type' => 'text', 'text' => '.'],
+            ],
+        ]];
+
+        // User expanded the "nachgedacht" anchor to include "Nudeln ",
+        // crossing the existing Soba link partial.
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Nudeln nachgedacht',
+            'statamic://entry::thinking-post',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('crosses_existing_link', $result['reason']);
+        $this->assertSame('statamic://entry::soba-recipe', $result['blocking_href']);
+    }
 }

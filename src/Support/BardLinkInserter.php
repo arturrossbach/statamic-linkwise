@@ -1228,18 +1228,40 @@ class BardLinkInserter
             // so the relink-preview endpoint can name it in an actionable
             // error message ("Anchor überlappt mit Link auf 'X'") rather
             // than a generic "would fail".
+            //
+            // When the anchor span crosses MULTIPLE link marks (the Bug 17
+            // Repro A shape — anchor expanded to cover an existing
+            // different-target link adjacent to a same-target one), prefer
+            // the DIFFERENT-target href as the blocker: that's the actual
+            // conflict the user has to resolve, not the same-target no-op
+            // they'd implicitly clear via Step 1 anyway.
             $startIdx = $startMap['index'];
             $endIdx = $endMap['index'];
             $blockingHref = null;
+            $sameTargetHref = null;
 
             for ($idx = $startIdx; $idx <= $endIdx; $idx++) {
                 $child = $children[$idx];
                 foreach ($child['marks'] ?? [] as $m) {
-                    if (($m['type'] ?? '') === 'link') {
-                        $blockingHref = $m['attrs']['href'] ?? '';
+                    if (($m['type'] ?? '') !== 'link') {
+                        continue;
+                    }
+                    $thisHref = $m['attrs']['href'] ?? '';
+                    if ($thisHref !== $href) {
+                        // Different target — strongest blocker, stop early.
+                        $blockingHref = $thisHref;
                         break 2;
                     }
+                    if ($sameTargetHref === null) {
+                        $sameTargetHref = $thisHref;
+                    }
                 }
+            }
+
+            // Fall back to same-target only when no different-target mark
+            // was seen across the span.
+            if ($blockingHref === null) {
+                $blockingHref = $sameTargetHref;
             }
 
             if ($blockingHref !== null) {
