@@ -9,6 +9,7 @@ use Arturrossbach\Linkwise\Commands\CheckLinksCommand;
 use Arturrossbach\Linkwise\Commands\DetailUnlinkCommand;
 use Arturrossbach\Linkwise\Commands\IndexCommand;
 use Arturrossbach\Linkwise\Commands\LinkInsertCommand;
+use Arturrossbach\Linkwise\Commands\NormalizeBardCommand;
 use Arturrossbach\Linkwise\Commands\SeedTestDataCommand;
 use Arturrossbach\Linkwise\Commands\UrlChangerApplyCommand;
 use Arturrossbach\Linkwise\Links\LinkwiseLinkMark;
@@ -35,6 +36,7 @@ class ServiceProvider extends AddonServiceProvider
         LinkInsertCommand::class,
         SeedTestDataCommand::class,
         AuditCommand::class,
+        NormalizeBardCommand::class,
     ];
 
     protected $routes = [
