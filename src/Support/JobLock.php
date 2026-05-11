@@ -196,8 +196,17 @@ class JobLock
         }
 
         // Otherwise surface the most-recent terminal status so the poller can
-        // dedup-toast it once.
+        // dedup-toast it once. Selection is by RECENCY (heartbeat),
+        // not by JOBS-array order (Bug 2026-05-11): an old `scan` terminal
+        // status sitting in cache used to shadow a freshly-completed
+        // `detailunlink` simply because 'scan' came first in the array,
+        // and the frontend never saw the detailunlink completion (no
+        // banner, no warning toast for "already gone" outcomes).
+        // Heartbeat lives at the cache root for every done-status that
+        // ships post-fix; legacy statuses without heartbeat sort last
+        // (deprioritised — they're already past their useful window).
         $latestTerminal = null;
+        $latestHeartbeat = -1;
         foreach (self::JOBS as $name => $meta) {
             $status = Cache::get($meta['key']);
             if (! is_array($status)) {
@@ -207,14 +216,16 @@ class JobLock
             if (! in_array($phase, ['done', 'cancelled', 'error'], true)) {
                 continue;
             }
-            $latestTerminal = [
-                'name' => $name,
-                'label' => $meta['label'],
-                'status' => $status,
-                'terminal' => true,
-            ];
-            // First found wins; ordering of self::JOBS is the priority.
-            break;
+            $heartbeat = (int) ($status['heartbeat'] ?? 0);
+            if ($heartbeat > $latestHeartbeat) {
+                $latestHeartbeat = $heartbeat;
+                $latestTerminal = [
+                    'name' => $name,
+                    'label' => $meta['label'],
+                    'status' => $status,
+                    'terminal' => true,
+                ];
+            }
         }
 
         return $latestTerminal;

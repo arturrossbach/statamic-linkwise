@@ -881,8 +881,14 @@ export default {
                 // Compares server-side heartbeat against client now; small
                 // clock drift between server/client is absorbed by the 60s
                 // threshold.
+                //
+                // Missing heartbeat (legacy status from before heartbeat was
+                // added everywhere) → treat as STALE. Otherwise an old
+                // pre-heartbeat 'done' cache entry sitting around could fire
+                // a fresh-looking toast on first poll. Real bug observed
+                // 2026-05-11 with a legacy `scan` terminal cache.
                 const heartbeat = tExtra.heartbeat || 0;
-                const ageSec = heartbeat ? Math.max(0, (Date.now() / 1000) - heartbeat) : 0;
+                const ageSec = heartbeat ? Math.max(0, (Date.now() / 1000) - heartbeat) : Infinity;
                 const stale = ageSec > 60;
 
                 if (! stale) {
