@@ -171,6 +171,19 @@ class BulkUnlinkCommand extends Command
             'succeeded' => $succeeded,
             'skipped' => $skipped,
             'errors' => $errors,
+            // Root-level heartbeat — bulkStatus maps full cache to frontend
+            // `extra`, dedup signature reads tExtra.heartbeat from here.
+            'heartbeat' => time(),
+            // 'extra' so frontend completionLabel/dedup reads non-empty
+            // counts + a per-run heartbeat. Without it back-to-back
+            // identical bulks deduped each other and the persistent
+            // banner went missing. Bug 2026-05-11.
+            'extra' => [
+                'succeeded' => $succeeded,
+                'skipped' => $skipped,
+                'errors' => $errors,
+                'heartbeat' => time(),
+            ],
         ], 300);
         Cache::forget('linkwise:bulkunlink:payload');
 

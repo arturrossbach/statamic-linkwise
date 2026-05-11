@@ -311,6 +311,20 @@ class UrlChangerApplyCommand extends Command
             'search' => $search,
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
+            // Root-level heartbeat — see LinkInsertCommand for rationale.
+            'heartbeat' => time(),
+            // 'extra' for frontend completionLabel + dedup-signature heartbeat.
+            // Mirror LinkInsertCommand / DetailUnlinkCommand. Bug 2026-05-11.
+            'extra' => [
+                'succeeded' => $succeeded,
+                'skipped' => $skipped,
+                'errors' => $errors,
+                'action' => $action,
+                'search' => $search,
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+                'heartbeat' => time(),
+            ],
         ], 300);
         Cache::forget('linkwise:urlchanger:payload');
 

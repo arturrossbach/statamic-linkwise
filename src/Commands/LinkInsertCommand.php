@@ -347,6 +347,13 @@ class LinkInsertCommand extends Command
             'errors' => $errors,
             'source_mode' => $sourceMode,
             'entry_title' => $entryTitle,
+            // Root-level heartbeat: the bulkStatus controller maps the whole
+            // cache to the frontend `extra` field, so the frontend dedup-
+            // signature's `tExtra.heartbeat` reads from HERE. Without this,
+            // back-to-back identical-outcome inserts produced the same
+            // signature and the second toast + banner were suppressed.
+            // Bug 2026-05-11.
+            'heartbeat' => time(),
             // 'extra' is what LinkwiseLayout's completionLabel/completionVariant
             // read. Without it ($status.extra || {}), succeeded/skipped/errors
             // are invisible to the toast helper → wrong success-variant +

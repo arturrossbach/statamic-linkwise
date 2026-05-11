@@ -331,6 +331,24 @@ class DetailUnlinkCommand extends Command
             'entry_title' => $entryTitle,
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
+            // Root-level heartbeat for frontend dedup uniqueness — see
+            // LinkInsertCommand for the full rationale.
+            'heartbeat' => time(),
+            // 'extra' is what LinkwiseLayout's completionLabel/completionVariant
+            // read (status.extra || {}). Without it the frontend saw empty
+            // succeeded/skipped → wrong "Could not remove any" copy + wrong
+            // variant + no heartbeat in the dedup signature → persistent
+            // success banner was unreliable. Bug 2026-05-11. Mirror LinkInsert.
+            'extra' => [
+                'succeeded' => $succeeded,
+                'skipped' => $skipped,
+                'errors' => $errors,
+                'source_mode' => $sourceMode,
+                'entry_title' => $entryTitle,
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+                'heartbeat' => time(),
+            ],
         ], 300);
         Cache::forget('linkwise:detailunlink:payload');
 

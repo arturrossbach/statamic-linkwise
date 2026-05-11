@@ -157,18 +157,30 @@
                     <div class="flex items-center gap-2">
                         <span v-if="bulkStuck" class="font-medium">Operation may be stuck —</span>
                         <span>{{ bulkBannerLabel }}</span>
-                        <!-- Indexing/finalizing phase: the visible counter has
-                             hit N/N but the command is still rebuilding the
-                             index + recomputing suggestion counts (can take
-                             1-3min on large sites). Show "Finalizing…" so
-                             the user doesn't think the job hung at N/N. -->
+                        <!-- N/M counter is shown for every phase that has a
+                             total — including 'indexing'. Without this the
+                             user only saw "Finalizing index…" for fast bulks
+                             that completed between polling ticks; they had no
+                             evidence the work itself had landed. Real bug
+                             2026-05-11: user said "Heavy-Banner zeigt sofort
+                             'finalizing index' statt vorher den Progress". -->
+                        <span v-if="activeBulk.total > 0" class="font-mono text-xs text-gray-500 dark:text-gray-400">
+                            {{ activeBulk.current }} / {{ activeBulk.total }}
+                        </span>
+                        <!-- Outcome counts during indexing — writes are done,
+                             surface succeeded/skipped so the user knows what
+                             actually happened before the index rebuild. -->
+                        <span v-if="activeBulk.phase === 'indexing' && (activeBulk.succeeded !== undefined || activeBulk.skipped !== undefined)" class="text-xs text-gray-500 dark:text-gray-400">
+                            ({{ activeBulk.succeeded || 0 }} done<span v-if="(activeBulk.skipped || 0) > 0">, {{ activeBulk.skipped }} skipped</span>)
+                        </span>
+                        <!-- Indexing/finalizing phase: the writes are complete
+                             but the command is still rebuilding the index +
+                             recomputing suggestion counts (can take 1-3min on
+                             large sites). -->
                         <span v-if="activeBulk.phase === 'indexing'" class="text-xs text-gray-500 dark:text-gray-400 italic">
                             Finalizing index…
                         </span>
-                        <span v-else-if="activeBulk.total > 0" class="font-mono text-xs text-gray-500 dark:text-gray-400">
-                            {{ activeBulk.current }} / {{ activeBulk.total }}
-                        </span>
-                        <span v-else-if="activeBulk.message" class="text-xs text-gray-500 dark:text-gray-400">
+                        <span v-else-if="!activeBulk.total && activeBulk.message" class="text-xs text-gray-500 dark:text-gray-400">
                             {{ activeBulk.message }}
                         </span>
                         <span v-if="bulkStuck" class="text-xs text-gray-500 dark:text-gray-400">
@@ -794,6 +806,13 @@ export default {
                         // the visible counter hits N/N — without this, the
                         // banner sits stuck at 80/80 looking dead).
                         phase,
+                        // succeeded/skipped surface during 'indexing' so the
+                        // banner can render "5 done, 0 skipped — finalizing".
+                        // bulkStatus controller maps full cache to `extra`,
+                        // so prefer the explicit top-level fields first,
+                        // fallback to extra. Real bug 2026-05-11.
+                        succeeded: status.succeeded ?? extra.succeeded ?? undefined,
+                        skipped: status.skipped ?? extra.skipped ?? undefined,
                         current: status.current || 0,
                         total: status.total || 0,
                         message: status.message || null,
@@ -823,9 +842,18 @@ export default {
                 } else if (status.kind === 'urlchanger') {
                     kindSig = `:a${tExtra.action || ''}:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
                 } else if (status.kind === 'detailunlink') {
-                    kindSig = `:m${tExtra.source_mode || ''}:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
+                    // heartbeat makes repeated identical-outcome runs unique
+                    // — without it two consecutive "5 removed / 0 skipped"
+                    // bulks produced the same signature and the second
+                    // recordCompletion was dedup-suppressed → user saw NO
+                    // persistent success banner after the second remove.
+                    // Real bug 2026-05-11.
+                    kindSig = `:m${tExtra.source_mode || ''}:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}:hb${tExtra.heartbeat || tExtra.started_by_id || ''}`;
                 } else if (status.kind === 'bulkunlink') {
-                    kindSig = `:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
+                    // Same uniqueness fix as detailunlink — heartbeat in the
+                    // signature so back-to-back identical-outcome bulks each
+                    // fire their own toast + banner.
+                    kindSig = `:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}:hb${tExtra.heartbeat || tExtra.started_by_id || ''}`;
                 } else if (status.kind === 'outboundinsert' || status.kind === 'inboundinsert') {
                     // Without this branch, repeated outbound/inbound inserts
                     // with identical succeeded/skipped numbers (very common

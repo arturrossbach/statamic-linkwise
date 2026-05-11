@@ -245,6 +245,8 @@ class ApplyRuleCommand extends Command
             'links_added' => $result['links_added'] ?? 0,
             'entries_skipped' => $result['entries_skipped'] ?? 0,
             'conflicts' => array_values($conflictedEntries),
+            // Root-level heartbeat — see LinkInsertCommand for rationale.
+            'heartbeat' => time(),
         ], 300);
         Cache::forget('linkwise:applyrule:payload');
 
@@ -274,6 +276,8 @@ class ApplyRuleCommand extends Command
                 'total_rules' => 0,
                 'total_links_added' => 0,
                 'rule_keyword' => '',
+                // Root-level heartbeat — see LinkInsertCommand for rationale.
+                'heartbeat' => time(),
             ], 300);
             Cache::forget('linkwise:applyrule:payload');
 
@@ -499,6 +503,8 @@ class ApplyRuleCommand extends Command
             'conflicts' => array_values($conflictedEntries),
             // Banner shows "Applied X rules" via the multi-rule label.
             'rule_keyword' => '',
+            // Root-level heartbeat — see LinkInsertCommand for rationale.
+            'heartbeat' => time(),
         ], 300);
         Cache::forget('linkwise:applyrule:payload');
 
