@@ -1062,4 +1062,316 @@ class BardLinkInserterTest extends TestCase
 
         $this->assertNull($result, 'Meta keys must never be linked');
     }
+
+    // ─── canInsertLinkIntoBardContent — Bug 17 dry-run preview ──────────
+    //
+    // The mutating walker returns null in three different cases (anchor
+    // absent / context mismatch / would cross existing link). The dry-run
+    // must distinguish them so the relink-preview endpoint can produce
+    // an actionable error toast — Bug 17's whole point is naming WHICH
+    // existing link blocks the wrap, not just "would fail."
+
+    public function test_dry_run_ok_when_anchor_is_unlinked_text(): void
+    {
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Follow the Redis Setup Guide for best results.'],
+            ],
+        ]];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+        );
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function test_dry_run_anchor_not_found(): void
+    {
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [['type' => 'text', 'text' => 'Nothing matches here at all.']],
+        ]];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('anchor_not_found', $result['reason']);
+    }
+
+    public function test_dry_run_anchor_only_inside_larger_word_is_not_found(): void
+    {
+        // "database" lives only as substring of "databases" → no word-
+        // boundary match → user-facing equivalent of anchor_not_found.
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [['type' => 'text', 'text' => 'We index 12 databases nightly.']],
+        ]];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'database',
+            'statamic://entry::db-123',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('anchor_not_found', $result['reason']);
+    }
+
+    public function test_dry_run_context_mismatch_when_sentence_absent(): void
+    {
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [['type' => 'text', 'text' => 'Redis Setup Guide explains the basics.']],
+        ]];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+            false,
+            'A sentence that no longer appears in the entry.',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('context_mismatch', $result['reason']);
+    }
+
+    public function test_dry_run_crosses_existing_link_captures_blocking_href(): void
+    {
+        // Bug 17 repro shape: anchor "über Erdnuss-Soba-Nudeln nachgedacht"
+        // would span an existing link mark on "nachgedacht". The mutating
+        // walker returns null silently; the dry-run names the blocker so
+        // the toast can say "Anchor überlappt mit Link auf X".
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Ich habe über Erdnuss-Soba-Nudeln '],
+                [
+                    'type' => 'text',
+                    'text' => 'nachgedacht',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::existing-target'],
+                    ]],
+                ],
+                ['type' => 'text', 'text' => '.'],
+            ],
+        ]];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'über Erdnuss-Soba-Nudeln nachgedacht',
+            'statamic://entry::new-target',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('crosses_existing_link', $result['reason']);
+        $this->assertSame('statamic://entry::existing-target', $result['blocking_href']);
+    }
+
+    public function test_dry_run_already_linked_to_target_when_existing_link_matches_target(): void
+    {
+        // Same crossing case but the existing link points at our target.
+        // Distinct reason because the toast wording differs ("already
+        // linked" vs "would overlap with another link").
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                [
+                    'type' => 'text',
+                    'text' => 'Redis Setup Guide',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::target-123'],
+                    ]],
+                ],
+            ],
+        ]];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('already_linked_to_target', $result['reason']);
+        $this->assertSame('statamic://entry::target-123', $result['blocking_href']);
+    }
+
+    public function test_dry_run_crosses_existing_link_beats_already_linked_to_target(): void
+    {
+        // Two occurrences of the same anchor — one crosses a same-target
+        // link (no-op), the other crosses a DIFFERENT-target link
+        // (the actual blocker). Severity comparator must surface the
+        // different-target finding so the toast names the real conflict.
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    [
+                        'type' => 'text',
+                        'text' => 'Redis Setup Guide',
+                        'marks' => [[
+                            'type' => 'link',
+                            'attrs' => ['href' => 'statamic://entry::target-123'],
+                        ]],
+                    ],
+                ],
+            ],
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    [
+                        'type' => 'text',
+                        'text' => 'Redis Setup Guide',
+                        'marks' => [[
+                            'type' => 'link',
+                            'attrs' => ['href' => 'statamic://entry::other-target'],
+                        ]],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('crosses_existing_link', $result['reason']);
+        $this->assertSame('statamic://entry::other-target', $result['blocking_href']);
+    }
+
+    public function test_dry_run_ok_when_anchor_appears_outside_existing_link(): void
+    {
+        // Same anchor twice — once already linked, once free standing.
+        // The free occurrence is the legitimate insert target; dry-run
+        // should report ok: true (not already_linked_to_target).
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    [
+                        'type' => 'text',
+                        'text' => 'Redis Setup Guide',
+                        'marks' => [[
+                            'type' => 'link',
+                            'attrs' => ['href' => 'statamic://entry::target-123'],
+                        ]],
+                    ],
+                ],
+            ],
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'See also: Redis Setup Guide.'],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+        );
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function test_dry_run_replicator_descends_into_nested_bard(): void
+    {
+        // Replicator-set Bard fragment carries the matching anchor crossed
+        // by an existing link → dry-run must walk into it and report the
+        // blocker.
+        $sets = [
+            [
+                'type' => 'callout',
+                'id' => 'cl-1',
+                'body' => [
+                    [
+                        'type' => 'paragraph',
+                        'content' => [
+                            [
+                                'type' => 'text',
+                                'text' => 'Redis Setup Guide',
+                                'marks' => [[
+                                    'type' => 'link',
+                                    'attrs' => ['href' => 'statamic://entry::other-target'],
+                                ]],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::canInsertLinkIntoReplicator(
+            $sets,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('crosses_existing_link', $result['reason']);
+        $this->assertSame('statamic://entry::other-target', $result['blocking_href']);
+    }
+
+    public function test_dry_run_parity_with_mutating_walker_on_blocking_case(): void
+    {
+        // Parity contract: if the mutating walker returns null, the dry-run
+        // MUST return ok:false. Catches future drift between the two paths
+        // — the entire reason findValidMatchPosition was extracted.
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                [
+                    'type' => 'text',
+                    'text' => 'Redis Setup Guide',
+                    'marks' => [[
+                        'type' => 'link',
+                        'attrs' => ['href' => 'statamic://entry::other'],
+                    ]],
+                ],
+            ],
+        ]];
+
+        $mutating = BardLinkInserter::insertLink($bard, 'Redis Setup Guide', 'target-123');
+        $dryRun = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+        );
+
+        $this->assertNull($mutating, 'Mutating walker must refuse to wrap an already-linked node');
+        $this->assertFalse($dryRun['ok'], 'Dry-run must agree with mutating walker on refusal');
+    }
+
+    public function test_dry_run_parity_with_mutating_walker_on_success_case(): void
+    {
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [['type' => 'text', 'text' => 'Follow the Redis Setup Guide for best results.']],
+        ]];
+
+        $mutating = BardLinkInserter::insertLink($bard, 'Redis Setup Guide', 'target-123');
+        $dryRun = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+        );
+
+        $this->assertNotNull($mutating);
+        $this->assertTrue($dryRun['ok']);
+    }
 }

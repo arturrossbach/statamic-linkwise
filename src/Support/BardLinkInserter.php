@@ -430,6 +430,213 @@ class BardLinkInserter
     }
 
     /**
+     * Dry-run analog of {@see insertLinkIntoEntryWithHref}: report whether
+     * an insert would succeed against the entry as it stands right now,
+     * WITHOUT mutating or saving anything.
+     *
+     * Walks bard / replicator / markdown fields in the SAME order the
+     * mutating version does — so a bard field that would succeed wins
+     * over a markdown field that would fail (mirroring real behaviour).
+     *
+     * Return shape — same as {@see findValidMatchPosition}:
+     *   - `['ok' => true]` on first field that would accept the wrap
+     *   - `['ok' => false, 'reason' => 'anchor_not_found' | 'context_mismatch'
+     *      | 'crosses_existing_link' | 'already_linked_to_target',
+     *      'blocking_href' => string]` — most-informative failure across
+     *      all fields. `blocking_href` is set for the cross-/already-
+     *      linked reasons.
+     *
+     * Used by the relink-preview HTTP endpoint to gate the 2-step
+     * re-link flow: when Step 2 (insert) would fail, we MUST NOT run
+     * Step 1 (unlink) — that's the Bug 17 partial-state hazard.
+     *
+     * @return array{ok:bool, reason?:string, blocking_href?:string}
+     */
+    public static function canInsertLinkIntoEntry(
+        string $sourceEntryId,
+        string $anchorText,
+        string $href,
+        bool $caseSensitive = false,
+        ?string $expectedSentenceContext = null,
+    ): array {
+        [$entry] = SafeEntrySaver::load($sourceEntryId);
+
+        if (! $entry) {
+            return ['ok' => false, 'reason' => 'anchor_not_found'];
+        }
+
+        try {
+            $fields = $entry->blueprint()->fields()->all();
+        } catch (\Throwable) {
+            return ['ok' => false, 'reason' => 'anchor_not_found'];
+        }
+
+        $bestFailure = null;
+
+        foreach ($fields as $handle => $field) {
+            $value = $entry->get($handle);
+
+            if ($field->type() === 'bard' && is_array($value) && ! empty($value)) {
+                $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+            } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
+                $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+            } elseif ($field->type() === 'markdown' && is_string($value) && ! empty($value) && $handle !== 'title') {
+                // Markdown dry-run: re-use the existing walker since
+                // markdown returns a new string (pass-by-value, no
+                // in-place mutation). Result coarser than bard — we get
+                // "would succeed / would fail" only, not the specific
+                // reason. Bug 17 repro is bard-only; markdown granularity
+                // is YAGNI until a markdown-variant bug surfaces.
+                $modified = static::insertLinkIntoMarkdown($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+                $result = $modified !== null
+                    ? ['ok' => true]
+                    : ['ok' => false, 'reason' => 'anchor_not_found'];
+            } else {
+                continue;
+            }
+
+            if ($result['ok'] ?? false) {
+                return ['ok' => true];
+            }
+
+            $bestFailure = static::pickWorseFailure($bestFailure, $result);
+        }
+
+        return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
+    }
+
+    /**
+     * Bard-tree dry-run mirroring {@see insertLinkWithHref} +
+     * {@see processNode}. First node that finds a valid match wins;
+     * otherwise return the most-informative failure across all nodes.
+     *
+     * @return array{ok:bool, reason?:string, blocking_href?:string}
+     */
+    public static function canInsertLinkIntoBardContent(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
+    {
+        $bestFailure = null;
+        foreach ($bardContent as $node) {
+            $result = static::analyzeBardNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+            if ($result['ok'] ?? false) {
+                return $result;
+            }
+            $bestFailure = static::pickWorseFailure($bestFailure, $result);
+        }
+
+        return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
+    }
+
+    /**
+     * Single-node dry-run mirroring {@see processNode}: first tries direct
+     * children (where the link mark would actually land), then recurses
+     * into nested child nodes. Same skip-list as the mutating walker so
+     * the two paths can't diverge on which nodes count.
+     *
+     * @return array{ok:bool, reason?:string, blocking_href?:string}
+     */
+    protected static function analyzeBardNode(array $node, string $anchorText, string $href, bool $caseSensitive, ?string $expectedSentenceContext): array
+    {
+        // Mirror the processNode skip-list — code blocks, hrs, images,
+        // replicator 'set' nodes. Stay in sync if the list ever changes.
+        if (in_array($node['type'] ?? '', ['set', 'codeBlock', 'code_block', 'horizontalRule', 'horizontal_rule', 'image'], true)) {
+            return ['ok' => false, 'reason' => 'anchor_not_found'];
+        }
+
+        if (! isset($node['content']) || ! is_array($node['content'])) {
+            return ['ok' => false, 'reason' => 'anchor_not_found'];
+        }
+
+        // First: this node's direct children (= the actual wrap target).
+        $direct = static::findValidMatchPosition($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+        if ($direct['ok'] ?? false) {
+            return $direct;
+        }
+        $bestFailure = $direct;
+
+        // Then: recurse into child nodes that may have their own content.
+        foreach ($node['content'] as $child) {
+            $nested = static::analyzeBardNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+            if ($nested['ok'] ?? false) {
+                return $nested;
+            }
+            $bestFailure = static::pickWorseFailure($bestFailure, $nested);
+        }
+
+        return $bestFailure;
+    }
+
+    /**
+     * Replicator dry-run mirroring {@see processReplicatorWithHref}.
+     *
+     * @return array{ok:bool, reason?:string, blocking_href?:string}
+     */
+    public static function canInsertLinkIntoReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
+    {
+        $bestFailure = null;
+
+        foreach ($sets as $set) {
+            if (! is_array($set)) {
+                continue;
+            }
+            foreach ($set as $key => $value) {
+                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
+                    continue;
+                }
+                if (ProseMirrorTypes::looksLikeBardContent($value)) {
+                    $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+                } elseif (static::looksLikeReplicatorContent($value)) {
+                    $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+                } else {
+                    continue;
+                }
+
+                if ($result['ok'] ?? false) {
+                    return $result;
+                }
+                $bestFailure = static::pickWorseFailure($bestFailure, $result);
+            }
+        }
+
+        return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
+    }
+
+    /**
+     * Severity comparator for dry-run failure reasons.
+     *
+     * Severity (high → low):
+     *   crosses_existing_link > already_linked_to_target > context_mismatch > anchor_not_found
+     *
+     * Rationale: a "crosses_existing_link" against a DIFFERENT target is
+     * the most actionable surface (toast names the blocking link).
+     * "already_linked_to_target" is a no-op vs an error semantically;
+     * we still surface it so the user sees they're not getting a fresh
+     * wrap, but it loses to a crosses-link finding elsewhere in the
+     * entry. "context_mismatch" beats "anchor_not_found" because it's
+     * more specific (anchor exists somewhere, just not in the captured
+     * sentence's range).
+     *
+     * @param  array{ok:bool, reason?:string, blocking_href?:string}|null  $current
+     * @param  array{ok:bool, reason?:string, blocking_href?:string}  $candidate
+     * @return array{ok:bool, reason?:string, blocking_href?:string}
+     */
+    protected static function pickWorseFailure(?array $current, array $candidate): array
+    {
+        if ($current === null) {
+            return $candidate;
+        }
+        $rank = [
+            'anchor_not_found' => 0,
+            'context_mismatch' => 1,
+            'already_linked_to_target' => 2,
+            'crosses_existing_link' => 3,
+        ];
+        $rankCurrent = $rank[$current['reason'] ?? ''] ?? 0;
+        $rankCandidate = $rank[$candidate['reason'] ?? ''] ?? 0;
+
+        return $rankCandidate > $rankCurrent ? $candidate : $current;
+    }
+
+    /**
      * Insert a link into Markdown content by replacing the first occurrence of anchor text.
      */
     /**
