@@ -216,4 +216,184 @@ class BardWalker
         }
         return $node;
     }
+
+    /**
+     * Normalize a Bard children-array: merge adjacent text nodes with
+     * identical mark-set into a single text node.
+     *
+     * Why this exists: Linkwise's link-insertion path can produce two
+     * adjacent text nodes that carry the same link-mark (e.g. when a
+     * match spans nodes that were already split by a prior mutation —
+     * `BardLinkInserter::linkAcrossNodes` wraps each node separately,
+     * not as one). Statamic Bard does NOT normalize this on save
+     * (verified 2026-05-11 via save-roundtrip with no changes — file
+     * bytes identical, fragmented marks persist). The two divergent
+     * views ("display sees one merged link, walker sees two") cause
+     * silent NO-OPs: URL-Changer apply with merged anchor mismatches
+     * the per-node anchor-fingerprint guard and reports
+     * total_replacements=0 while looking successful.
+     *
+     * Invariant enforced here: "no children-array contains two adjacent
+     * text nodes with the same mark-set". Calling this after every
+     * mutation — and as a final pass in SafeEntrySaver::save —
+     * collapses fragments to their canonical form before they reach
+     * disk or any downstream walker.
+     *
+     * What gets merged:
+     *   - Two adjacent text nodes whose mark arrays contain the same
+     *     marks (order-agnostic comparison; mark = type+attrs).
+     *   - Including the no-marks case: plain "Hello" + plain " world"
+     *     → "Hello world". This is the case left behind by unlink
+     *     mutations that strip a mark but don't remerge the surrounding
+     *     plain-text siblings.
+     *
+     * What does NOT get merged:
+     *   - text nodes separated by any non-text node (hardBreak, image, …).
+     *   - text nodes with differing mark-sets (different href, additional
+     *     bold-mark on one side, etc.) — preserving semantics.
+     *
+     * Recursion:
+     *   - Recurses into $node['content'] for any container node.
+     *   - Recurses into Bard 'set' attrs.values for set nodes (consistent
+     *     with the rest of BardWalker — sets carry nested Bard fragments
+     *     that need the same invariant).
+     *   - codeBlock content is left untouched (opaque to Linkwise, same
+     *     contract as the other walkers here).
+     *
+     * Pure: returns a new array, does not mutate input. Safe to call
+     * with empty input (returns empty).
+     *
+     * @param  array  $children  A Bard children array — either the top-
+     *                           level Bard tree, or any node's
+     *                           $node['content'] sub-array.
+     * @return array             Normalized children — same structure,
+     *                           with adjacent same-mark text nodes merged.
+     */
+    public static function normalizeChildren(array $children): array
+    {
+        // First pass: recurse into each child so nested content is normalized
+        // BEFORE we compare siblings at this level. Bottom-up keeps the
+        // invariant holding all the way down.
+        foreach ($children as $i => $child) {
+            if (! is_array($child)) {
+                continue;
+            }
+
+            $type = $child['type'] ?? '';
+
+            // codeBlock content is opaque to Linkwise — same skip-contract
+            // used by BardLinkInserter (line 86) and the other walkers.
+            if (in_array($type, ['codeBlock', 'code_block'], true)) {
+                continue;
+            }
+
+            if (isset($child['content']) && is_array($child['content'])) {
+                $children[$i]['content'] = self::normalizeChildren($child['content']);
+            }
+
+            // Bard 'set' nodes carry nested Bard fragments under attrs.values.
+            // Normalize each one — same invariant must hold inside set
+            // bodies (Peak Cards, pull-quotes, accordions).
+            if ($type === 'set' && isset($child['attrs']['values']) && is_array($child['attrs']['values'])) {
+                foreach ($child['attrs']['values'] as $key => $val) {
+                    if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) {
+                        continue;
+                    }
+                    if (! is_array($val) || empty($val)) {
+                        continue;
+                    }
+                    if (ProseMirrorTypes::looksLikeBardContent($val)) {
+                        $children[$i]['attrs']['values'][$key] = self::normalizeChildren($val);
+                    }
+                }
+            }
+        }
+
+        // Second pass: merge adjacent text-node siblings at THIS level.
+        return self::mergeAdjacentTextNodes($children);
+    }
+
+    /**
+     * Merge runs of adjacent text nodes with identical mark-sets into
+     * single text nodes. Single-level operation — does not recurse.
+     * The public entry point {@see normalizeChildren()} handles recursion.
+     */
+    protected static function mergeAdjacentTextNodes(array $children): array
+    {
+        if (count($children) < 2) {
+            return $children;
+        }
+
+        $out = [];
+        foreach ($children as $child) {
+            if (! is_array($child)) {
+                $out[] = $child;
+                continue;
+            }
+
+            $lastIdx = count($out) - 1;
+            $prev = $lastIdx >= 0 && is_array($out[$lastIdx]) ? $out[$lastIdx] : null;
+
+            $bothText = $prev !== null
+                && ($prev['type'] ?? '') === 'text'
+                && ($child['type'] ?? '') === 'text'
+                && isset($prev['text'])
+                && isset($child['text']);
+
+            if ($bothText && self::sameMarkSet($prev['marks'] ?? [], $child['marks'] ?? [])) {
+                $out[$lastIdx]['text'] = $prev['text'] . $child['text'];
+                continue;
+            }
+
+            $out[] = $child;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Two mark-arrays are equivalent when they contain the same marks
+     * regardless of order. A "mark" is identified by (type, attrs) —
+     * canonicalized via sorted-key JSON so attrs-order doesn't fool
+     * the comparison.
+     *
+     * Why order-agnostic: ProseMirror nominally orders marks but in
+     * practice different code paths (Linkwise, Statamic CP, third-party
+     * editors) emit them in different orders for the same logical state.
+     * A bold+link text node should merge with a link+bold text node —
+     * they render identically.
+     */
+    protected static function sameMarkSet(array $a, array $b): bool
+    {
+        if (count($a) !== count($b)) {
+            return false;
+        }
+        if (empty($a)) {
+            return true;
+        }
+
+        $canonicalize = function (array $marks): array {
+            $signatures = [];
+            foreach ($marks as $m) {
+                if (! is_array($m)) {
+                    // Non-array entry — treat as distinct opaque value.
+                    $signatures[] = '__nonarray__'.serialize($m);
+                    continue;
+                }
+                $type = (string) ($m['type'] ?? '');
+                $attrs = $m['attrs'] ?? [];
+                if (is_array($attrs)) {
+                    ksort($attrs);
+                    $attrsJson = json_encode($attrs);
+                } else {
+                    $attrsJson = '__nonarray_attrs__';
+                }
+                $signatures[] = $type.'|'.$attrsJson;
+            }
+            sort($signatures);
+            return $signatures;
+        };
+
+        return $canonicalize($a) === $canonicalize($b);
+    }
 }

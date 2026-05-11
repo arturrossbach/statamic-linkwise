@@ -250,4 +250,224 @@ class BardWalkerTest extends TestCase
 
         $this->assertSame([], $yielded);
     }
+
+    // ─── normalizeChildren ─────────────────────────────────────────────────
+    //
+    // The invariant: a Bard children-array never contains two adjacent text
+    // nodes with the same mark-set. Tests below cover the cases that produce
+    // such fragments in production (Re-Link flow, unlink-then-insert across
+    // splits) and the cases that must NOT collapse (different marks, non-text
+    // separators, codeBlock content).
+
+    public function test_normalize_merges_adjacent_plain_text_nodes(): void
+    {
+        $children = [
+            ['type' => 'text', 'text' => 'Hello '],
+            ['type' => 'text', 'text' => 'world'],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        $this->assertCount(1, $out);
+        $this->assertSame('Hello world', $out[0]['text']);
+    }
+
+    public function test_normalize_merges_adjacent_same_href_link_marks(): void
+    {
+        // The Bug 16 case: anchor "über Erdnuss-Soba-Nudeln" stored as two
+        // adjacent text nodes both linking to the same target. Display
+        // merges them, write path didn't — this normalisation closes the gap.
+        $href = 'statamic://entry::target123';
+        $children = [
+            ['type' => 'text', 'text' => 'Heute '],
+            ['type' => 'text', 'text' => 'über ', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => 'Erdnuss-Soba-Nudeln', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => ' nachgedacht.'],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        $this->assertCount(3, $out);
+        $this->assertSame('Heute ', $out[0]['text']);
+        $this->assertSame('über Erdnuss-Soba-Nudeln', $out[1]['text']);
+        $this->assertSame($href, $out[1]['marks'][0]['attrs']['href']);
+        $this->assertSame(' nachgedacht.', $out[2]['text']);
+    }
+
+    public function test_normalize_does_not_merge_different_hrefs(): void
+    {
+        $children = [
+            ['type' => 'text', 'text' => 'a', 'marks' => [['type' => 'link', 'attrs' => ['href' => 'https://x.test']]]],
+            ['type' => 'text', 'text' => 'b', 'marks' => [['type' => 'link', 'attrs' => ['href' => 'https://y.test']]]],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        // Different hrefs are semantically different links — must stay split.
+        $this->assertCount(2, $out);
+    }
+
+    public function test_normalize_does_not_merge_text_split_by_non_text_node(): void
+    {
+        $children = [
+            ['type' => 'text', 'text' => 'before'],
+            ['type' => 'hardBreak'],
+            ['type' => 'text', 'text' => 'after'],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        // hardBreak (or any non-text node) breaks adjacency. Merging across
+        // it would silently change rendering.
+        $this->assertCount(3, $out);
+        $this->assertSame('before', $out[0]['text']);
+        $this->assertSame('hardBreak', $out[1]['type']);
+        $this->assertSame('after', $out[2]['text']);
+    }
+
+    public function test_normalize_merges_three_or_more_adjacent_same_mark(): void
+    {
+        // Walker handles runs of N, not just pairs.
+        $children = [
+            ['type' => 'text', 'text' => 'a', 'marks' => [['type' => 'bold']]],
+            ['type' => 'text', 'text' => 'b', 'marks' => [['type' => 'bold']]],
+            ['type' => 'text', 'text' => 'c', 'marks' => [['type' => 'bold']]],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        $this->assertCount(1, $out);
+        $this->assertSame('abc', $out[0]['text']);
+    }
+
+    public function test_normalize_merges_marks_in_different_order(): void
+    {
+        // Bold+link and link+bold are semantically identical — must merge.
+        // Different code paths emit marks in different orders; the merge
+        // must not depend on array order to catch real fragments.
+        $href = 'https://x.test';
+        $children = [
+            ['type' => 'text', 'text' => 'A', 'marks' => [
+                ['type' => 'bold'],
+                ['type' => 'link', 'attrs' => ['href' => $href]],
+            ]],
+            ['type' => 'text', 'text' => 'B', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => $href]],
+                ['type' => 'bold'],
+            ]],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        $this->assertCount(1, $out);
+        $this->assertSame('AB', $out[0]['text']);
+    }
+
+    public function test_normalize_recurses_into_nested_content(): void
+    {
+        // Real Bard trees nest: blockquote → paragraph → text. Invariant
+        // must hold all the way down, not only at the top level.
+        $children = [
+            [
+                'type' => 'blockquote',
+                'content' => [
+                    [
+                        'type' => 'paragraph',
+                        'content' => [
+                            ['type' => 'text', 'text' => 'hel'],
+                            ['type' => 'text', 'text' => 'lo'],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        $this->assertCount(1, $out[0]['content'][0]['content']);
+        $this->assertSame('hello', $out[0]['content'][0]['content'][0]['text']);
+    }
+
+    public function test_normalize_recurses_into_bard_set_attrs_values(): void
+    {
+        // Bard 'set' nodes carry nested Bard fragments under attrs.values
+        // (Peak Cards, pull-quotes, …). Same invariant must hold inside.
+        $children = [
+            [
+                'type' => 'set',
+                'attrs' => [
+                    'values' => [
+                        'type' => 'peak_card',
+                        'id' => 'abc',
+                        'body' => [
+                            [
+                                'type' => 'paragraph',
+                                'content' => [
+                                    ['type' => 'text', 'text' => 'foo'],
+                                    ['type' => 'text', 'text' => 'bar'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        $body = $out[0]['attrs']['values']['body'];
+        $this->assertCount(1, $body[0]['content']);
+        $this->assertSame('foobar', $body[0]['content'][0]['text']);
+    }
+
+    public function test_normalize_leaves_codeblock_content_untouched(): void
+    {
+        // codeBlock content is opaque to Linkwise — same contract as the
+        // rest of BardWalker / BardLinkInserter. Even if a code block had
+        // adjacent text children (uncommon but possible), we don't touch.
+        $children = [
+            [
+                'type' => 'codeBlock',
+                'content' => [
+                    ['type' => 'text', 'text' => 'int '],
+                    ['type' => 'text', 'text' => 'x;'],
+                ],
+            ],
+        ];
+
+        $out = BardWalker::normalizeChildren($children);
+
+        // Both children survive — code content is preserved verbatim.
+        $this->assertCount(2, $out[0]['content']);
+        $this->assertSame('int ', $out[0]['content'][0]['text']);
+        $this->assertSame('x;', $out[0]['content'][1]['text']);
+    }
+
+    public function test_normalize_empty_input_returns_empty(): void
+    {
+        $this->assertSame([], BardWalker::normalizeChildren([]));
+    }
+
+    public function test_normalize_single_child_returns_unchanged(): void
+    {
+        // Trivial single-child case: no adjacency to merge, structure passes through.
+        $children = [['type' => 'text', 'text' => 'lonely']];
+        $this->assertSame($children, BardWalker::normalizeChildren($children));
+    }
+
+    public function test_normalize_pure_does_not_mutate_input(): void
+    {
+        // The helper is documented as pure. Verify: input array stays
+        // untouched after the call (no by-reference surprises).
+        $href = 'https://x.test';
+        $children = [
+            ['type' => 'text', 'text' => 'a', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => 'b', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+        ];
+        $snapshot = $children;
+
+        BardWalker::normalizeChildren($children);
+
+        $this->assertEquals($snapshot, $children);
+    }
 }
