@@ -81,6 +81,7 @@
                                             :disabled="!!item._unlinked"
                                             :truncated-before="item.context_truncated_start || false"
                                             :truncated-after="item.context_truncated_end || false"
+                                            :anchor-offset-in-context="Number.isInteger(item.anchor_offset_in_context) ? item.anchor_offset_in_context : null"
                                             @update:anchor="item._anchor = $event"
                                             @reset="item._anchor = item._originalAnchor"
                                         />
@@ -118,6 +119,7 @@
                                             :disabled="!!item._unlinked"
                                             :truncated-before="item.context_truncated_start || false"
                                             :truncated-after="item.context_truncated_end || false"
+                                            :anchor-offset-in-context="Number.isInteger(item.anchor_offset_in_context) ? item.anchor_offset_in_context : null"
                                             @update:anchor="item._anchor = $event"
                                             @reset="item._anchor = item._originalAnchor"
                                         />
@@ -547,8 +549,24 @@ export default {
                     } catch {
                         return { success: false, error: 'invalid server response' };
                     }
-                    if (! data.results?.[0]?.success) {
-                        return { success: false, error: data.results?.[0]?.error || 'insert reported no success' };
+                    // Inbound/Outbound insert endpoints are async dispatch:
+                    // they enqueue a background artisan command and return
+                    // `{success: true, message: 'started'}` immediately.
+                    // The earlier check `data.results?.[0]?.success` matched
+                    // sync-shape only, so async dispatches always reported
+                    // "insert reported no success" → false error toast,
+                    // followed by the real success toast from LinkwiseLayout's
+                    // heavy-job poller when the background command finished
+                    // (Bug 2026-05-11: re-link showed error + success on the
+                    // same operation that actually completed cleanly).
+                    //
+                    // Accept either shape: sync-success (`results[0].success`)
+                    // or dispatch-ack (`data.success === true`). Future-proof
+                    // against either endpoint moving sync↔async.
+                    const syncOk = data.results?.[0]?.success === true;
+                    const dispatchOk = data.success === true;
+                    if (! syncOk && ! dispatchOk) {
+                        return { success: false, error: data.results?.[0]?.error || data.error || 'insert reported no success' };
                     }
 
                     // Mutate the row only when the modal is still alive — a

@@ -1077,6 +1077,9 @@ export default {
                                 sentence_context: link.sentence_context || '',
                                 context_truncated_start: link.context_truncated_start || false,
                                 context_truncated_end: link.context_truncated_end || false,
+                                // Plumbed from DashboardController for exact-occurrence
+                                // highlighting in SuggestedPhrase (Bug 2026-05-11).
+                                anchor_offset_in_context: Number.isInteger(link.anchor_offset_in_context) ? link.anchor_offset_in_context : null,
                                 _anchor: link.anchor_text || '',
                                 _originalAnchor: link.anchor_text || '',
                                 type: 'internal',
@@ -1114,6 +1117,7 @@ export default {
                             sentence_context: link.sentence_context || '',
                             context_truncated_start: link.context_truncated_start || false,
                             context_truncated_end: link.context_truncated_end || false,
+                            anchor_offset_in_context: Number.isInteger(link.anchor_offset_in_context) ? link.anchor_offset_in_context : null,
                             _anchor: link.anchor_text || '',
                             _originalAnchor: link.anchor_text || '',
                             url: link.href,
@@ -1141,6 +1145,7 @@ export default {
                             sentence_context: link.sentence_context || '',
                             context_truncated_start: link.context_truncated_start || false,
                             context_truncated_end: link.context_truncated_end || false,
+                            anchor_offset_in_context: Number.isInteger(link.anchor_offset_in_context) ? link.anchor_offset_in_context : null,
                             _anchor: link.anchor_text || '',
                             _originalAnchor: link.anchor_text || '',
                             edit_url: null,

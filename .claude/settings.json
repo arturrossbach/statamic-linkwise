@@ -51,33 +51,6 @@
         ]
       }
     ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/post-fix-reminder.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/post-frontend-build.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/post-fix-walkthrough-check.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [

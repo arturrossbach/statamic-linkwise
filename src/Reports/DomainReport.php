@@ -49,12 +49,13 @@ class DomainReport
                 continue;
             }
 
-            $externalLinks = $this->extractExternalLinksFromEntry($entry);
+            // Walk once: offset-annotated external links + flat text in the
+            // SAME pass. Replaces the naive occurrence counter that picked
+            // the wrong position when the same anchor word appeared both
+            // linked and unlinked in the entry (Bug 2026-05-11).
+            $bundle = TextExtractor::extractFromEntry($entry);
 
-            // Track anchor occurrence per entry for correct context extraction
-            $anchorOccurrences = [];
-
-            foreach ($externalLinks as $link) {
+            foreach ($bundle['external_links'] as $link) {
                 $domain = $this->extractDomain($link['url']);
 
                 if (! $domain) {
@@ -71,13 +72,16 @@ class DomainReport
                     ];
                 }
 
-                $anchorKey = mb_strtolower($link['anchor_text']);
-                $anchorOccurrences[$anchorKey] = ($anchorOccurrences[$anchorKey] ?? -1) + 1;
+                $ctx = ContextExtractor::extractAtOffset(
+                    $bundle['text'],
+                    $link['offset'],
+                    mb_strlen($link['anchor_text']),
+                );
 
                 $domains[$domain]['links'][] = [
                     'url' => $link['url'],
                     'anchor_text' => $link['anchor_text'],
-                    'sentence_context' => ContextExtractor::extract($record->text, $link['anchor_text'], 120, $anchorOccurrences[$anchorKey]),
+                    'sentence_context' => $ctx['text'] ?? '',
                     'post_id' => $record->id,
                     'post_title' => $record->title,
                 ];

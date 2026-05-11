@@ -1,157 +1,79 @@
 # Linkwise — Claude Code Rules
 
-## BLOCKING: Domain-First Brainstorm Before Tests
+## BLOCKING: Pre-Flight before "kannst testen"
 
-Tests aus Code-Sicht zu schreiben ("welcher Pfad fehlt?") fängt nur Bugs in den getesteten Pfaden. Bugs leben in Echtdaten, nicht in synthetischen Beispielen. Vor jedem Feature/Fix:
+Bevor du dem User irgendwas zum Testen gibst, MUSS jeder Punkt erfüllt sein:
 
-1. **Brainstorm aus Anwender-Sicht** ("was wäre dem User schlimm?") — keine Code-Begriffe, nur Domain. Pro User-Aktion 5-10 Punkte.
-2. **Mapping pro Punkt**: Unit-Test (isolierter Algorithmus) ODER Audit-Check (Konsistenz auf Echtdaten gegen prose-peak-test). Wenn weder noch: explizit als bekanntes Risiko dokumentieren.
-3. **Invariant-Tests bei Mutatoren**: "no existing structure is destroyed", "no content drift beyond intended span", "all marks preserved". Diese gelten für JEDEN Walker / JEDEN Replacer.
-4. **Audit-Erweiterung wenn Echtdaten-Komplexität nötig**: Highlight-vs-Tatsache, Toast-vs-Realität, Vorschlag-vs-Sicherheit, Revert-Completeness — gehören in `linkwise:audit`, nicht in Unit-Tests.
+1. **Domain-First Brainstorm**: aus User-Sicht ("was wäre dem User schlimm?"), 5+ Failure-Modi pro Aktion. Keine Code-Begriffe. Mapping pro Punkt zu Unit-Test ODER Audit-Check ODER explizit als bekanntes Risiko.
+2. **Tests laufen** — alle grün, neue + Regression.
+3. **`php artisan linkwise:audit`** gegen `~/Herd/prose-peak-test`. Exit 0 oder jedes pre-existing failure explizit benannt.
+4. **Real-flow proof** für mutating changes (tinker oder Playwright, kein "es sollte funktionieren").
 
-Anti-Pattern: synthetische Bard-JSONs handcrafted in Tests, ohne Patterns die echte Inhalte haben (hyphen-words, mixed-marks, multi-paragraph linked phrases). Echt heißt: gegen prose-peak-test simulieren.
+Test-Verantwortung liegt bei Claude, nicht beim User. Findet der User einen funktionalen Bug den ein Test/Audit gefangen hätte → mein Fehler.
 
-## BLOCKING: Break It Before You Ship It
+## BLOCKING: Implementation Axiom
 
-Before telling the user to test ANY implementation, you MUST:
+Vor jeder UI- oder Logik-Implementation:
+1. Statamic-Komponente prüfen (`vendor/statamic/cms/resources/js/components/ui/index.js`) — verfügbare: `Tabs`/`TabList`/`TabTrigger`/`TabContent`, `Dropdown`/`DropdownItem`/`DropdownMenu`/`DropdownSeparator`, `Modal`/`ModalClose`/`ModalTitle`, `Stack`/`StackHeader`/`StackContent`/`StackFooter`, `Header`, `Card`, `Panel`, `Button`, `Badge`, `Popover`, `ConfirmationModal`, directive `v-tooltip`.
+2. Browser-native HTML/CSS als zweite Wahl.
+3. Custom nur wenn 1+2 nicht passen — explizit flaggen.
 
-1. **List 5+ things that could go wrong** — *aus User-Sicht, nicht Code-Sicht* (siehe Domain-First Brainstorm).
-2. **Write a test for each.** Unit-Test ODER Audit-Check. Not just happy path — failure modes, edge cases, concurrent access, duplicate data, empty input, boundary conditions.
-3. **Run the tests.** All must pass.
-4. **Run `php artisan linkwise:audit`** gegen prose-peak-test.
-5. **Only then** tell the user to test.
+Imports: `import { ... } from '@statamic/cms/ui'` und `import { Link, Head, router } from '@statamic/cms/inertia'`.
 
-The user should only find UX/visual issues — NEVER functional bugs, data corruption, or logic errors. Those are YOUR job to catch. If the user finds a bug that a test or audit could have caught, that is a failure on your part. *Test-Verantwortung liegt bei Claude, nicht beim User* (verbindlich seit 2026-05-08).
+## BLOCKING: Blast-Radius vor Code-Änderung
 
-Ask yourself for every feature:
-- What if the input is empty? Null? A duplicate?
-- What if the data changed between read and write?
-- What if the user does this operation twice?
-- What if only part of the operation succeeds?
-- What if there are multiple items with the same key/identifier?
-- What happens at the boundaries (first, last, single item, zero items)?
-- **Was passiert mit bestehenden Strukturen die schon dort sind?** (existing links, existing marks, existing formatting)
-- **Stimmt das was die UI zeigt mit dem überein was der Code tut?** (highlight vs insert, toast vs reality)
+Vor jedem `Edit` auf `src/`:
+1. grep nach allen Aufrufern und allen Vorkommen des zu ändernden Patterns
+2. Tabelle posten welche Stellen betroffen sind und wie der Fix dort wirkt
+3. erst dann edit
 
-This is non-negotiable. No exceptions.
+Wenn User fragt "andere Stellen?" → ich war zu schmal.
 
-## BLOCKING: Statamic UI Components Check
+## BLOCKING: Build verify nach jedem Frontend-Edit
 
-Before writing ANY Vue template code — every button, dropdown, modal, tab, card, table, badge, tooltip, form element — you MUST:
+Nach jedem `.vue`/`.js` edit Pflichtreihenfolge:
+1. `PATH=/Users/rossbach/.nvm/versions/node/v22.22.2/bin:$PATH npm run build 2>&1 | tail -15` (NICHT -3 — Build-Errors stehen oben)
+2. Auf "✓ built in Xms" prüfen. Bei "Build failed" → STOP, fix syntax, retry.
+3. `cd ~/Herd/prose-peak-test && php artisan vendor:publish --provider="Arturrossbach\Linkwise\ServiceProvider" --force`
+4. Manifest-Hash neu + `grep -oE "<unique-changed-string>" public/vendor/linkwise/build/assets/addon-<NEW>.js` → Änderung muss im Bundle sein
+5. erst dann "kann testen"
 
-1. Search `vendor/statamic/cms/resources/js/components/ui/index.js` for existing exports
-2. Read the component source to understand props/slots
-3. Use the Statamic component. No exceptions.
+## BLOCKING: Single Source of Truth
 
-If you skip this step and write custom HTML/CSS for something Statamic already provides, you are wasting the user's time and creating inconsistent UI. This has happened 5+ times and is not acceptable.
+Bei Daten-Flow-Änderungen erst tracen wo der Wert herkommt + wo er angezeigt wird. Wenn an mehreren Stellen berechnet → eine ist authoritative, andere müssen sie nutzen. Heutige Sources of Truth:
 
-### Known Statamic UI Components (check index.js for current list):
-- `Tabs`, `TabList`, `TabTrigger`, `TabContent` — Tab navigation
-- `Dropdown`, `DropdownItem`, `DropdownSeparator`, `DropdownMenu` — Context menus
-- `Modal`, `ModalClose`, `ModalTitle` — Modal dialogs
-- `Stack`, `StackHeader`, `StackContent`, `StackFooter` — Panel overlays
-- `Header` — Page headers with icon + actions slots
-- `Card`, `Panel` — Containers
-- `Button` — Action buttons
-- `Badge` — Status badges
-- `Popover` — Popover tooltips
-- `ConfirmationModal` — Confirm/cancel dialogs
-- `v-tooltip` — Global directive (auto-registered)
+- **Suggestion counts**: `InboundEngine::suggest()` ist autoritativ. `DashboardController` ruft sie pro Entry und überschreibt `LinkReport::suggestionCounts()`. Keine duplizierte Suggestion-Logik in LinkReport.
+- **Outbound counts**: `LinkReport` (internal). `DashboardController` addiert external für `outbound_total`.
+- **Broken links**: `BrokenLinkChecker` schreibt JSON. `BrokenLinkReport` + Overview lesen daraus.
+- **Domain attributes**: `DomainReport` scannt. `domain-attributes.json` ist Storage. `LinkwiseLinkMark` liest fürs Rendering.
+- **Auto-link preview**: `AutoLinkApplier::applyRule(preview: true)`.
+- **Bulk completion**: alle 5 commands schreiben `phase=done` mit `heartbeat` at root. `JobLock::snapshot()` pickt latest by heartbeat. Frontend `LinkwiseLayout` rendert toast + persistent banner.
 
-### Import pattern:
-```js
-import { Dropdown, DropdownItem, Modal, Tabs, TabList } from '@statamic/cms/ui';
-import { Link, Head } from '@statamic/cms/inertia';
-```
+## Bulk-Write-Path Standard
 
-## Implementation Axiom (check BEFORE every implementation)
+Jeder neue/geänderte bulk command MUSS:
+1. **`JobLock::registerCrashGuard`** früh
+2. **`SafeEntrySaver::verifyHashes`** per-record (in der loop) — NICHT fail-fast 409 im Controller
+3. **`BulkSnapshotStore::record` → `appendWrittenItem` per success → `recordPostHashesForEntries` → `markCompleted`**
+4. **`recordBulkSkipped`** im skip-pfad (anchor not found, hash conflict, throwable) für drawer-Sichtbarkeit
+5. **`'heartbeat' => time()` at ROOT** des `phase=done` cache (für frontend dedup + JobLock-snapshot-priority)
+6. **per-item try/catch** im loop → keine ganze-bulk-aborts
 
-1. **Statamic first:** Does Statamic already provide a component, directive, or pattern for this?
-2. **Browser-native second:** Is there a native HTML/CSS solution?
-3. **Custom last:** Only if 1+2 don't apply — and flag it explicitly.
-
-## Workflow Rules
-
-- NEVER implement multiple steps before user tests in browser
-- Every step ends with a concrete test instruction
-- User tests → confirms → next step
-- Update architecture.md memory AFTER EVERY SPRINT
-- Before asking user to test in UI: verify via CLI (tinker, curl, or phpunit) that the feature works. The user should only confirm visual/UX aspects, not find functional bugs.
-
-## Link Whisper Benchmark
-
-Before every feature implementation, check: What does Link Whisper do here? Proactively suggest UX details from the Link Whisper analysis. Don't wait for the user to point it out.
-
-## Proactive Improvement Suggestions
-
-During every concept review AND during implementation: actively suggest product/UX improvements. Don't just build what's asked — think about what SHOULD be there. Examples:
-- "Should we add a Suggestions column to the Links Report?" (like the user suggested for Sprint 8)
-- "Link Whisper shows anchor text in the modal — should we add that?"
-- "This table could benefit from a keyword search field"
-
-The user values proactive thinking. If you see an opportunity to make the product better, suggest it before the user has to ask.
-
-## BLOCKING: Think Before You Build
-
-Before implementing ANY change, complete this checklist. No exceptions.
-
-### Before writing code:
-1. **Trace the data flow.** Where does this value come from? Where is it displayed? Are there other places showing the same data? List them.
-2. **Identify the single source of truth.** If the same data is computed in multiple places, which one is authoritative? The others must use it, not recompute.
-3. **Think like a user.** Would an SEO manager understand every label, every number, every color at first glance? If not, rewrite before implementing.
-4. **Check for duplicates.** Does another card, column, or section already show this information?
-
-### After writing code, before telling the user to test:
-5. **Verify numbers match across views.** If a count appears in Overview AND in a tab — do they show the same number? Check via tinker.
-6. **Verify colors match reality.** If something is red, is the situation actually bad? If green, is it actually good?
-7. **Read every visible text out loud.** Does it make sense to someone who doesn't know the codebase?
-8. **Look at the full page, not just your change.** Did your change create a duplicate? A contradiction? A layout break?
-
-This checklist exists because skipping it has caused bugs in every single session. The user should not have to find inconsistencies — that is your job.
+Modelle: `LinkInsertCommand`, `DetailUnlinkCommand`, `UrlChangerApplyCommand`. Ausnahme: `BulkUnlinkCommand` fehlt noch verifyHashes (offene Tech-Debt).
 
 ## Code Quality
 
-- DRY: Extract shared components (like HelpIcon) immediately
-- No SVG width/height attributes — use CSS
-- ProseMirror manipulation only via Bard API
-- Type hints on all PHP methods
-- Stemming via wamania/php-stemmer (Snowball), never ad-hoc
+- DRY ohne premature abstraction
+- Type hints auf jeder PHP-Methode
+- ProseMirror nur via Bard-API
+- Stemming via `wamania/php-stemmer` (Snowball)
+- Keine SVG width/height attributes — CSS
 
-## Testing
+## Workflow
 
-- Write unit tests for EVERY new feature, not just the happy path
-- Test edge cases: empty input, already-linked text, word boundaries, case sensitivity
-- Before telling the user to test in UI: verify via CLI (tinker/phpunit) that it works
-- Auto-Link tests must cover: word boundary, once-per-post, already-linked detection, self-reference, preview consistency
-- Run the full test suite before every commit
-- NEVER run the full Playwright suite during development — only targeted tests with `--grep`
-- When a value appears in multiple views: verify BOTH views show the same number via tinker before asking the user to test
-
-## BLOCKING: linkwise:audit before "kannst testen"
-
-Before posting any "kannst testen" / "feature complete" / "fertig" message
-that touches Linkwise code, you MUST:
-
-1. Run `php artisan linkwise:audit` against `~/Herd/prose-peak-test`
-2. Confirm exit code 0, OR explicitly document each remaining failure as a
-   known limitation (data corruption from earlier dev iterations vs new bugs)
-3. Only then tell the user to test
-
-This is the corruption-prevention gate. Audit failures that look like new
-bugs MUST be triaged before claiming done. Skipping this is how today's
-catastrophic markdown-corruption bug shipped — the audit would have caught
-it in 10 seconds.
-
-Path-specific runs are fine for fast iteration:
-`php artisan linkwise:audit --path=auto-link` (or any single path).
-Full audit is mandatory before user-facing test asks.
-
-## Data Flow — Single Sources of Truth
-
-When changing anything related to these, trace the full flow first:
-
-- **Suggestion counts**: `InboundEngine::suggest()` is the single source of truth. `DashboardController` calls it per entry and overrides LinkReport's counts. Do NOT add suggestion logic to `LinkReport::suggestionCounts()` — it will diverge.
-- **Outbound counts**: `LinkReport` computes internal outbound. `DashboardController` adds external counts for `outbound_total`.
-- **Broken links**: `BrokenLinkChecker` writes JSON. `BrokenLinkReport` reads it. Overview reads from the same data.
-- **Domain attributes**: `DomainReport` scans entries. Domain attributes stored in `domain-attributes.json`. `LinkwiseLinkMark` reads them for rendering.
-- **Auto-link preview**: `AutoLinkApplier::applyRule(preview: true)` is the single source of truth for match_count and linked_count.
+- NIE mehrere Steps vor User-Browser-Test
+- Jeder Step endet mit konkreter Test-Anweisung
+- CLI-Verify (tinker/phpunit) bevor User UI testet
+- Auto-link Tests: word-boundary, once-per-post, already-linked, self-reference, preview-consistency
+- Volle Playwright-Suite NIE während Dev — nur `--grep` targeted
+- Vor `git commit` volle PHPUnit Unit-Suite grün

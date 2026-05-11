@@ -517,28 +517,6 @@ class UrlReplacer
             return $entryResult;
         }
 
-        // Collect full text for context extraction
-        $fullText = '';
-        foreach ($fields as $handle => $field) {
-            $val = $entry->get($handle);
-            if ($field->type() === 'bard' && is_array($val)) {
-                $fullText .= ' '.\Arturrossbach\Linkwise\Support\TextExtractor::fromBard($val);
-            } elseif ($field->type() === 'markdown' && is_string($val)) {
-                $fullText .= ' '.preg_replace('/\[([^\[\]]+)\]\([^)]+\)/', '$1', $val);
-            } elseif ($field->type() === 'replicator' && is_array($val)) {
-                // Extract text from nested Bard fields in Replicator
-                foreach ($val as $set) {
-                    if (! is_array($set)) continue;
-                    foreach ($set as $key => $v) {
-                        if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) continue;
-                        if (is_array($v) && ! empty($v) && ProseMirrorTypes::looksLikeBardContent($v)) {
-                            $fullText .= ' '.\Arturrossbach\Linkwise\Support\TextExtractor::fromBard($v);
-                        }
-                    }
-                }
-            }
-        }
-
         // Preview-only walker — no save. Apply path is applySelected (which
         // routes through SafeEntrySaver). See process() docblock above for
         // why the apply branch was removed in 2026-05-09.
@@ -572,13 +550,42 @@ class UrlReplacer
         // UI to render the diff side-by-side without recomputing.
         unset($replace);
 
-        // Add context for occurrences that don't have it yet (Bard/Replicator)
-        $anchorOccurrences = [];
+        // Compute context per occurrence using the offset-aware walker.
+        // Replaces the naive occurrence-counter that picked the wrong
+        // position when the same anchor word appeared both linked and
+        // unlinked in the same entry (Bug 2026-05-11). The bundle walker
+        // visits links in the same depth-first order as findIn* below
+        // (per field, replicator nested), so the Nth occurrence for a
+        // given URL maps to the Nth bundle link with that URL.
+        $bundle = \Arturrossbach\Linkwise\Support\TextExtractor::extractFromEntry($entry);
+        $bundleLinksByUrl = [];
+        foreach ($bundle['internal_links'] as $l) {
+            $bundleLinksByUrl[$l['href']][] = $l;
+        }
+        foreach ($bundle['external_links'] as $l) {
+            $bundleLinksByUrl[$l['url']][] = $l;
+        }
+        $consumed = [];
         foreach ($entryResult['occurrences'] as &$occ) {
-            if (! empty($occ['anchor_text']) && ! empty($fullText)) {
-                $anchorKey = mb_strtolower($occ['anchor_text']);
-                $anchorOccurrences[$anchorKey] = ($anchorOccurrences[$anchorKey] ?? -1) + 1;
-                $occ['context'] = ContextExtractor::extract($fullText, $occ['anchor_text'], 120, $anchorOccurrences[$anchorKey]);
+            if (empty($occ['anchor_text'])) continue;
+            $url = (string) ($occ['matched_url'] ?? '');
+            $i = $consumed[$url] ?? 0;
+            $consumed[$url] = $i + 1;
+            $bundleLink = $bundleLinksByUrl[$url][$i] ?? null;
+            if ($bundleLink !== null) {
+                $ctx = ContextExtractor::extractAtOffset(
+                    $bundle['text'],
+                    $bundleLink['offset'],
+                    mb_strlen($bundleLink['anchor_text']),
+                );
+                $occ['context'] = $ctx['text'] ?? '';
+            } elseif (empty($occ['context'])) {
+                // Defensive fallback: bundle didn't include this URL (e.g.
+                // a non-standard href shape the bundle walker filters out).
+                // Naive occurrence=0 lookup — correct for unique anchors,
+                // graceful degradation for duplicates.
+                $ctx = ContextExtractor::extractStructured($bundle['text'], $occ['anchor_text'], 120, 0);
+                $occ['context'] = $ctx['text'] ?? '';
             }
         }
 

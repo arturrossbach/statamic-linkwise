@@ -135,32 +135,53 @@ class DashboardController extends CpController
             $externalLinks = [];
             $internalLinksWithAnchors = [];
             if ($statamicEntry) {
-                $externalLinks = $this->extractExternalLinksFromEntry($statamicEntry);
-                $internalLinksWithAnchors = $this->extractInternalLinksWithAnchors($statamicEntry);
-            }
+                // Single-pass walk: text + internal + external links, each
+                // annotated with the char-offset where its anchor sits in
+                // that text. Replaces the naive occurrence counter that
+                // silently picked unlinked anchor positions when the same
+                // anchor word appeared both linked and unlinked in the same
+                // entry (Bug 2026-05-11: DetailModal showed contexts for
+                // unverlinkte Stellen, while the actually-linked positions
+                // never made it into the modal).
+                $bundle = TextExtractor::extractFromEntry($statamicEntry);
+                $entryText = $bundle['text'];
 
-            $entryText = $records[$entry['id']]->text ?? '';
-            $anchorOccurrences = [];
-            foreach ($externalLinks as &$extLink) {
-                $anchor = $extLink['anchor_text'] ?? '';
-                $key = mb_strtolower($anchor);
-                $occ = $anchorOccurrences[$key] ?? 0;
-                $ctx = ContextExtractor::extractStructured($entryText, $anchor, 120, $occ);
-                $extLink['sentence_context'] = $ctx ? $ctx['text'] : '';
-                $extLink['context_truncated_start'] = $ctx['truncated_start'] ?? false;
-                $extLink['context_truncated_end'] = $ctx['truncated_end'] ?? false;
-                $anchorOccurrences[$key] = $occ + 1;
-            }
-            $anchorOccurrences = [];
-            foreach ($internalLinksWithAnchors as &$intLink) {
-                $anchor = $intLink['anchor_text'] ?? '';
-                $key = mb_strtolower($anchor);
-                $occ = $anchorOccurrences[$key] ?? 0;
-                $ctx = ContextExtractor::extractStructured($entryText, $anchor, 120, $occ);
-                $intLink['sentence_context'] = $ctx ? $ctx['text'] : '';
-                $intLink['context_truncated_start'] = $ctx['truncated_start'] ?? false;
-                $intLink['context_truncated_end'] = $ctx['truncated_end'] ?? false;
-                $anchorOccurrences[$key] = $occ + 1;
+                foreach ($bundle['external_links'] as $extLink) {
+                    $ctx = ContextExtractor::extractAtOffset(
+                        $entryText,
+                        $extLink['offset'],
+                        mb_strlen($extLink['anchor_text']),
+                    );
+                    $externalLinks[] = [
+                        'url' => $extLink['url'],
+                        'anchor_text' => $extLink['anchor_text'],
+                        'sentence_context' => $ctx['text'] ?? '',
+                        'context_truncated_start' => $ctx['truncated_start'] ?? false,
+                        'context_truncated_end' => $ctx['truncated_end'] ?? false,
+                        // Frontend uses this to highlight the EXACT linked
+                        // occurrence in the snippet, not a naive indexOf
+                        // that would colour the first string-match (which
+                        // may be unlinked).
+                        'anchor_offset_in_context' => $ctx['anchor_offset'] ?? null,
+                    ];
+                }
+
+                foreach ($bundle['internal_links'] as $intLink) {
+                    $ctx = ContextExtractor::extractAtOffset(
+                        $entryText,
+                        $intLink['offset'],
+                        mb_strlen($intLink['anchor_text']),
+                    );
+                    $internalLinksWithAnchors[] = [
+                        'entry_id' => $intLink['entry_id'],
+                        'anchor_text' => $intLink['anchor_text'],
+                        'href' => $intLink['href'],
+                        'sentence_context' => $ctx['text'] ?? '',
+                        'context_truncated_start' => $ctx['truncated_start'] ?? false,
+                        'context_truncated_end' => $ctx['truncated_end'] ?? false,
+                        'anchor_offset_in_context' => $ctx['anchor_offset'] ?? null,
+                    ];
+                }
             }
 
             $entry['external_links'] = $externalLinks;
@@ -1308,27 +1329,6 @@ class DashboardController extends CpController
         }
 
         return $contentKeywords;
-    }
-
-    protected function extractInternalLinksWithAnchors($entry): array
-    {
-        $links = [];
-
-        EntryFieldWalker::walk(
-            $entry,
-            function (array $bard) use (&$links) {
-                $links = array_merge($links, TextExtractor::internalLinksWithAnchorFromBard($bard));
-            },
-            function (string $markdown) use (&$links) {
-                if (preg_match_all('#\[([^\[\]]*)\]\(statamic://entry::([^)]+)\)#', $markdown, $matches, PREG_SET_ORDER)) {
-                    foreach ($matches as $m) {
-                        $links[] = ['entry_id' => $m[2], 'anchor_text' => $m[1], 'href' => 'statamic://entry::'.$m[2]];
-                    }
-                }
-            },
-        );
-
-        return $links;
     }
 
     protected function extractExternalLinksFromEntry($entry): array

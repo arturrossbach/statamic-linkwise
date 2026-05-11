@@ -39,6 +39,14 @@ export default {
         disabled: { type: Boolean, default: false },
         truncatedBefore: { type: Boolean, default: false },
         truncatedAfter: { type: Boolean, default: false },
+        // Exact char offset of the anchor inside sentenceContext, as computed
+        // by the backend (ContextExtractor::extractAtOffset). Lets the
+        // component highlight the SPECIFIC linked occurrence when the anchor
+        // word appears multiple times in the snippet (e.g. an unlinked
+        // occurrence in the same paragraph). When null/undefined, falls back
+        // to indexOf — which is correct only when the anchor is unique in
+        // the snippet (suggestion previews, single-occurrence contexts).
+        anchorOffsetInContext: { type: Number, default: null },
     },
 
     emits: ['update:anchor', 'reset'],
@@ -54,6 +62,27 @@ export default {
     computed: {
         anchorIdx() {
             if (!this.sentenceContext || !this.anchor) return -1;
+            // When the backend supplied an exact offset (anchor_offset_in_context)
+            // AND the current anchor still matches the text at that offset, use
+            // it — this is the only way to highlight the right occurrence when
+            // the anchor word appears multiple times in the snippet (linked +
+            // unlinked in the same paragraph).
+            //
+            // The "still matches" guard handles in-place anchor edits
+            // (double-click-expand/shrink): the backend offset is for the
+            // original anchor; after the user grows the anchor, that offset may
+            // point to text that no longer equals the new anchor → fall back to
+            // indexOf for the live-edit case. The edit is a UI preview before
+            // apply, the user accepts that the highlight follows the search.
+            if (Number.isInteger(this.anchorOffsetInContext) && this.anchorOffsetInContext >= 0) {
+                const slice = this.sentenceContext.substring(
+                    this.anchorOffsetInContext,
+                    this.anchorOffsetInContext + this.anchor.length,
+                );
+                if (slice.toLowerCase() === this.anchor.toLowerCase()) {
+                    return this.anchorOffsetInContext;
+                }
+            }
             return this.sentenceContext.toLowerCase().indexOf(this.anchor.toLowerCase());
         },
 
