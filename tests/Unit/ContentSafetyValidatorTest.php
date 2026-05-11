@@ -458,6 +458,52 @@ class ContentSafetyValidatorTest extends TestCase
         $this->expectNotToPerformAssertions();
     }
 
+    public function test_link_coverage_unlinking_one_of_multiple_marks_passes(): void
+    {
+        // Real bug 2026-05-11: source entry has three link marks to the
+        // same target (e.g. "Erdnuss-Soba-Nudeln" linked 3× in different
+        // paragraphs, total 48 chars). User removes ONE of them via the
+        // inbound-detail modal. Per-href total drops 48 → 29. The pre-
+        // 2026-05-11 char-sum check fired "this would shorten an existing
+        // link without removing it" — a false positive: each surviving
+        // mark is unchanged, one was cleanly removed. The per-mark
+        // identity check (this test) MUST accept the save.
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'A '],
+            ['type' => 'text', 'text' => 'Erdnuss', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::soba']],
+            ]],
+            ['type' => 'text', 'text' => ' middle '],
+            ['type' => 'text', 'text' => 'Erdnuss', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::soba']],
+            ]],
+            ['type' => 'text', 'text' => ' end '],
+            ['type' => 'text', 'text' => 'Eier', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::soba']],
+            ]],
+            ['type' => 'text', 'text' => '.'],
+        ]]];
+        // Same paragraph minus the middle mark — surviving marks at same
+        // offsets, same lengths. Clean per-mark removal.
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'A '],
+            ['type' => 'text', 'text' => 'Erdnuss', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::soba']],
+            ]],
+            ['type' => 'text', 'text' => ' middle Erdnuss end '],
+            ['type' => 'text', 'text' => 'Eier', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => 'statamic::soba']],
+            ]],
+            ['type' => 'text', 'text' => '.'],
+        ]]];
+
+        ContentSafetyValidator::ensureLinkCoveragePreserved(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
     public function test_link_coverage_extension_passes(): void
     {
         // Auto-Link rule running multiple times can grow the linked-char
@@ -577,5 +623,238 @@ class ContentSafetyValidatorTest extends TestCase
 
         ContentSafetyValidator::ensureLinkCoveragePreserved($entry, $entry);
         $this->expectNotToPerformAssertions();
+    }
+
+    // ─── ensureNoNewAdjacentSameMarks ────────────────────────────────────
+    //
+    // Bug 16 fragmentation gate. Diff-mode: existing fragments don't block,
+    // only NEW ones do. The migration `linkwise:normalize-bard` cleans
+    // legacy data; this gate prevents new regressions.
+
+    public function test_adjacent_pairs_unchanged_passes(): void
+    {
+        // Idempotent save: same fragment count in before + after → no throw.
+        // Existing fragmented entries must still be saveable.
+        $href = 'statamic://entry::a';
+        $fragmented = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'über ', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => 'Erdnuss', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+        ]]];
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($fragmented),
+            $this->entryWithBard($fragmented),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_adjacent_pairs_clean_to_clean_passes(): void
+    {
+        // No fragments anywhere — most common case, must be a fast no-op.
+        $clean = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Just clean prose.'],
+        ]]];
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($clean),
+            $this->entryWithBard($clean),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_adjacent_pairs_introducing_new_fragment_throws(): void
+    {
+        // The regression we're preventing: a save that produces a NEW
+        // adjacent same-mark pair (e.g. via linkAcrossNodes without
+        // normalize). before = clean, after = fragmented → throw.
+        $href = 'statamic://entry::a';
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Heute über Erdnuss-Soba-Nudeln nachgedacht.'],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Heute '],
+            ['type' => 'text', 'text' => 'über ', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => 'Erdnuss-Soba-Nudeln', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => ' nachgedacht.'],
+        ]]];
+
+        $this->expectException(\Arturrossbach\Linkwise\Exceptions\ContentCorruptionException::class);
+        $this->expectExceptionMessage('would introduce 1 new fragmented-link pair');
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+    }
+
+    public function test_adjacent_pairs_cleanup_passes(): void
+    {
+        // Migration / normalize would do the opposite of the bug:
+        // before had a pair, after doesn't. That's an improvement —
+        // must not throw (negative delta is fine).
+        $href = 'statamic://entry::a';
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'über ', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => 'Erdnuss', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'über Erdnuss', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+        ]]];
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_adjacent_pairs_counts_runs_correctly(): void
+    {
+        // 3 adjacent same-mark siblings = 2 pairs, 4 = 3 pairs. Walker
+        // must count runs, not just isolated pairs.
+        $href = 'statamic://entry::a';
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'clean'],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'a', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => 'b', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'text', 'text' => 'c', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+        ]]];
+
+        $this->expectException(\Arturrossbach\Linkwise\Exceptions\ContentCorruptionException::class);
+        $this->expectExceptionMessage('2 new fragmented-link pair'); // 3 same-mark siblings → 2 pairs
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+    }
+
+    public function test_adjacent_pairs_different_hrefs_not_pair(): void
+    {
+        // Different href = semantically different link; not a fragment.
+        // before clean, after has two different-href siblings → not a pair → no throw.
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'clean'],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'a', 'marks' => [['type' => 'link', 'attrs' => ['href' => 'https://x.test']]]],
+            ['type' => 'text', 'text' => 'b', 'marks' => [['type' => 'link', 'attrs' => ['href' => 'https://y.test']]]],
+        ]]];
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_adjacent_pairs_text_separated_by_non_text_not_pair(): void
+    {
+        // hardBreak between same-mark texts breaks adjacency.
+        $href = 'statamic://entry::a';
+        $before = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'clean'],
+        ]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'a', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ['type' => 'hardBreak'],
+            ['type' => 'text', 'text' => 'b', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+        ]]];
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_adjacent_pairs_counts_into_nested_content(): void
+    {
+        // Fragments inside list-items / blockquotes etc. count too.
+        $href = 'statamic://entry::a';
+        $before = [['type' => 'blockquote', 'content' => [
+            ['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'clean']]],
+        ]]];
+        $after = [['type' => 'blockquote', 'content' => [
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => 'a', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+                ['type' => 'text', 'text' => 'b', 'marks' => [['type' => 'link', 'attrs' => ['href' => $href]]]],
+            ]],
+        ]]];
+
+        $this->expectException(\Arturrossbach\Linkwise\Exceptions\ContentCorruptionException::class);
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+    }
+
+    public function test_adjacent_pairs_ignores_codeblock_content(): void
+    {
+        // codeBlock content is opaque — fragments inside (unlikely but
+        // possible) don't count. Consistent with the rest of the walkers.
+        $before = [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'clean']]]];
+        $after = [['type' => 'codeBlock', 'content' => [
+            ['type' => 'text', 'text' => 'int '],
+            ['type' => 'text', 'text' => 'x;'],
+        ]]];
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function test_adjacent_pairs_order_agnostic_mark_compare(): void
+    {
+        // [bold, link] and [link, bold] = same mark-set → counts as pair.
+        // Linkwise and Statamic CP emit marks in different orders for the
+        // same logical state; the check must catch the real fragment.
+        $href = 'https://x.test';
+        $before = [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'clean']]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'A', 'marks' => [
+                ['type' => 'bold'],
+                ['type' => 'link', 'attrs' => ['href' => $href]],
+            ]],
+            ['type' => 'text', 'text' => 'B', 'marks' => [
+                ['type' => 'link', 'attrs' => ['href' => $href]],
+                ['type' => 'bold'],
+            ]],
+        ]]];
+
+        $this->expectException(\Arturrossbach\Linkwise\Exceptions\ContentCorruptionException::class);
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
+    }
+
+    public function test_adjacent_pairs_plain_text_no_marks_counts(): void
+    {
+        // After unlink, mark-strip leaves adjacent plain-text siblings.
+        // That counts as a fragment too — Statamic renders the same as
+        // a single text node, but the structure is dirty. Walker counts it.
+        $before = [['type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Heute über Erdnuss nachgedacht.']]]];
+        $after = [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Heute '],
+            ['type' => 'text', 'text' => 'über '],
+            ['type' => 'text', 'text' => 'Erdnuss'],
+            ['type' => 'text', 'text' => ' nachgedacht.'],
+        ]]];
+
+        $this->expectException(\Arturrossbach\Linkwise\Exceptions\ContentCorruptionException::class);
+        // 4 adjacent plain-text nodes = 3 pairs.
+        $this->expectExceptionMessage('3 new fragmented-link pair');
+
+        ContentSafetyValidator::ensureNoNewAdjacentSameMarks(
+            $this->entryWithBard($before),
+            $this->entryWithBard($after),
+        );
     }
 }
