@@ -341,4 +341,134 @@ class AutoLinkApplierTest extends TestCase
             public function __construct() {}
         };
     }
+
+    /* ─────────── Bug 3: per-record exceptions must NOT abort the whole rule ─────────── */
+
+    /**
+     * Real bug: BardLinkInserter inside AutoLinkApplier::applyRule could throw
+     * (EntryConflictException for parallel-edit hash mismatch, or any \Throwable
+     * from the underlying save chain). The throw bubbled up out of the foreach,
+     * out of applyRule, into ApplyRuleCommand's outer try/catch which set
+     * phase=error and returned FAILURE. Records AFTER the failing one were
+     * never tried. User reported it as "the whole bulk aborts when one fails".
+     *
+     * Fix: wrap the real-insert call in try/catch so a per-record exception
+     * counts as entries_skipped++ and the loop continues.
+     */
+    public function test_apply_rule_continues_when_insert_throws_on_one_record(): void
+    {
+        $records = $this->makeMatchingRecords(['a', 'b', 'c']);
+
+        // Subclass overrides performInsert to throw for a specific entry id.
+        // The wrapper try/catch must catch this and continue with the next record.
+        $applier = new class($this->fakeIndexer($records), $this->fakeManager()) extends AutoLinkApplier {
+            public string $throwOnId = '';
+            public array $insertedIds = [];
+
+            protected function performInsert(string $entryId, string $keyword, string $href, bool $caseSensitive, bool $save = true, ?string $expectedSentenceContext = null): bool
+            {
+                if ($entryId === $this->throwOnId) {
+                    throw new \RuntimeException('simulated per-record failure');
+                }
+                if ($save) {
+                    $this->insertedIds[] = $entryId;
+                }
+                return true;
+            }
+
+            // Stub the link-detection helpers so all records have status 'would_link'
+            protected function entryContainsLink(string $entryId, string $href): bool { return false; }
+            protected function keywordIsLinkedInEntry(string $entryId, string $keyword, bool $caseSensitive): bool { return false; }
+        };
+        $applier->throwOnId = 'b';
+
+        $rule = AutoLinkRule::create([
+            'keyword' => 'matchword',
+            'url' => 'https://example.com',
+        ]);
+
+        $result = $applier->applyRule($rule);
+
+        $this->assertSame(['a', 'c'], $applier->insertedIds, 'records BEFORE and AFTER the failing one must still be inserted');
+        $this->assertSame(2, $result['links_added'], 'links_added counts only successful inserts');
+        $this->assertGreaterThanOrEqual(1, $result['entries_skipped'], 'failed record counted as skipped');
+        $this->assertArrayNotHasKey('cancelled', $result, 'rule must NOT be marked cancelled');
+    }
+
+    public function test_apply_rule_continues_when_insert_throws_on_first_record(): void
+    {
+        $records = $this->makeMatchingRecords(['a', 'b', 'c']);
+
+        $applier = new class($this->fakeIndexer($records), $this->fakeManager()) extends AutoLinkApplier {
+            public string $throwOnId = '';
+            public array $insertedIds = [];
+
+            protected function performInsert(string $entryId, string $keyword, string $href, bool $caseSensitive, bool $save = true, ?string $expectedSentenceContext = null): bool
+            {
+                if ($entryId === $this->throwOnId) {
+                    throw new \RuntimeException('simulated');
+                }
+                if ($save) $this->insertedIds[] = $entryId;
+                return true;
+            }
+            protected function entryContainsLink(string $entryId, string $href): bool { return false; }
+            protected function keywordIsLinkedInEntry(string $entryId, string $keyword, bool $caseSensitive): bool { return false; }
+        };
+        $applier->throwOnId = 'a'; // first record
+
+        $rule = AutoLinkRule::create([
+            'keyword' => 'matchword',
+            'url' => 'https://example.com',
+        ]);
+
+        $result = $applier->applyRule($rule);
+
+        $this->assertSame(['b', 'c'], $applier->insertedIds, 'records AFTER the first-failing one must still be inserted');
+        $this->assertSame(2, $result['links_added']);
+    }
+
+    public function test_apply_rule_continues_when_insert_throws_on_last_record(): void
+    {
+        $records = $this->makeMatchingRecords(['a', 'b', 'c']);
+
+        $applier = new class($this->fakeIndexer($records), $this->fakeManager()) extends AutoLinkApplier {
+            public string $throwOnId = '';
+            public array $insertedIds = [];
+
+            protected function performInsert(string $entryId, string $keyword, string $href, bool $caseSensitive, bool $save = true, ?string $expectedSentenceContext = null): bool
+            {
+                if ($entryId === $this->throwOnId) {
+                    throw new \RuntimeException('simulated');
+                }
+                if ($save) $this->insertedIds[] = $entryId;
+                return true;
+            }
+            protected function entryContainsLink(string $entryId, string $href): bool { return false; }
+            protected function keywordIsLinkedInEntry(string $entryId, string $keyword, bool $caseSensitive): bool { return false; }
+        };
+        $applier->throwOnId = 'c'; // last record
+
+        $rule = AutoLinkRule::create([
+            'keyword' => 'matchword',
+            'url' => 'https://example.com',
+        ]);
+
+        $result = $applier->applyRule($rule);
+
+        $this->assertSame(['a', 'b'], $applier->insertedIds, 'records BEFORE the last-failing one must still be inserted');
+        $this->assertSame(2, $result['links_added']);
+    }
+
+    /** Records with text containing 'matchword' so textContainsKeywordAtBoundary returns true. */
+    private function makeMatchingRecords(array $ids): array
+    {
+        return array_map(fn (string $id) => new EntryRecord(
+            id: $id,
+            title: "Entry $id",
+            url: "/entry/$id",
+            collection: 'pages',
+            text: "This entry contains the matchword for testing.",
+            outboundLinks: [],
+        ), $ids);
+    }
 }

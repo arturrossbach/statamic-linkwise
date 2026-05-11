@@ -7,6 +7,7 @@ use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use Arturrossbach\Linkwise\Support\ContextExtractor;
 use Arturrossbach\Linkwise\Support\ProseMirrorTypes;
 use Arturrossbach\Linkwise\Support\UrlHelper;
+use Illuminate\Support\Facades\Log;
 use Statamic\Facades\Entry;
 
 class AutoLinkApplier
@@ -131,7 +132,7 @@ class AutoLinkApplier
             // This keeps Preview honest — the count reflects what Apply will truly insert.
             if ($linkStatus === 'would_link') {
                 try {
-                    $canInsert = BardLinkInserter::insertLinkIntoEntryWithHref(
+                    $canInsert = $this->performInsert(
                         $record->id, $rule->keyword, $href, $rule->caseSensitive, false
                     );
                     if (! $canInsert) {
@@ -181,12 +182,26 @@ class AutoLinkApplier
             // has a link and will be skipped. To change the URL, use the URL Changer instead.
 
             // V1: single-insert always (oncePerPost=true is enforced).
-            $inserted = BardLinkInserter::insertLinkIntoEntryWithHref(
-                $record->id,
-                $rule->keyword,
-                $href,
-                $rule->caseSensitive,
-            );
+            // Bug 3 (2026-05-11): a per-record exception (EntryConflictException
+            // from a parallel edit, malformed bard, disk failure, anything
+            // \Throwable) used to bubble up out of this loop, out of applyRule,
+            // into ApplyRuleCommand's outer try/catch — which set phase=error
+            // and aborted the whole rule. Records AFTER the failing one were
+            // never even tried. Now we trap per-record so the bulk continues.
+            $inserted = false;
+            try {
+                $inserted = $this->performInsert(
+                    $record->id,
+                    $rule->keyword,
+                    $href,
+                    $rule->caseSensitive,
+                );
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] AutoLinkApplier insert failed for entry '.$record->id.': '.$e->getMessage());
+                $result['errors'] = $result['errors'] ?? [];
+                $errKey = mb_substr($e->getMessage(), 0, 120);
+                $result['errors'][$errKey] = ($result['errors'][$errKey] ?? 0) + 1;
+            }
 
             if ($inserted) {
                 $result['links_added']++;
@@ -212,6 +227,25 @@ class AutoLinkApplier
         }
 
         return $result;
+    }
+
+    /**
+     * Thin seam over BardLinkInserter::insertLinkIntoEntryWithHref.
+     *
+     * Exists for two reasons:
+     *   1. Tests can subclass and override to simulate per-record exceptions
+     *      without a Statamic test environment (Bug 3 regression coverage).
+     *   2. Both the preview-time can-insert probe AND the real apply call
+     *      route through one place — easier to add cross-cutting concerns
+     *      (logging, metrics) later without duplicating.
+     *
+     * The signature mirrors BardLinkInserter exactly. No behaviour change.
+     */
+    protected function performInsert(string $entryId, string $keyword, string $href, bool $caseSensitive, bool $save = true, ?string $expectedSentenceContext = null): bool
+    {
+        return BardLinkInserter::insertLinkIntoEntryWithHref(
+            $entryId, $keyword, $href, $caseSensitive, $save, $expectedSentenceContext
+        );
     }
 
     /**
