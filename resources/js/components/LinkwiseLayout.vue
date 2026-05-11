@@ -223,7 +223,7 @@
 </template>
 
 <script>
-import { Head, Link } from '@statamic/cms/inertia';
+import { Head, Link, router as inertiaRouter } from '@statamic/cms/inertia';
 import { Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal } from '@statamic/cms/ui';
 import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterruptedBulk, recordCompletion, getLastCompletion, clearLastCompletion } from '../services/bulkOperationService.js';
 import { activeLabel, shortLabel, completionLabel, completionVariant } from '../services/bulkLabels.js';
@@ -877,16 +877,22 @@ export default {
                     this.seenRunning.check = false;
                     window.location.reload();
                 }
-                // After inbound/outbound bulk-add: reload so the entries
-                // table reflects new outbound/inbound counts and the index
-                // changes from finalizeIndex() are visible. Same once-per-
-                // instance guard so a stale 'done' from a previous session
-                // (cache TTL 300s) doesn't loop.
+                // After inbound/outbound bulk-add: refresh so the entries
+                // table reflects new outbound/inbound counts. Use Inertia's
+                // partial reload instead of window.location.reload() —
+                // bug 2 (2026-05-11): the hard-reload killed the success
+                // toast that fireTerminalToast had just queued (Vue's render
+                // tick never completed before the page navigated away), and
+                // because the toast/banner state lived only in JS memory the
+                // user saw "Progressbanner flackert kurz auf, kein Toast,
+                // kein Success-Banner". inertiaRouter.reload() re-fetches
+                // page props (the entries data) while preserving the Vue
+                // component tree — toast + completion-banner survive.
                 if ((status.kind === 'inboundinsert' || status.kind === 'outboundinsert')
                     && phase === 'done'
                     && this.seenRunning[status.kind]) {
                     this.seenRunning[status.kind] = false;
-                    window.location.reload();
+                    inertiaRouter.reload({ preserveState: true, preserveScroll: true });
                 }
             } catch {
                 // transient errors — try again next tick
@@ -931,13 +937,15 @@ export default {
                     Statamic.$toast.info(message);
             }
 
-            // Force-open the notifications <details> when a non-success
-            // outcome lands so the persistent banner is visible. Without
-            // this the user only sees a brief toast — the recap banner
-            // sits silently inside a collapsed disclosure.
-            if (variant !== 'success') {
-                this.notificationsCollapsed = false;
-            }
+            // Force-open the notifications <details> on EVERY completion —
+            // the persistent recap banner is the only durable confirmation
+            // the user has that their action landed. Bug 2 (2026-05-11):
+            // the previous guard skipped success-completions, so a user
+            // who had once collapsed notifications saw NO toast (Vue render
+            // tick was killed by window.location.reload) AND no banner
+            // (sitting inside the collapsed disclosure). Even on success
+            // we now expand — user can re-collapse if they want.
+            this.notificationsCollapsed = false;
         },
 
         async cancelBulk() {
