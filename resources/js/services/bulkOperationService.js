@@ -270,7 +270,14 @@ export async function runBulkOperation({ kind, label, context, items, perItem, o
         } else if (final.succeeded > 0 && final.skipped === 0) {
             Statamic.$toast.success(`${final.succeeded} ${label}.`);
         } else if (final.succeeded > 0 && final.skipped > 0) {
-            warnToast(`${final.succeeded} ${label}, ${final.skipped} skipped.`);
+            // Mixed result — include the most-frequent skip reason so the
+            // user knows WHICH problem hit them, not just the count.
+            // Without this, a single pre-flight refusal (Bug 17, anchor
+            // overlap, hash conflict, …) shows up as "X re-link, 1 skipped"
+            // with no diagnostic.
+            const topReason = topErrorReason(final.errors);
+            const tail = topReason ? ` — ${topReason}` : '';
+            warnToast(`${final.succeeded} ${label}, ${final.skipped} skipped${tail}`);
         } else if (final.succeeded === 0 && final.skipped > 0) {
             // Surface the most-frequent error reason so the user has a clue
             // why nothing worked. Shared with the bulkLabels module so

@@ -53,7 +53,7 @@ class SafeEntrySaver
      *
      * @throws EntryConflictException if the entry was modified by another user
      */
-    public static function save(Entry $entry, string $expectedHash): void
+    public static function save(Entry $entry, string $expectedHash, ?array $relinkContext = null): void
     {
         // Reload the entry from disk to get current state. We need this for
         // both the conflict-check below AND the diff-based content-safety
@@ -119,7 +119,7 @@ class SafeEntrySaver
         // Last line of defense if a future code path slips past the
         // walker's partial-overlap skip — fail-closed protects user data
         // even when tests have a coverage gap.
-        ContentSafetyValidator::ensureLinkCoveragePreserved($current, $entry);
+        ContentSafetyValidator::ensureLinkCoveragePreserved($current, $entry, $relinkContext);
 
         // Fragmentation gate (added 2026-05-11 alongside the normalize
         // step). After the in-place normalize above this should be

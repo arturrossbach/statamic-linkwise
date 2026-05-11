@@ -108,16 +108,43 @@ class ContentSafetyValidator
      *
      * @throws ContentCorruptionException
      */
-    public static function ensureLinkCoveragePreserved(Entry $before, Entry $after): void
+    public static function ensureLinkCoveragePreserved(Entry $before, Entry $after, ?array $relinkContext = null): void
     {
         $beforeCoverage = self::collectLinkCoverage($before);
         $afterCoverage = self::collectLinkCoverage($after);
+
+        // Re-link bypass — explicit operation context from RelinkService.
+        //
+        // The principle "any same-href partial overlap = corruption" is
+        // correct for the Bug B silent-split threat the validator was
+        // built for. An intentional re-anchor (same href, anchor moves
+        // within its original span) trips the same shape but isn't
+        // corruption — the caller declares the substitution explicitly,
+        // so the overlap is no longer silent.
+        //
+        // The bypass skips the partial-overlap check for ONE bm declared
+        // by (field, href, occurrence_index). All other bms — at the same
+        // href in other positions, at other hrefs, in other fields —
+        // still get the full check. A Bug B variant introduced in a
+        // different range will still throw.
+        //
+        // The occurrence_index ordering matches collectLinkCoverage's
+        // traversal order (per-href, tree-traversal). RelinkService passes
+        // the same per-field index UrlReplacer used to find the link.
+        $skipField = $relinkContext['field'] ?? null;
+        $skipHref = $relinkContext['href'] ?? null;
+        $skipIndex = $relinkContext['occurrence_index'] ?? null;
 
         foreach ($beforeCoverage as $field => $hrefMap) {
             foreach ($hrefMap as $href => $beforeMarks) {
                 $afterMarks = $afterCoverage[$field][$href] ?? [];
 
-                foreach ($beforeMarks as $bm) {
+                foreach ($beforeMarks as $beforeIdx => $bm) {
+                    if ((string) $field === (string) $skipField
+                        && (string) $href === (string) $skipHref
+                        && $beforeIdx === $skipIndex) {
+                        continue;
+                    }
                     $bmEnd = $bm['offset'] + $bm['length'];
 
                     // (a) Preserved or extended at same start.
