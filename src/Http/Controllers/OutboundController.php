@@ -97,20 +97,12 @@ class OutboundController extends CpController
 
         $entryId = $validated['entry_id'];
 
-        // Optimistic locking check on the source entry (for outbound the
-        // single source is shared across all insertions, so one hash check
-        // covers the whole batch — fail-fast 409 before dispatch).
-        // Skipped for revert flows (per-entry conflicts → skips, not abort).
+        // Hash conflicts: DON'T fail-fast 409 (Bug 9 2026-05-11). Even
+        // for the single-source outbound case, dispatch the job and let
+        // LinkInsertCommand's per-record verifyHashes skip the inserts
+        // with a clean "X added, Y skipped (entry modified)" toast.
+        // Keeps UX consistent across all bulk flows.
         $expectedHash = $request->input('content_hash', '');
-        if ($expectedHash && empty($validated['reverts'])) {
-            $entry = Entry::find($entryId);
-            if ($entry && SafeEntrySaver::hash($entry) !== $expectedHash) {
-                return response()->json([
-                    'error' => 'conflict',
-                    'message' => 'Entry was modified since this page loaded. Please reload and try again.',
-                ], 409);
-            }
-        }
 
         // Outbound case: one source entry, many target inserts. The shared
         // LinkInsertCommand expects each item to carry its own

@@ -93,21 +93,11 @@ class InboundController extends CpController
             'reverts' => ['sometimes', 'nullable', 'string', 'max:64'],
         ]);
 
-        // Pre-flight hash check — fail-fast 409 before dispatch instead of
-        // letting the loop hit conflicts mid-run. Skipped for revert flows
-        // (those tolerate per-entry conflicts as skips, see DashboardController
-        // ::detailUnlinkAsync for the rationale).
-        if (empty($validated['reverts'])) {
-            $conflicts = SafeEntrySaver::verifyHashes($request->input('entry_hashes', []));
-            if (! empty($conflicts)) {
-                $title = reset($conflicts);
-
-                return response()->json([
-                    'error' => 'conflict',
-                    'message' => 'Entry "'.$title.'" was modified since this page loaded. Please reload and try again.',
-                ], 409);
-            }
-        }
+        // Hash conflicts: DON'T fail-fast 409 (Bug 9 2026-05-11 — that
+        // aborted the whole bulk when one entry was modified). Dispatch
+        // anyway and let LinkInsertCommand's per-record verifyHashes
+        // skip the modified entries while the others land. User sees a
+        // mixed-result toast at the end instead of "everything cancelled".
 
         $user = auth()->user();
         $startedBy = $user?->name() ?? $user?->email() ?? null;

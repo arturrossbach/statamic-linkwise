@@ -1122,27 +1122,16 @@ class DashboardController extends CpController
             'reverts' => 'sometimes|nullable|string|max:64',
         ]);
 
-        // Pre-flight hash check — fail-fast 409 before dispatch instead of
-        // letting the loop encounter conflicts mid-run.
-        // EXCEPTION: revert flows tolerate per-entry conflicts (modified
-        // entries are SKIPPED, not aborted). The activity-log Revert button
-        // sets `reverts: <id>`; when present we skip the fast-fail and let
-        // the command's inner per-entry hash check handle conflicts as skips.
+        // Hash conflicts: DON'T fail-fast 409 (that aborted the whole bulk
+        // when a single entry was modified — Bug 9 2026-05-11). Instead
+        // dispatch the job and let DetailUnlinkCommand's per-record
+        // verifyHashes (line 157) skip the modified entries while the
+        // others land. The user sees a clear "X removed, 1 skipped
+        // (modified by editor)" toast at the end instead of an opaque
+        // "everything cancelled because one entry changed" wall.
+        // Same per-record skip pattern that the revert flow already used
+        // — now applied to the normal bulk too.
         $allHashes = $validated['entry_hashes'] ?? [];
-        if (empty($validated['reverts'])) {
-            $replacementEntryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
-            $relevantHashes = array_intersect_key($allHashes, $replacementEntryIds);
-            $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($relevantHashes);
-            if (! empty($conflicts)) {
-                $title = reset($conflicts);
-
-                return response()->json([
-                    'error' => 'conflict',
-                    'message' => 'Entry "'.$title.'" was modified by another editor. Please reload and try again.',
-                    'entry_id' => array_key_first($conflicts),
-                ], 409);
-            }
-        }
 
         $user = auth()->user();
         $startedBy = $user?->name() ?? $user?->email() ?? null;

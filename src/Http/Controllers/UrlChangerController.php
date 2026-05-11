@@ -281,25 +281,14 @@ class UrlChangerController extends CpController
             'reverts' => 'sometimes|nullable|string|max:64',
         ]);
 
-        // Verify hashes upfront — fail-fast 409 if any conflict before we
-        // dispatch the heavy job. Better than 169 individual conflicts inside
-        // the loop with a confusing aggregate error.
-        // Skipped for revert flows (per-entry conflicts → skips, not abort).
+        // Hash conflicts: DON'T fail-fast 409 (Bug 9 2026-05-11). Dispatch
+        // anyway and let UrlChangerApplyCommand's per-record verifyHashes
+        // (line 164) skip the modified entries with a clean "X applied,
+        // Y skipped (entry modified)" toast. Consistent with the other
+        // async bulk endpoints. The 169-individual-conflicts concern from
+        // the old comment is moot — errors are aggregated by reason in
+        // status.errors and the toast shows the top reason.
         $allHashes = $validated['entry_hashes'] ?? [];
-        if (empty($validated['reverts'])) {
-            $replacementEntryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
-            $relevantHashes = array_intersect_key($allHashes, $replacementEntryIds);
-            $conflicts = SafeEntrySaver::verifyHashes($relevantHashes);
-            if (! empty($conflicts)) {
-                $title = reset($conflicts);
-
-                return response()->json([
-                    'error' => 'conflict',
-                    'message' => 'Entry "'.$title.'" was modified by another editor. Please reload and try again.',
-                    'entry_id' => array_key_first($conflicts),
-                ], 409);
-            }
-        }
 
         // Owner-Tracking: surface WHO started this job so other editors who
         // see the cross-tab banner / 409-conflict toast know it's a colleague's
