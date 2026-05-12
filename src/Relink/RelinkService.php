@@ -128,38 +128,42 @@ class RelinkService
         // "stale modal" user signal — see C1 tinker verification notes).
         $removalField = null;
         $removalFieldType = null;
+        $removalPosition = null;
         foreach ($fields as $handle => $field) {
             $value = $entry->get($handle);
             $type = $field->type();
 
             if ($type === 'bard' && is_array($value) && ! empty($value)) {
-                [$modified, $did] = $this->urlReplacer->replaceNthInBard(
+                [$modified, $did, $position] = $this->urlReplacer->replaceNthInBard(
                     $value, $originalHref, $originalHref, UrlHelper::UNLINK, $occurrenceIndex, $originalAnchor
                 );
                 if ($did) {
                     $entry->set($handle, $modified);
                     $removalField = $handle;
                     $removalFieldType = 'bard';
+                    $removalPosition = $position;
                     break;
                 }
             } elseif ($type === 'replicator' && is_array($value) && ! empty($value)) {
-                [$modified, $did] = $this->urlReplacer->replaceNthInReplicator(
+                [$modified, $did, $position] = $this->urlReplacer->replaceNthInReplicator(
                     $value, $originalHref, $originalHref, UrlHelper::UNLINK, $occurrenceIndex, $originalAnchor
                 );
                 if ($did) {
                     $entry->set($handle, $modified);
                     $removalField = $handle;
                     $removalFieldType = 'replicator';
+                    $removalPosition = $position;
                     break;
                 }
             } elseif ($type === 'markdown' && is_string($value) && ! empty($value) && $handle !== 'title') {
-                [$modified, $did] = $this->urlReplacer->replaceNthInMarkdown(
+                [$modified, $did, $position] = $this->urlReplacer->replaceNthInMarkdown(
                     $value, $originalHref, UrlHelper::UNLINK, $occurrenceIndex, $originalAnchor
                 );
                 if ($did) {
                     $entry->set($handle, $modified);
                     $removalField = $handle;
                     $removalFieldType = 'markdown';
+                    $removalPosition = $position;
                     break;
                 }
             }
@@ -173,40 +177,42 @@ class RelinkService
             ];
         }
 
-        // ─── Step B: validate the insert on the post-removal tree ─────
+        // ─── Step B+C combined: insert at position (Bug 17–20 root refactor) ─
         //
-        // The mark is genuinely gone from $entry's in-memory state now,
-        // so canInsertLinkIntoBardContent operates on real post-Step-A
-        // truth — no `originalHref` simulation needed (Phase A workaround
-        // becomes unnecessary; that parameter will be removed in C6).
-        //
-        // If validation says no, return WITHOUT calling save — the
-        // in-memory entry is dirty but never persisted, no partial state.
-        $insertValue = $entry->get($removalField);
-        $analysis = $this->analyzeInsert($removalFieldType, $insertValue, $newAnchor, $newHref, $sentenceContext, $anchorOffsetInContext);
-
-        if (! ($analysis['ok'] ?? false)) {
-            return array_merge($analysis, [
-                'message' => $this->messageForReason(
-                    $analysis['reason'] ?? 'anchor_not_found',
-                    $analysis['blocking_href'] ?? null,
-                ),
-            ]);
-        }
-
-        // ─── Step C: insert the new link ──────────────────────────────
-        $inserted = $this->insert($removalFieldType, $insertValue, $newAnchor, $newHref, $sentenceContext, $anchorOffsetInContext);
-        if ($inserted === null) {
-            // Validation said yes but insertion failed — should not
-            // happen if findValidMatchPosition and the inserter agree.
-            // Defensive: don't save.
+        // Step A returned the EXACT location where the mark was removed.
+        // Compute the new anchor's position from that + the user's intended
+        // anchor edit:
+        //   - new contains old (expansion):    new starts BEFORE original
+        //   - old contains new (shrink):        new starts INSIDE original
+        //   - neither contains the other:       refuse — the user's edit isn't
+        //                                       a pure anchor change
+        // No more find-first walk, no sentence-context fingerprint, no
+        // anchor_offset_in_context plumbing.
+        $newPosition = $this->deriveNewPosition($removalPosition, $originalAnchor, $newAnchor);
+        if ($newPosition === null) {
             return [
                 'ok' => false,
-                'reason' => 'unexpected',
-                'message' => 'Unerwarteter Fehler bei der Insert-Phase trotz Pre-Validierung.',
+                'reason' => 'anchor_edit_not_supported',
+                'message' => 'Der Anker-Edit ist keine einfache Erweiterung oder Verkürzung — bitte den Link löschen und neu setzen.',
             ];
         }
-        $entry->set($removalField, $inserted);
+
+        $insertValue = $entry->get($removalField);
+        $insertResult = $this->insertAtPosition($removalFieldType, $insertValue, $newAnchor, $newHref, $newPosition);
+
+        if (! ($insertResult['ok'] ?? false)) {
+            return [
+                'ok' => false,
+                'reason' => $insertResult['reason'] ?? 'unexpected',
+                'blocking_href' => $insertResult['blocking_href'] ?? null,
+                'message' => $this->messageForReason(
+                    $insertResult['reason'] ?? 'anchor_not_found',
+                    $insertResult['blocking_href'] ?? null,
+                ),
+            ];
+        }
+
+        $entry->set($removalField, $insertResult['content']);
 
         // ─── Step D: save once, hash-checked ──────────────────────────
         //
@@ -342,6 +348,99 @@ class RelinkService
     }
 
     /**
+     * Derive Step C's insert position from Step A's removal position
+     * and the user's anchor edit. The new anchor must be a pure extension
+     * (new contains original) OR a pure contraction (original contains new);
+     * other edits — replacing the anchor entirely, character swaps — return
+     * null so the caller surfaces an actionable message instead of silently
+     * landing the link at the wrong place.
+     *
+     * For Bard/Replicator positions: keeps replicator_path + paragraph_path
+     * intact, shifts char_start / char_end. For Markdown: shifts char_start
+     * / char_end only.
+     *
+     * @param  array|null  $originalPosition  From UrlReplacer::replaceNth*
+     * @return array|null  Same shape as input, with new char range, or null
+     */
+    protected function deriveNewPosition(?array $originalPosition, string $originalAnchor, string $newAnchor): ?array
+    {
+        if ($originalPosition === null) {
+            return null;
+        }
+
+        $originalLen = mb_strlen($originalAnchor);
+        $newLen = mb_strlen($newAnchor);
+        $origStart = $originalPosition['char_start'] ?? null;
+        if ($origStart === null) {
+            return null;
+        }
+
+        // Determine shift: how does new anchor sit relative to original?
+        $shift = null;
+        // Case 1: new contains original (expansion — prefix or suffix or both).
+        $posOfOrigInNew = mb_strpos($newAnchor, $originalAnchor);
+        if ($posOfOrigInNew !== false) {
+            $shift = -$posOfOrigInNew; // new starts $posOfOrigInNew chars BEFORE original
+        } else {
+            // Case 2: original contains new (shrink).
+            $posOfNewInOrig = mb_strpos($originalAnchor, $newAnchor);
+            if ($posOfNewInOrig !== false) {
+                $shift = $posOfNewInOrig; // new starts $posOfNewInOrig chars AFTER original
+            }
+        }
+        if ($shift === null) {
+            return null;
+        }
+
+        $newStart = $origStart + $shift;
+        $newEnd = $newStart + $newLen;
+        if ($newStart < 0) {
+            return null;
+        }
+
+        $newPosition = $originalPosition;
+        $newPosition['char_start'] = $newStart;
+        $newPosition['char_end'] = $newEnd;
+
+        return $newPosition;
+    }
+
+    /**
+     * Field-type-dispatched position-based insert. Returns the
+     * BardLinkInserter::insertLinkAtPosition* shape:
+     * `['ok' => bool, 'content' => ?mixed, 'reason' => ?string, 'blocking_href' => ?string]`.
+     */
+    protected function insertAtPosition(string $type, mixed $value, string $newAnchor, string $newHref, array $position): array
+    {
+        if ($type === 'bard') {
+            return BardLinkInserter::insertLinkAtPositionInBard(
+                $value, $newAnchor, $newHref,
+                $position['paragraph_path'] ?? [],
+                $position['char_start'] ?? 0,
+                $position['char_end'] ?? 0,
+            );
+        }
+        if ($type === 'replicator') {
+            return BardLinkInserter::insertLinkAtPositionInReplicator(
+                $value, $newAnchor, $newHref,
+                $position['replicator_path'] ?? [],
+                $position['paragraph_path'] ?? [],
+                $position['char_start'] ?? 0,
+                $position['char_end'] ?? 0,
+            );
+        }
+        if ($type === 'markdown') {
+            return BardLinkInserter::insertLinkAtPositionInMarkdown(
+                $value, $newAnchor, $newHref,
+                $position['char_start'] ?? 0,
+                $position['char_end'] ?? 0,
+            );
+        }
+
+        return ['ok' => false, 'reason' => 'unsupported_field_type'];
+    }
+
+    /**
      * Field-type-dispatched dry-run analyzer.
      *
      * Bard + Replicator have granular reasons from canInsertLinkInto*.
@@ -408,6 +507,8 @@ class RelinkService
                 ? "Der Anker überlappt mit einem bestehenden Link auf {$blockingLabel} im selben Eintrag. Bitte den Link zuerst entfernen und erneut versuchen."
                 : 'Der Anker überlappt mit einem bestehenden Link im selben Eintrag. Bitte den Link zuerst entfernen.',
             'already_linked_to_target' => 'Dieser Text ist bereits mit dem Ziel verlinkt.',
+            'anchor_edit_not_supported' => 'Der Anker-Edit ist keine einfache Erweiterung oder Verkürzung — bitte den Link löschen und neu setzen.',
+            'invalid_position', 'out_of_range', 'crosses_nontext_boundary' => 'Der Anker konnte im Eintrag nicht platziert werden — bitte Modal neu öffnen.',
             default => 'Re-Link konnte nicht ausgeführt werden.',
         };
     }
