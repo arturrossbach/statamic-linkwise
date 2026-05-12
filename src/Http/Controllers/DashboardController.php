@@ -487,6 +487,9 @@ class DashboardController extends CpController
                 'outboundInsert' => cp_route('linkwise.outbound.insert'),
                 // urlchanger revert through urlchanger apply-async with swapped URLs
                 'urlChangerApply' => cp_route('linkwise.url-changer.apply-async'),
+                // relink (Bug 17 Phase C) revert through the same atomic
+                // endpoint with original/new swapped
+                'relink' => cp_route('linkwise.relink'),
             ],
         ] + $this->staleCheckProps());
     }

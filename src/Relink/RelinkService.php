@@ -4,6 +4,7 @@ namespace Arturrossbach\Linkwise\Relink;
 
 use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Arturrossbach\Linkwise\Support\UrlHelper;
 use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
@@ -53,6 +54,7 @@ class RelinkService
 {
     public function __construct(
         protected UrlReplacer $urlReplacer,
+        protected BulkSnapshotStore $snapshotStore,
     ) {}
 
     /**
@@ -78,6 +80,7 @@ class RelinkService
         string $newHref,
         ?string $sentenceContext = null,
         ?string $expectedHash = null,
+        ?string $reverts = null,
     ): array {
         // Idempotency — user clicked re-link without changing anchor or
         // target. Cheap to handle here; prevents activity-log spam.
@@ -229,11 +232,112 @@ class RelinkService
             ];
         }
 
+        $newHash = SafeEntrySaver::hash($entry);
+
+        // ─── Activity log: record this re-link as ONE snapshot ────────
+        //
+        // Earlier 2-step flow logged Step 1 as "url-changer unlink" and
+        // Step 2 as "link insert" — two separate events that looked like
+        // the user did two unrelated operations. Atomic re-link records
+        // a single kind='relink' snapshot whose summary names both ends
+        // of the transition (original anchor/href → new anchor/href).
+        //
+        // Recording is best-effort: a snapshot-write failure must never
+        // break the save the user already saw succeed. Same convention
+        // BulkSnapshotStore uses internally for its file-write retries.
+        $this->recordRelinkSnapshot(
+            sourceEntryId: $sourceEntryId,
+            originalHref: $originalHref,
+            occurrenceIndex: $occurrenceIndex,
+            originalAnchor: $originalAnchor,
+            newAnchor: $newAnchor,
+            newHref: $newHref,
+            sentenceContext: $sentenceContext,
+            field: $removalField,
+            preHash: $currentHash,
+            postHash: $newHash,
+            reverts: $reverts,
+        );
+
         return [
             'ok' => true,
-            'new_hash' => SafeEntrySaver::hash($entry),
+            'new_hash' => $newHash,
             'field' => $removalField,
         ];
+    }
+
+    /**
+     * Write the activity-log entry for a completed re-link.
+     *
+     * Items shape carries everything revertHelper.js needs to build the
+     * inverse-relink payload: swap (original_*, new_*) and POST back to
+     * /cp/linkwise/relink with the original snapshot's id in `reverts`.
+     */
+    protected function recordRelinkSnapshot(
+        string $sourceEntryId,
+        string $originalHref,
+        int $occurrenceIndex,
+        string $originalAnchor,
+        string $newAnchor,
+        string $newHref,
+        ?string $sentenceContext,
+        string $field,
+        string $preHash,
+        string $postHash,
+        ?string $reverts,
+    ): void {
+        try {
+            $summary = [
+                'source_entry_id' => $sourceEntryId,
+                'field' => $field,
+                'original_href' => $originalHref,
+                'original_anchor' => $originalAnchor,
+                'new_href' => $newHref,
+                'new_anchor' => $newAnchor,
+                'occurrence_index' => $occurrenceIndex,
+                'sentence_context' => $sentenceContext,
+            ];
+            if ($reverts !== null && $reverts !== '') {
+                $summary['reverts'] = $reverts;
+            }
+
+            $item = [
+                'entry_id' => $sourceEntryId,
+                'field' => $field,
+                'original_href' => $originalHref,
+                'original_anchor' => $originalAnchor,
+                'new_href' => $newHref,
+                'new_anchor' => $newAnchor,
+                'occurrence_index' => $occurrenceIndex,
+                'sentence_context' => $sentenceContext,
+            ];
+
+            $snapshotId = $this->snapshotStore->record(
+                kind: 'relink',
+                entryIds: [$sourceEntryId],
+                preHashes: [$sourceEntryId => $preHash],
+                summary: $summary,
+                items: [$item],
+            );
+
+            $this->snapshotStore->recordPostHashes($snapshotId, [$sourceEntryId => $postHash]);
+            $this->snapshotStore->markCompleted($snapshotId, [
+                'succeeded' => 1,
+                'skipped' => 0,
+                'errors' => (object) [],
+            ]);
+
+            // Mark the upstream snapshot as reverted when this re-link
+            // is itself a revert dispatch — closes the activity-log
+            // lineage so the original entry shows "reverted at …".
+            if ($reverts !== null && $reverts !== '') {
+                $this->snapshotStore->markReverted($reverts);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
+                '[Linkwise] RelinkService snapshot record failed — '.$e->getMessage()
+            );
+        }
     }
 
     /**

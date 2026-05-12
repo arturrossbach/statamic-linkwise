@@ -61,6 +61,16 @@ export function isReversible(snapshot) {
     // Need items to build the inverse payload
     if (!Array.isArray(snapshot.items) || snapshot.items.length === 0) return false;
 
+    // Atomic re-link (Bug 17 Phase C): items carry (original_*, new_*) and
+    // the revert dispatches the same RelinkService with original/new swapped.
+    // Reject malformed items (missing fields) so the UI shows a clean
+    // non-revertable state instead of routing a half-empty payload.
+    if (kind === 'relink') {
+        const it = snapshot.items[0];
+        return !! (it && it.entry_id && it.original_href && it.new_href
+            && it.original_anchor && it.new_anchor);
+    }
+
     // detailunlink-revert is only meaningful for items whose matched_url is
     // an internal entry reference — external URLs (https://…) need a target
     // entry to re-link through inbound/outbound-insert, which we don't have.
@@ -335,6 +345,44 @@ export function buildRevertRequest(snapshot, endpoints) {
         }
 
         return null;
+    }
+
+    if (snapshot.kind === 'relink') {
+        // Re-link snapshots carry exactly one item with (original_*, new_*).
+        // Revert = swap them and POST to /cp/linkwise/relink again — the
+        // atomic service handles the symmetric inverse with no special
+        // case on the backend side.
+        const item = items[0];
+        if (!item || !item.entry_id || !item.original_href || !item.new_href || !item.original_anchor || !item.new_anchor) {
+            return null;
+        }
+        const isInternal = typeof item.original_href === 'string'
+            && item.original_href.startsWith('statamic://entry::');
+        const payload = {
+            entry_id: item.entry_id,
+            // post_hashes carries the hash AFTER the original re-link.
+            // SafeEntrySaver::save will refuse if the entry has been
+            // edited since then — preserves the user's intervening edits.
+            content_hash: entryHashes[item.entry_id] || '',
+            // Swap: the NEW link becomes the original-to-remove, and the
+            // ORIGINAL becomes the new-to-insert.
+            original_href: item.new_href,
+            occurrence_index: item.occurrence_index ?? 0,
+            original_anchor: item.new_anchor,
+            new_anchor: item.original_anchor,
+            sentence_context: item.sentence_context || '',
+            reverts: snapshot.id,
+        };
+        if (isInternal) {
+            payload.target_entry_id = item.original_href.replace('statamic://entry::', '');
+        } else {
+            payload.new_href = item.original_href;
+        }
+        return {
+            url: endpoints.relink,
+            payload,
+            kindLabel: 're-link',
+        };
     }
 
     return null;

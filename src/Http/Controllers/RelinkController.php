@@ -49,6 +49,12 @@ class RelinkController extends CpController
             // Scan-time sentence around the anchor; context-fingerprint
             // guard during insert to prevent silent wrong-occurrence wrap.
             'sentence_context' => ['nullable', 'string', 'max:1024'],
+
+            // When this re-link is itself the revert of a recorded
+            // relink snapshot, carries that snapshot's id. RelinkService
+            // chains it into the new snapshot's summary + flips the
+            // upstream snapshot's reverted_at via markReverted.
+            'reverts' => ['nullable', 'string', 'max:64'],
         ]);
 
         if (empty($validated['target_entry_id']) && empty($validated['new_href'])) {
@@ -71,6 +77,7 @@ class RelinkController extends CpController
             newHref: $newHref,
             sentenceContext: $validated['sentence_context'] ?? null,
             expectedHash: $validated['content_hash'] ?? null,
+            reverts: $validated['reverts'] ?? null,
         );
 
         return response()->json($result);

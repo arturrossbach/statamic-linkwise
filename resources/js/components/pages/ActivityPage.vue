@@ -541,6 +541,18 @@ export default {
             if (snap.kind === 'bulkunlink') {
                 return `Removed <strong>${items.length}</strong> broken link${items.length === 1 ? '' : 's'} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
             }
+            if (snap.kind === 'relink') {
+                // One item per re-link snapshot. Show original→new anchor
+                // transition; href change is implicit (almost always
+                // identical, the user typically only adjusts the anchor).
+                const origAnchor = `<span class="font-mono">"${this.escape(sum.original_anchor || '')}"</span>`;
+                const newAnchor = `<span class="font-mono">"${this.escape(sum.new_anchor || '')}"</span>`;
+                const hrefChanged = sum.original_href !== sum.new_href;
+                if (hrefChanged) {
+                    return `Re-linked ${origAnchor} → ${newAnchor} (target also changed).`;
+                }
+                return `Re-anchored ${origAnchor} → ${newAnchor} (same target).`;
+            }
             return `Operation affected <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
         },
 
@@ -608,6 +620,11 @@ export default {
                 return sum.entry_title ? `Bulk unlink ${dir} links on "${this.escape(sum.entry_title)}"` : `Bulk unlink ${dir} links`;
             }
             if (rf.kind === 'urlchanger') return sum.search ? `URL Changer "${this.escape(sum.search)}"` : 'URL Changer apply';
+            if (rf.kind === 'relink') {
+                const a = sum.original_anchor ? `"${this.escape(sum.original_anchor)}"` : 'anchor';
+                const b = sum.new_anchor ? `"${this.escape(sum.new_anchor)}"` : 'new anchor';
+                return `Re-link ${a} → ${b}`;
+            }
             return rf.kind || 'previous operation';
         },
 
@@ -773,6 +790,21 @@ export default {
                     this.reverting = false;
                     return;
                 }
+                // The relink endpoint is SYNC: by the time we get a 200,
+                // the entry is already saved and the new snapshot already
+                // recorded (RelinkService::recordRelinkSnapshot calls
+                // markReverted on the upstream id, so the activity-log
+                // chain is closed server-side). No heavy banner needed.
+                // All the bulk endpoints are async dispatches — they
+                // return immediately and the heavy banner reflects
+                // server-side progress.
+                if (this.detail.snapshot.kind === 'relink') {
+                    Statamic.$toast.success('Re-link reverted.');
+                    this.detail = null;
+                    setTimeout(() => this.$inertia.reload({ only: ['snapshots'] }), 200);
+                    return;
+                }
+
                 Statamic.$toast.success('Revert started — see banner above for progress.');
 
                 // Mark the original snapshot as reverted. Best-effort — the
@@ -834,6 +866,7 @@ export default {
                 inboundinsert: 'Bulk insert inbound links',
                 outboundinsert: 'Bulk insert outbound links',
                 urlchanger: 'URL Changer apply',
+                relink: 'Re-link anchor',
             }[kind] || kind);
         },
 
@@ -843,6 +876,7 @@ export default {
                 applyrule: 'success',
                 inboundinsert: 'success',
                 outboundinsert: 'success',
+                relink: 'info',
                 urlchanger: 'info',
                 bulkunlink: 'warning',
                 detailunlink: 'warning',
