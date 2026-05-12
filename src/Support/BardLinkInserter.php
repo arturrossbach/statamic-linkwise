@@ -1486,4 +1486,206 @@ class BardLinkInserter
 
         return is_array($first) && isset($first['type']) && isset($first['id']);
     }
+
+    // ─── Position-based insert (Commit B of Bug 17–20 root refactor) ─────
+    //
+    // The methods below take an EXPLICIT (paragraph_path, char_start, char_end)
+    // position — computed by Step A (UrlReplacer) — and wrap the text at that
+    // exact location with a link mark. NO find-first-walker, NO sentence-context
+    // fingerprint, NO anchor-fingerprint guard. The position IS the truth.
+    //
+    // Used only by RelinkService Step C. Other insertion paths (AutoLink,
+    // ApplyRule, OutboundController.insert, InboundController.insert) keep
+    // the existing find-first walker because they have no prior Step A —
+    // they ARE the first walk over the content. Different problem, different
+    // tradeoffs. See bug_18_19_architecture_debt memo.
+
+    /**
+     * Insert a link mark at a specific (paragraph, char range) position
+     * inside a Bard content tree.
+     *
+     * @param  list<int>  $paragraphPath  Indices into $bardContent reaching the paragraph
+     * @param  int  $charStart  byte/char offset in the paragraph's concatenated text
+     * @param  int  $charEnd    exclusive end offset
+     *
+     * @return array{ok: bool, content?: array, reason?: string, blocking_href?: string}
+     */
+    public static function insertLinkAtPositionInBard(array $bardContent, string $anchorText, string $href, array $paragraphPath, int $charStart, int $charEnd): array
+    {
+        if ($charStart < 0 || $charEnd <= $charStart) {
+            return ['ok' => false, 'reason' => 'invalid_position'];
+        }
+
+        // Navigate path to the paragraph, by-reference so we can mutate in-place.
+        $cursor = &$bardContent;
+        $pathDepth = count($paragraphPath);
+        for ($i = 0; $i < $pathDepth - 1; $i++) {
+            $segment = $paragraphPath[$i];
+            if (! isset($cursor[$segment]['content']) || ! is_array($cursor[$segment]['content'])) {
+                return ['ok' => false, 'reason' => 'invalid_position'];
+            }
+            $cursor = &$cursor[$segment]['content'];
+        }
+        $lastSegment = $paragraphPath[$pathDepth - 1];
+        if (! isset($cursor[$lastSegment])) {
+            return ['ok' => false, 'reason' => 'invalid_position'];
+        }
+        $paragraph = $cursor[$lastSegment];
+
+        $children = $paragraph['content'] ?? [];
+
+        // Map char_start / char_end to (startNodeIndex, startOffset, endNodeIndex, endOffset).
+        // Same coordinate scheme as findValidMatchPosition uses: accumulate
+        // mb_strlen per text child; non-text children act as a hard boundary.
+        $accOffset = 0;
+        $startIdx = null;
+        $startOff = null;
+        $endIdx = null;
+        $endOff = null;
+        foreach ($children as $idx => $child) {
+            if (! isset($child['text'])) {
+                // Non-text node — if the range straddles it, refuse.
+                if ($startIdx !== null && $endIdx === null) {
+                    return ['ok' => false, 'reason' => 'crosses_nontext_boundary'];
+                }
+                continue;
+            }
+            $childLen = mb_strlen($child['text']);
+            $childEnd = $accOffset + $childLen;
+
+            if ($startIdx === null && $childEnd > $charStart) {
+                $startIdx = $idx;
+                $startOff = $charStart - $accOffset;
+            }
+            if ($endIdx === null && $childEnd >= $charEnd) {
+                $endIdx = $idx;
+                $endOff = $charEnd - $accOffset; // exclusive
+                break;
+            }
+            $accOffset = $childEnd;
+        }
+
+        if ($startIdx === null || $endIdx === null) {
+            return ['ok' => false, 'reason' => 'out_of_range'];
+        }
+
+        // Already-linked guard: every text child the new mark would touch
+        // must NOT carry an existing link mark. Same invariant the find-
+        // first walker enforces — we just check it directly here.
+        for ($i = $startIdx; $i <= $endIdx; $i++) {
+            $child = $children[$i] ?? null;
+            if (! isset($child['marks'])) {
+                continue;
+            }
+            foreach ($child['marks'] as $mark) {
+                if (($mark['type'] ?? '') !== 'link') {
+                    continue;
+                }
+                $blockingHref = $mark['attrs']['href'] ?? '';
+                $reason = $blockingHref === $href ? 'already_linked_to_target' : 'crosses_existing_link';
+
+                return ['ok' => false, 'reason' => $reason, 'blocking_href' => $blockingHref];
+            }
+        }
+
+        $attrs = ['href' => $href];
+        try {
+            if (\Illuminate\Support\Facades\Config::get('linkwise.open_in_new_tab', false)) {
+                $attrs['target'] = '_blank';
+            }
+        } catch (\Throwable) {
+            // Config not available (unit tests)
+        }
+        $linkMark = ['type' => 'link', 'attrs' => $attrs];
+
+        $anchorLen = $charEnd - $charStart;
+        if ($startIdx === $endIdx) {
+            $modifiedChildren = static::splitSingleNode($children, $startIdx, $startOff, $anchorLen, $linkMark);
+        } else {
+            $modifiedChildren = static::linkAcrossNodes($children, $startIdx, $startOff, $endIdx, $endOff, $linkMark);
+        }
+
+        $paragraph['content'] = $modifiedChildren;
+        $cursor[$lastSegment] = $paragraph;
+
+        return ['ok' => true, 'content' => $bardContent];
+    }
+
+    /**
+     * Insert a link at a position inside a Replicator value.
+     *
+     * @param  list<array{set_index: int, key: string}>  $replicatorPath
+     *
+     * @return array{ok: bool, content?: array, reason?: string, blocking_href?: string}
+     */
+    public static function insertLinkAtPositionInReplicator(array $sets, string $anchorText, string $href, array $replicatorPath, array $paragraphPath, int $charStart, int $charEnd): array
+    {
+        if (empty($replicatorPath)) {
+            return ['ok' => false, 'reason' => 'invalid_position'];
+        }
+
+        // Navigate the replicator path to the innermost Bard array, by-reference.
+        $cursor = &$sets;
+        $depth = count($replicatorPath);
+        for ($i = 0; $i < $depth - 1; $i++) {
+            $step = $replicatorPath[$i];
+            if (! isset($cursor[$step['set_index']][$step['key']]) || ! is_array($cursor[$step['set_index']][$step['key']])) {
+                return ['ok' => false, 'reason' => 'invalid_position'];
+            }
+            $cursor = &$cursor[$step['set_index']][$step['key']];
+        }
+        $lastStep = $replicatorPath[$depth - 1];
+        $bardKey = $lastStep['key'];
+        $setIndex = $lastStep['set_index'];
+        if (! isset($cursor[$setIndex][$bardKey]) || ! is_array($cursor[$setIndex][$bardKey])) {
+            return ['ok' => false, 'reason' => 'invalid_position'];
+        }
+
+        $result = static::insertLinkAtPositionInBard(
+            $cursor[$setIndex][$bardKey], $anchorText, $href, $paragraphPath, $charStart, $charEnd,
+        );
+        if (! ($result['ok'] ?? false)) {
+            return $result;
+        }
+        $cursor[$setIndex][$bardKey] = $result['content'];
+
+        return ['ok' => true, 'content' => $sets];
+    }
+
+    /**
+     * Insert a link at a position inside a Markdown string.
+     *
+     * @return array{ok: bool, content?: string, reason?: string, blocking_href?: string}
+     */
+    public static function insertLinkAtPositionInMarkdown(string $markdown, string $anchorText, string $href, int $charStart, int $charEnd): array
+    {
+        if ($charStart < 0 || $charEnd <= $charStart || $charEnd > strlen($markdown)) {
+            return ['ok' => false, 'reason' => 'invalid_position'];
+        }
+
+        // Already-linked guard: if the [charStart..charEnd] range sits inside
+        // an existing `[anchor](url)`, refuse. Lightweight check: scan all
+        // `[…](…)` matches with PREG_OFFSET_CAPTURE; if any overlaps, refuse.
+        if (preg_match_all('#\[[^\[\]]*\]\([^)]+\)#', $markdown, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            foreach ($matches as $m) {
+                $mStart = $m[0][1];
+                $mEnd = $mStart + strlen($m[0][0]);
+                if (! ($charEnd <= $mStart || $charStart >= $mEnd)) {
+                    // Overlap. Extract href.
+                    if (preg_match('#\]\(([^)]+)\)#', $m[0][0], $hm)) {
+                        $reason = $hm[1] === $href ? 'already_linked_to_target' : 'crosses_existing_link';
+
+                        return ['ok' => false, 'reason' => $reason, 'blocking_href' => $hm[1]];
+                    }
+                    return ['ok' => false, 'reason' => 'crosses_existing_link'];
+                }
+            }
+        }
+
+        $anchor = substr($markdown, $charStart, $charEnd - $charStart);
+        $replacement = '['.$anchor.']('.$href.')';
+        $result = substr_replace($markdown, $replacement, $charStart, $charEnd - $charStart);
+
+        return ['ok' => true, 'content' => $result];
+    }
 }
