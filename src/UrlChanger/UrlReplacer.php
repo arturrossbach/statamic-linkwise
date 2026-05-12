@@ -201,7 +201,16 @@ class UrlReplacer
                             // link to that URL: the index matches no matter
                             // where they moved it.
                             $nodeText = (string) ($node['text'] ?? '');
-                            $anchorMismatch = $expectedAnchor !== null && $nodeText !== $expectedAnchor;
+                            // Trim both sides — the guard's intent is
+                            // semantic ("scan recorded X, node wraps Y
+                            // ≠ X"). The indexer normalises anchors
+                            // (trim, whitespace-collapse), Bard text-
+                            // nodes preserve raw bytes. Byte-exact
+                            // false-positives on legit re-links where
+                            // the marked text-node carries trailing
+                            // whitespace (Bug 17 follow-up 2026-05-12).
+                            $anchorMismatch = $expectedAnchor !== null
+                                && trim($nodeText) !== trim($expectedAnchor);
                             if (! $anchorMismatch && $href === $oldUrl) {
                                 if ($newUrl === UrlHelper::UNLINK) {
                                     array_splice($node['marks'], $j, 1);
@@ -307,7 +316,11 @@ class UrlReplacer
                 if ($counter === $targetIndex) {
                     $counter++;
                     // Anchor-fingerprint guard. See replaceNthInBard rationale.
-                    if ($expectedAnchor !== null && $match[1] !== $expectedAnchor) {
+                    // Trim both sides — the indexer normalises, raw markdown
+                    // bytes don't. Byte-exact false-positives on legit
+                    // re-links with trailing-whitespace anchors. Mirror of
+                    // the trim-compare in replaceNthInNode.
+                    if ($expectedAnchor !== null && trim($match[1]) !== trim($expectedAnchor)) {
                         return $match[0]; // hit position, but anchor differs — skip
                     }
                     $actuallyReplaced = true;

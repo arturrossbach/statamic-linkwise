@@ -561,4 +561,67 @@ class UrlReplacerTest extends TestCase
         $this->assertSame(0, $exactMatches[0]['occurrence_index']);
         $this->assertSame(1, $exactMatches[1]['occurrence_index']);
     }
+
+    // ─── Anchor-fingerprint trim-compare (Bug 17 follow-up 2026-05-12) ─────
+    //
+    // The indexer normalises anchors (trim, whitespace-collapse), Bard
+    // text-nodes preserve raw bytes. Byte-exact comparison false-
+    // positived on re-link operations where the marked text-node carries
+    // trailing whitespace ("Erdnuss-Soba-Nudeln " in storage, "Erdnuss-
+    // Soba-Nudeln" in the index). The guard's intent is semantic
+    // ("scan-stale?"), so trim both sides before comparing.
+
+    public function test_anchor_fingerprint_tolerates_trailing_whitespace_in_bard(): void
+    {
+        $href = 'statamic://entry::redis-target';
+        $bard = [
+            ['type' => 'paragraph', 'content' => [
+                // Node text has a trailing space; the indexed anchor doesn't.
+                ['type' => 'text', 'text' => 'Redis Setup Guide ', 'marks' => [
+                    ['type' => 'link', 'attrs' => ['href' => $href]],
+                ]],
+            ]],
+        ];
+
+        [, $did] = $this->replacer->replaceNthInBard(
+            $bard, $href, $href, '__LINKWISE_UNLINK__', 0, 'Redis Setup Guide'
+        );
+
+        $this->assertTrue($did, 'Trim-compare must accept whitespace-only differences');
+    }
+
+    public function test_anchor_fingerprint_still_rejects_real_mismatch_in_bard(): void
+    {
+        // Defense-in-depth: trim-compare must NOT degenerate to "any
+        // string passes" — a genuinely different anchor (scan stale)
+        // is still refused.
+        $href = 'statamic://entry::redis-target';
+        $bard = [
+            ['type' => 'paragraph', 'content' => [
+                ['type' => 'text', 'text' => 'Postgres Setup Guide', 'marks' => [
+                    ['type' => 'link', 'attrs' => ['href' => $href]],
+                ]],
+            ]],
+        ];
+
+        [, $did] = $this->replacer->replaceNthInBard(
+            $bard, $href, $href, '__LINKWISE_UNLINK__', 0, 'Redis Setup Guide'
+        );
+
+        $this->assertFalse($did, 'A different anchor must still trip the fingerprint guard');
+    }
+
+    public function test_anchor_fingerprint_tolerates_trailing_whitespace_in_markdown(): void
+    {
+        $href = 'statamic://entry::redis-target';
+        // Indexed anchor "Redis Setup Guide" vs raw markdown anchor
+        // "Redis Setup Guide " (trailing space).
+        $md = 'Follow the [Redis Setup Guide ]('.$href.') for best results.';
+
+        [, $did] = $this->replacer->replaceNthInMarkdown(
+            $md, $href, '__LINKWISE_UNLINK__', 0, 'Redis Setup Guide'
+        );
+
+        $this->assertTrue($did, 'Markdown trim-compare must accept whitespace-only differences');
+    }
 }

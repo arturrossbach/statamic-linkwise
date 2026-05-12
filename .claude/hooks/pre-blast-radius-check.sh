@@ -27,6 +27,4 @@ case "$FILE_PATH" in
     ;;
 esac
 
-cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"BLAST-RADIUS CHECK (BLOCKING — see feedback_blast_radius_check.md): Before editing this file, have you done these THREE things?\n\n1. Identified the EXACT pattern you're changing (function name, signature, anti-pattern keyword)?\n2. Run grep -rn for ALL callers AND related patterns across src/, resources/js/, routes/?\n3. Posted the blast-radius TABLE in chat (Stelle | Datei:Line | Wirkt der Fix dort? | Wenn nein: warum NICHT?)?\n\nIf NO to any: STOP. Do the grep + table FIRST. Then implement.\n\nSpecial flags requiring extra care: Laravel validation rules (strips unvalidated fields silently), function signatures (all callers updated?), frontend payload changes (all senders + all backend validators?), helper-method removal (orphan check), cache-payload format changes (all readers?)."}}
-EOF
+echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"Blast-radius: grep callers, post table. feedback_blast_radius_check.md."}}'
