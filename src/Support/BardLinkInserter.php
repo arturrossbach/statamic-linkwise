@@ -446,9 +446,10 @@ class BardLinkInserter
      *      all fields. `blocking_href` is set for the cross-/already-
      *      linked reasons.
      *
-     * Used by the relink-preview HTTP endpoint to gate the 2-step
-     * re-link flow: when Step 2 (insert) would fail, we MUST NOT run
-     * Step 1 (unlink) — that's the Bug 17 partial-state hazard.
+     * Used by RelinkService to validate the new link's insertion
+     * AFTER the original mark has been removed from the in-memory
+     * tree. Atomic command: validation reads real post-removal state,
+     * no simulation needed.
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
@@ -458,7 +459,6 @@ class BardLinkInserter
         string $href,
         bool $caseSensitive = false,
         ?string $expectedSentenceContext = null,
-        ?string $originalHref = null,
     ): array {
         [$entry] = SafeEntrySaver::load($sourceEntryId);
 
@@ -478,9 +478,9 @@ class BardLinkInserter
             $value = $entry->get($handle);
 
             if ($field->type() === 'bard' && is_array($value) && ! empty($value)) {
-                $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
+                $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
             } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
-                $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
+                $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
             } elseif ($field->type() === 'markdown' && is_string($value) && ! empty($value) && $handle !== 'title') {
                 // Markdown dry-run: re-use the existing walker since
                 // markdown returns a new string (pass-by-value, no
@@ -513,11 +513,11 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    public static function canInsertLinkIntoBardContent(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?string $originalHref = null): array
+    public static function canInsertLinkIntoBardContent(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
     {
         $bestFailure = null;
         foreach ($bardContent as $node) {
-            $result = static::analyzeBardNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
+            $result = static::analyzeBardNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
             if ($result['ok'] ?? false) {
                 return $result;
             }
@@ -535,7 +535,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    protected static function analyzeBardNode(array $node, string $anchorText, string $href, bool $caseSensitive, ?string $expectedSentenceContext, ?string $originalHref = null): array
+    protected static function analyzeBardNode(array $node, string $anchorText, string $href, bool $caseSensitive, ?string $expectedSentenceContext): array
     {
         // Mirror the processNode skip-list — code blocks, hrs, images,
         // replicator 'set' nodes. Stay in sync if the list ever changes.
@@ -548,7 +548,7 @@ class BardLinkInserter
         }
 
         // First: this node's direct children (= the actual wrap target).
-        $direct = static::findValidMatchPosition($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
+        $direct = static::findValidMatchPosition($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext);
         if ($direct['ok'] ?? false) {
             return $direct;
         }
@@ -556,7 +556,7 @@ class BardLinkInserter
 
         // Then: recurse into child nodes that may have their own content.
         foreach ($node['content'] as $child) {
-            $nested = static::analyzeBardNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
+            $nested = static::analyzeBardNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
             if ($nested['ok'] ?? false) {
                 return $nested;
             }
@@ -571,7 +571,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    public static function canInsertLinkIntoReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?string $originalHref = null): array
+    public static function canInsertLinkIntoReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
     {
         $bestFailure = null;
 
@@ -584,9 +584,9 @@ class BardLinkInserter
                     continue;
                 }
                 if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
+                    $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
                 } elseif (static::looksLikeReplicatorContent($value)) {
-                    $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $originalHref);
+                    $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
                 } else {
                     continue;
                 }
@@ -1073,7 +1073,7 @@ class BardLinkInserter
      *
      * Returns either an `ok=true` struct carrying the node positions the
      * caller needs to wrap, or an `ok=false` struct carrying a typed
-     * failure reason so the relink-preview endpoint can produce an
+     * failure reason so RelinkService can produce an
      * actionable error message instead of a generic "would fail".
      *
      * Reason taxonomy:
@@ -1095,7 +1095,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, pos?:int, startNodeIndex?:int, endNodeIndex?:int, startOffset?:int, endOffset?:int, reason?:string, blocking_href?:string}
      */
-    protected static function findValidMatchPosition(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?string $originalHref = null): array
+    protected static function findValidMatchPosition(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
     {
         // Build concatenated text from child text nodes
         $fullText = '';
@@ -1226,7 +1226,7 @@ class BardLinkInserter
             //   surprise data loss.
             //
             // Bug 17 (2026-05-11): we now also capture the blocking href
-            // so the relink-preview endpoint can name it in an actionable
+            // so RelinkService can name it in an actionable
             // error message ("Anchor überlappt mit Link auf 'X'") rather
             // than a generic "would fail".
             //
@@ -1236,18 +1236,6 @@ class BardLinkInserter
             // the DIFFERENT-target href as the blocker: that's the actual
             // conflict the user has to resolve, not the same-target no-op
             // they'd implicitly clear via Step 1 anyway.
-            // $originalHref simulates Step 1 of the re-link flow: the
-            // DetailModal will unlink the existing link at this anchor
-            // before Step 2 inserts. Marks whose href equals $originalHref
-            // are therefore treated as if they were already gone — they
-            // can't block Step 2 from succeeding. This is what makes the
-            // common case work: simple anchor-expansion within a
-            // same-target link (e.g. "Redis" → "Redis Setup Guide" to
-            // the same target) must NOT be refused as already_linked.
-            //
-            // Different-target marks remain blockers regardless — they're
-            // the genuine Bug 17 conflict the user has to resolve via
-            // URL-Changer first.
             $startIdx = $startMap['index'];
             $endIdx = $endMap['index'];
             $blockingHref = null;
@@ -1260,12 +1248,6 @@ class BardLinkInserter
                         continue;
                     }
                     $thisHref = $m['attrs']['href'] ?? '';
-
-                    // Skip marks that will be unlinked by Step 1 of the
-                    // re-link flow (= post-Step-1 simulation).
-                    if ($originalHref !== null && $thisHref === $originalHref) {
-                        continue;
-                    }
 
                     if ($thisHref !== $href) {
                         // Different target — strongest blocker, stop early.

@@ -162,9 +162,6 @@ export default {
     props: {
         modal: { type: Object, default: null },
         applyUrl: { type: String, default: '' },
-        inboundInsertUrl: { type: String, default: '' },
-        outboundInsertUrl: { type: String, default: '' },
-        relinkPreviewUrl: { type: String, default: '' },
         relinkUrl: { type: String, default: '' },
         entries: { type: Array, default: () => [] },
     },

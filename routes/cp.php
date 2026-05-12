@@ -8,7 +8,6 @@ use Arturrossbach\Linkwise\Http\Controllers\IgnoredLinkController;
 use Arturrossbach\Linkwise\Http\Controllers\InboundController;
 use Arturrossbach\Linkwise\Http\Controllers\OutboundController;
 use Arturrossbach\Linkwise\Http\Controllers\RelinkController;
-use Arturrossbach\Linkwise\Http\Controllers\RelinkPreviewController;
 use Arturrossbach\Linkwise\Http\Controllers\UrlChangerController;
 
 Route::middleware('can:manage linkwise')->group(function () {
@@ -114,16 +113,6 @@ Route::middleware('can:manage linkwise')->group(function () {
 
     Route::post('linkwise/inbound/insert', [InboundController::class, 'insert'])
         ->name('linkwise.inbound.insert');
-
-    // Bug 17 pre-flight: simulate Step 2 (link-insert) before Step 1
-    // (URL-Changer unlink) commits — DetailModal calls this on every
-    // re-link to refuse partial state when an expanded anchor would
-    // overlap an existing link.
-    //
-    // DEPRECATED by Bug 17 Phase C atomic re-link endpoint below.
-    // Removed in commit C6 alongside the Phase-A frontend scaffolding.
-    Route::post('linkwise/relink-preview', [RelinkPreviewController::class, 'preview'])
-        ->name('linkwise.relink-preview');
 
     // Bug 17 Phase C: atomic re-link. One POST replaces the previous
     // Step 1 (url-changer apply) + Step 2 (async insert) chain. Sync,

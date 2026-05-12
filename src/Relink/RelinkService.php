@@ -289,8 +289,8 @@ class RelinkService
 
     /**
      * Centralised reason → German action-oriented message.
-     * Same wording as Phase A's RelinkPreviewController so the toast
-     * copy stays consistent through the architecture transition.
+     * The DetailModal renders `message` verbatim in the per-item error
+     * shown by the bulk-completion toast.
      */
     protected function messageForReason(string $reason, ?string $blockingHref): string
     {

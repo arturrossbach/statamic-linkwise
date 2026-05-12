@@ -15,10 +15,12 @@ use Statamic\Http\Controllers\CP\CpController;
  * Bulk re-link is N sequential POSTs from the frontend, each one a
  * complete atomic unit — no cross-item lock contention.
  *
- * Replaces the Phase A trio: (a) POST /cp/linkwise/url-changer/apply
- * for Step 1 unlink, (b) POST /cp/linkwise/{outbound,inbound}/insert
- * for Step 2 async insert, (c) POST /cp/linkwise/relink-preview for
- * the partial-state safeguard.
+ * Replaces the previous trio that the DetailModal called in sequence:
+ * (a) POST /cp/linkwise/url-changer/apply for Step 1 unlink,
+ * (b) POST /cp/linkwise/{outbound,inbound}/insert for Step 2 async
+ * insert, (c) POST /cp/linkwise/relink-preview for the Phase-A
+ * partial-state safeguard. All three are now subsumed by this one
+ * sync controller.
  */
 class RelinkController extends CpController
 {
