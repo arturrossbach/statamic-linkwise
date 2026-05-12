@@ -562,7 +562,7 @@ class AutoLinkController extends CpController
         \Illuminate\Support\Facades\Cache::forget('linkwise:applyrule:cancel');
 
         $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(PHP_BINARY);
+        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
         $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('apply-rule.log', 'Apply Rule (single)'));
 
         exec("$php $artisan linkwise:apply-rule >> $log 2>&1 &");
@@ -615,7 +615,7 @@ class AutoLinkController extends CpController
         ], 600);
 
         $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(PHP_BINARY);
+        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
         $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('apply-rule.log', 'Apply Rule (selected)'));
 
         exec("$php $artisan linkwise:apply-rule >> $log 2>&1 &");

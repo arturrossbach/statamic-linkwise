@@ -128,7 +128,7 @@ class InboundController extends CpController
         ], 600);
 
         $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(PHP_BINARY);
+        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
         $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('link-insert.log', 'Link Insert'));
 
         exec("$php $artisan linkwise:link-insert >> $log 2>&1 &");

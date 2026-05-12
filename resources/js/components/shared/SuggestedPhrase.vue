@@ -67,13 +67,6 @@ export default {
             // it — this is the only way to highlight the right occurrence when
             // the anchor word appears multiple times in the snippet (linked +
             // unlinked in the same paragraph).
-            //
-            // The "still matches" guard handles in-place anchor edits
-            // (double-click-expand/shrink): the backend offset is for the
-            // original anchor; after the user grows the anchor, that offset may
-            // point to text that no longer equals the new anchor → fall back to
-            // indexOf for the live-edit case. The edit is a UI preview before
-            // apply, the user accepts that the highlight follows the search.
             if (Number.isInteger(this.anchorOffsetInContext) && this.anchorOffsetInContext >= 0) {
                 const slice = this.sentenceContext.substring(
                     this.anchorOffsetInContext,
@@ -81,6 +74,34 @@ export default {
                 );
                 if (slice.toLowerCase() === this.anchor.toLowerCase()) {
                     return this.anchorOffsetInContext;
+                }
+
+                // In-place edit (double-click-expand/shrink): the backend
+                // offset is for the ORIGINAL anchor; after the user shrinks
+                // or expands, the current anchor sits at a shifted offset
+                // RELATIVE to that. Compute shift from the original↔current
+                // relation — same logic the backend uses to drive Step C
+                // (RelinkService::deriveNewPosition).
+                //
+                // Without this shift, indexOf falls back to "first match in
+                // the snippet" — which for "Erdnuss-Soba-Nudeln" in
+                // "Ich liebe ... Heute über ..." was the WRONG occurrence
+                // (Bug 2026-05-12).
+                const origLower = (this.originalAnchor || '').toLowerCase();
+                const newLower = this.anchor.toLowerCase();
+                let shifted = null;
+                if (origLower && origLower.includes(newLower)) {
+                    // Shrink: current anchor sits inside original at some offset
+                    shifted = this.anchorOffsetInContext + origLower.indexOf(newLower);
+                } else if (newLower.includes(origLower) && origLower !== '') {
+                    // Expand: current anchor extends original at some prefix
+                    shifted = this.anchorOffsetInContext - newLower.indexOf(origLower);
+                }
+                if (shifted !== null && shifted >= 0) {
+                    const slice2 = this.sentenceContext.substring(shifted, shifted + this.anchor.length);
+                    if (slice2.toLowerCase() === this.anchor.toLowerCase()) {
+                        return shifted;
+                    }
                 }
             }
             return this.sentenceContext.toLowerCase().indexOf(this.anchor.toLowerCase());
