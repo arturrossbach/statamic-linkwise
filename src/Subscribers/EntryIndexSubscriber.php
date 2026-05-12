@@ -87,6 +87,11 @@ class EntryIndexSubscriber
                     // tokens are stale. indexEntry already tokenized using
                     // the current title+text via the standard pipeline.
                     tokens: $record->tokens,
+                    // Forward occurrences from freshly-indexed $record. Missed
+                    // this on the inbound-count fix (commit f57bc85) — per-save
+                    // re-index dropped the field, drift came back. Re-added
+                    // 2026-05-12 as a follow-up.
+                    outboundLinkOccurrences: $record->outboundLinkOccurrences,
                 );
 
                 $records[$record->id] = $record;
