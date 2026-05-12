@@ -1146,45 +1146,7 @@ class BardLinkInserter
                     // as "context changed, refresh and retry".
                     return ['ok' => false, 'reason' => 'context_mismatch'];
                 }
-                // Bug 19 fix: when the caller knows the anchor's exact
-                // character offset inside the (un-trimmed) sentence_context,
-                // narrow the range to ONE position. The sentence_context is
-                // a ±N-char window that can span multiple identical anchor
-                // occurrences inside a paragraph (e.g. "Ich liebe X mhhhh.
-                // Heute über X nachgedacht" — two "X"s inside the captured
-                // window). Without this narrow, "wrap first valid match"
-                // silently lands on the wrong one. We offset against the
-                // raw context first (matches the offset's coordinate space),
-                // then map the resulting char position into $fullText.
-                //
-                // We DON'T require an exact one-anchor-wide range. The
-                // sentence-context narrowing already eliminated outside-
-                // sentence matches; pinning to anchor-length is what
-                // discriminates between two occurrences inside the same
-                // sentence (which the user wouldn't see in their captured
-                // context anyway).
-                if ($anchorOffsetInContext !== null && $anchorOffsetInContext >= 0) {
-                    // Map raw-context offset → fullText position. The raw
-                    // context could differ from $needle by the leading "…/
-                    // ..." we stripped above; recompute the shift so the
-                    // offset stays aligned.
-                    $rawContext = $expectedSentenceContext;
-                    $strippedPrefix = mb_strlen($rawContext) - mb_strlen(ltrim(str_replace(['…', '...'], '', $rawContext)));
-                    $offsetInNeedle = $anchorOffsetInContext - $strippedPrefix;
-                    if ($offsetInNeedle >= 0 && $offsetInNeedle + mb_strlen($anchorText) <= mb_strlen($needle)) {
-                        $pinned = $rangeStart + $offsetInNeedle;
-                        // Single-position range — anchor must START exactly
-                        // here. The downstream gate `$found < start ||
-                        // $found + anchorLen > end` rejects everything else.
-                        $contextRange = ['start' => $pinned, 'end' => $pinned + mb_strlen($anchorText)];
-                    } else {
-                        // Offset doesn't fit inside the narrowed needle —
-                        // content has shifted under us, scan is stale.
-                        $contextRange = ['start' => $rangeStart, 'end' => $rangeStart + mb_strlen($needle)];
-                    }
-                } else {
-                    $contextRange = ['start' => $rangeStart, 'end' => $rangeStart + mb_strlen($needle)];
-                }
+                $contextRange = ['start' => $rangeStart, 'end' => $rangeStart + mb_strlen($needle)];
             }
         }
 

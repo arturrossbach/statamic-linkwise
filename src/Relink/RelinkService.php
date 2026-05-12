@@ -441,57 +441,6 @@ class RelinkService
     }
 
     /**
-     * Field-type-dispatched dry-run analyzer.
-     *
-     * Bard + Replicator have granular reasons from canInsertLinkInto*.
-     * Markdown is coarse — the existing insertLinkIntoMarkdown returns
-     * null/non-null only. We map null → anchor_not_found (consistent
-     * with Phase A's coarse markdown treatment).
-     */
-    protected function analyzeInsert(string $type, mixed $value, string $newAnchor, string $newHref, ?string $sentenceContext, ?int $anchorOffsetInContext = null): array
-    {
-        if ($type === 'bard') {
-            return BardLinkInserter::canInsertLinkIntoBardContent(
-                $value, $newAnchor, $newHref, false, $sentenceContext, $anchorOffsetInContext
-            );
-        }
-        if ($type === 'replicator') {
-            return BardLinkInserter::canInsertLinkIntoReplicator(
-                $value, $newAnchor, $newHref, false, $sentenceContext, $anchorOffsetInContext
-            );
-        }
-        if ($type === 'markdown') {
-            $probe = BardLinkInserter::insertLinkIntoMarkdown(
-                $value, $newAnchor, $newHref, false, $sentenceContext
-            );
-
-            return $probe !== null
-                ? ['ok' => true]
-                : ['ok' => false, 'reason' => 'anchor_not_found'];
-        }
-
-        return ['ok' => false, 'reason' => 'anchor_not_found'];
-    }
-
-    /**
-     * Field-type-dispatched mutator. Returns modified value or null.
-     */
-    protected function insert(string $type, mixed $value, string $newAnchor, string $newHref, ?string $sentenceContext, ?int $anchorOffsetInContext = null): mixed
-    {
-        if ($type === 'bard') {
-            return BardLinkInserter::insertLinkWithHref($value, $newAnchor, $newHref, false, $sentenceContext, $anchorOffsetInContext);
-        }
-        if ($type === 'replicator') {
-            return BardLinkInserter::processReplicatorWithHref($value, $newAnchor, $newHref, false, $sentenceContext, $anchorOffsetInContext);
-        }
-        if ($type === 'markdown') {
-            return BardLinkInserter::insertLinkIntoMarkdown($value, $newAnchor, $newHref, false, $sentenceContext);
-        }
-
-        return null;
-    }
-
-    /**
      * Centralised reason → German action-oriented message.
      * The DetailModal renders `message` verbatim in the per-item error
      * shown by the bulk-completion toast.
