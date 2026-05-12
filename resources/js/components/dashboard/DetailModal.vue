@@ -498,6 +498,14 @@ export default {
                         original_anchor: item.anchor_text || '',
                         new_anchor: item._anchor,
                         sentence_context: item.sentence_context || '',
+                        // Bug 19 fix: the sentence_context is a ±N-char window
+                        // around the anchor and can span multiple identical
+                        // occurrences. The backend uses this offset to narrow
+                        // the context-range filter to a single position so a
+                        // shrink-re-link cannot wander to an earlier match.
+                        anchor_offset_in_context: Number.isInteger(item.anchor_offset_in_context)
+                            ? item.anchor_offset_in_context
+                            : null,
                     };
                     // Internal links carry target_entry_id; external links
                     // (https://…) carry new_href. The DetailModal re-link

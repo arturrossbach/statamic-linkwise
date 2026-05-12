@@ -81,6 +81,7 @@ class RelinkService
         ?string $sentenceContext = null,
         ?string $expectedHash = null,
         ?string $reverts = null,
+        ?int $anchorOffsetInContext = null,
     ): array {
         // Idempotency — user clicked re-link without changing anchor or
         // target. Cheap to handle here; prevents activity-log spam.
@@ -182,7 +183,7 @@ class RelinkService
         // If validation says no, return WITHOUT calling save — the
         // in-memory entry is dirty but never persisted, no partial state.
         $insertValue = $entry->get($removalField);
-        $analysis = $this->analyzeInsert($removalFieldType, $insertValue, $newAnchor, $newHref, $sentenceContext);
+        $analysis = $this->analyzeInsert($removalFieldType, $insertValue, $newAnchor, $newHref, $sentenceContext, $anchorOffsetInContext);
 
         if (! ($analysis['ok'] ?? false)) {
             return array_merge($analysis, [
@@ -194,7 +195,7 @@ class RelinkService
         }
 
         // ─── Step C: insert the new link ──────────────────────────────
-        $inserted = $this->insert($removalFieldType, $insertValue, $newAnchor, $newHref, $sentenceContext);
+        $inserted = $this->insert($removalFieldType, $insertValue, $newAnchor, $newHref, $sentenceContext, $anchorOffsetInContext);
         if ($inserted === null) {
             // Validation said yes but insertion failed — should not
             // happen if findValidMatchPosition and the inserter agree.
@@ -348,16 +349,16 @@ class RelinkService
      * null/non-null only. We map null → anchor_not_found (consistent
      * with Phase A's coarse markdown treatment).
      */
-    protected function analyzeInsert(string $type, mixed $value, string $newAnchor, string $newHref, ?string $sentenceContext): array
+    protected function analyzeInsert(string $type, mixed $value, string $newAnchor, string $newHref, ?string $sentenceContext, ?int $anchorOffsetInContext = null): array
     {
         if ($type === 'bard') {
             return BardLinkInserter::canInsertLinkIntoBardContent(
-                $value, $newAnchor, $newHref, false, $sentenceContext
+                $value, $newAnchor, $newHref, false, $sentenceContext, $anchorOffsetInContext
             );
         }
         if ($type === 'replicator') {
             return BardLinkInserter::canInsertLinkIntoReplicator(
-                $value, $newAnchor, $newHref, false, $sentenceContext
+                $value, $newAnchor, $newHref, false, $sentenceContext, $anchorOffsetInContext
             );
         }
         if ($type === 'markdown') {
@@ -376,13 +377,13 @@ class RelinkService
     /**
      * Field-type-dispatched mutator. Returns modified value or null.
      */
-    protected function insert(string $type, mixed $value, string $newAnchor, string $newHref, ?string $sentenceContext): mixed
+    protected function insert(string $type, mixed $value, string $newAnchor, string $newHref, ?string $sentenceContext, ?int $anchorOffsetInContext = null): mixed
     {
         if ($type === 'bard') {
-            return BardLinkInserter::insertLinkWithHref($value, $newAnchor, $newHref, false, $sentenceContext);
+            return BardLinkInserter::insertLinkWithHref($value, $newAnchor, $newHref, false, $sentenceContext, $anchorOffsetInContext);
         }
         if ($type === 'replicator') {
-            return BardLinkInserter::processReplicatorWithHref($value, $newAnchor, $newHref, false, $sentenceContext);
+            return BardLinkInserter::processReplicatorWithHref($value, $newAnchor, $newHref, false, $sentenceContext, $anchorOffsetInContext);
         }
         if ($type === 'markdown') {
             return BardLinkInserter::insertLinkIntoMarkdown($value, $newAnchor, $newHref, false, $sentenceContext);

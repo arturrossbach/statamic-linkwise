@@ -1474,4 +1474,117 @@ class BardLinkInserterTest extends TestCase
         $this->assertSame('crosses_existing_link', $result['reason']);
         $this->assertSame('statamic://entry::soba-recipe', $result['blocking_href']);
     }
+
+    // ─── Bug 19: anchor_offset_in_context narrows context-range ──────────
+    //
+    // Same paragraph contains two identical anchor occurrences ("Soba" in
+    // "Ich liebe Soba mhhhh. Heute über Soba nachgedacht"). The captured
+    // sentence_context is a ±N-char window covering BOTH occurrences. Re-
+    // link is for the SECOND one. Without the offset, find-first-match
+    // would wrap the wrong "Soba". With the offset, the range narrows to
+    // a single position so only the intended occurrence is considered.
+
+    public function test_bug19_offset_pins_match_to_intended_occurrence(): void
+    {
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Ich liebe Soba mhhhh. Heute über Soba mehr.'],
+            ],
+        ]];
+
+        // The whole paragraph is the captured sentence_context. The anchor
+        // sits at offset 32 (= start of the SECOND "Soba"). Without the
+        // offset, the dry-run would accept the first "Soba" (offset 10).
+        $context = 'Ich liebe Soba mhhhh. Heute über Soba mehr.';
+        $offsetOfSecondSoba = mb_strpos($context, 'Soba', 11);
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Soba',
+            'statamic://entry::target-123',
+            false,
+            $context,
+            $offsetOfSecondSoba,
+        );
+
+        $this->assertTrue($result['ok'], 'Second-occurrence match must be valid');
+        // Mutating walker on the same input must land at the SAME position.
+        $modified = BardLinkInserter::insertLinkWithHref(
+            $bard,
+            'Soba',
+            'statamic://entry::target-123',
+            false,
+            $context,
+            $offsetOfSecondSoba,
+        );
+        $this->assertNotNull($modified);
+
+        // Walker splits the source text-node into THREE: prefix-plain,
+        // wrapped-anchor, suffix-plain. Confirm the marked text-node's
+        // content is exactly "Soba" AND that its preceding sibling carries
+        // the full "Ich liebe Soba mhhhh. Heute über " prefix (= the first
+        // Soba stays unmarked because it's part of the prefix text-node).
+        $children = $modified[0]['content'];
+        $markedSoba = null;
+        $markedIndex = null;
+        foreach ($children as $idx => $child) {
+            if (($child['text'] ?? '') === 'Soba' && ! empty($child['marks'])) {
+                $markedSoba = $child;
+                $markedIndex = $idx;
+                break;
+            }
+        }
+        $this->assertNotNull($markedSoba, 'A "Soba" text-node with link mark must exist');
+        $this->assertSame(
+            'statamic://entry::target-123',
+            $markedSoba['marks'][0]['attrs']['href'] ?? null,
+        );
+        $this->assertGreaterThan(0, $markedIndex, 'Marked Soba must NOT be the first child');
+        $prefixText = $children[$markedIndex - 1]['text'] ?? '';
+        $this->assertStringContainsString(
+            'Ich liebe Soba',
+            $prefixText,
+            'First "Soba" must remain unmarked inside the prefix text-node — proves Bug 19 fix landed at second occurrence',
+        );
+    }
+
+    public function test_bug19_without_offset_first_match_wins_baseline(): void
+    {
+        // Same scenario as bug19_offset_pins_*, but WITHOUT the offset arg.
+        // This locks in the legacy behaviour so a future refactor that
+        // accidentally tightens the no-offset path is caught — and it
+        // documents WHY the offset matters: without it, the wrong one wins.
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Ich liebe Soba mhhhh. Heute über Soba mehr.'],
+            ],
+        ]];
+        $context = 'Ich liebe Soba mhhhh. Heute über Soba mehr.';
+
+        $modified = BardLinkInserter::insertLinkWithHref(
+            $bard,
+            'Soba',
+            'statamic://entry::target-123',
+            false,
+            $context,
+            null, // ← key difference
+        );
+
+        $children = $modified[0]['content'];
+        $firstSoba = null;
+        foreach ($children as $child) {
+            if (($child['text'] ?? '') === 'Soba') {
+                $firstSoba = $child;
+
+                break;
+            }
+        }
+        $this->assertSame(
+            'statamic://entry::target-123',
+            $firstSoba['marks'][0]['attrs']['href'] ?? null,
+            'Baseline: without offset, FIRST occurrence wins (= Bug 19 was this).'
+        );
+    }
 }

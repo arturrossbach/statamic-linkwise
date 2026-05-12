@@ -50,6 +50,16 @@ class RelinkController extends CpController
             // guard during insert to prevent silent wrong-occurrence wrap.
             'sentence_context' => ['nullable', 'string', 'max:1024'],
 
+            // Bug 19 fix: anchor's character offset inside the captured
+            // sentence_context. The context is a ±N-char window that can
+            // span multiple identical occurrences; this offset pins the
+            // valid match to the exact in-window position so a shrink-
+            // re-link cannot wander to an earlier word-boundary match.
+            // Optional — frontend sends null when extractor couldn't
+            // pin the offset, in which case the old window-only filter
+            // applies (Bug 19 unfixable in that case, but rare).
+            'anchor_offset_in_context' => ['nullable', 'integer', 'min:0'],
+
             // When this re-link is itself the revert of a recorded
             // relink snapshot, carries that snapshot's id. RelinkService
             // chains it into the new snapshot's summary + flips the
@@ -78,6 +88,9 @@ class RelinkController extends CpController
             sentenceContext: $validated['sentence_context'] ?? null,
             expectedHash: $validated['content_hash'] ?? null,
             reverts: $validated['reverts'] ?? null,
+            anchorOffsetInContext: isset($validated['anchor_offset_in_context'])
+                ? (int) $validated['anchor_offset_in_context']
+                : null,
         );
 
         return response()->json($result);
