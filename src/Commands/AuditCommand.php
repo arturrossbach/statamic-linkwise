@@ -95,6 +95,7 @@ class AuditCommand extends Command
             'insert-parity'          => fn () => $this->auditInsertParity(),
             'snapshot-self-consistency' => fn () => $this->auditSnapshotSelfConsistency(),
             'stale-job-locks'        => fn () => $this->auditStaleJobLocks(),
+            'php-cli-binary'         => fn () => $this->auditPhpCliBinary(),
             'domains'                => fn () => $this->auditDomainParity(),
             'broken-links'           => fn () => $this->auditBrokenLinks(),
             'url-changer'            => fn () => $this->auditUrlChanger(),
@@ -1982,6 +1983,63 @@ class AuditCommand extends Command
     // is the cleaner signal — captures both crashed commands and
     // legitimately-finished commands that didn't clean up.
     // ──────────────────────────────────────────────────────────────────
+    /**
+     * Architectural-smell check: detect whether `PhpBinary::cli()` would yield
+     * an FPM-suffixed binary path on this environment. If yes, every detached
+     * `exec("$php $artisan ...")` dispatch is broken — bulk operations would
+     * hang at phase=starting (Bug 21 class).
+     *
+     * Caveat: this check runs in CLI context (the audit command itself), where
+     * PHP_BINARY is already CLI. So we can only catch the case where the
+     * fallback chain explicitly produces an fpm-binary — which would indicate
+     * the helper logic itself is wrong. The more dangerous case (FPM context
+     * yielding fpm) requires a runtime warning in the controller layer, not
+     * here. Still useful as a regression net for the helper.
+     */
+    protected function auditPhpCliBinary(): void
+    {
+        $this->line('<fg=yellow>php-cli-binary</> — PhpBinary::cli() resolves to a CLI php, not FPM');
+
+        $resolved = \Arturrossbach\Linkwise\Support\PhpBinary::cli();
+
+        if (! is_string($resolved) || $resolved === '') {
+            $this->recordFailure(
+                'php-cli-binary',
+                "PhpBinary::cli() returned empty/non-string: ".var_export($resolved, true).
+                " — detached bulk-exec dispatches will fail. Check helper logic.",
+            );
+
+            return;
+        }
+
+        if (str_contains($resolved, '-fpm')) {
+            $this->recordFailure(
+                'php-cli-binary',
+                "PhpBinary::cli() returned '{$resolved}' — an FPM binary. Detached ".
+                "bulk-exec ('linkwise:detail-unlink' etc.) will hang at phase=starting ".
+                "(Bug 21 class). Helper should have stripped the -fpm suffix or fallen ".
+                "back to \$PATH. Likely cause: Herd/system PHP setup change since the ".
+                "helper was tested.",
+            );
+
+            return;
+        }
+
+        // Sanity: ensure the resolved binary actually runs (=== exists +
+        // executable). `php` from $PATH is OK — shell will find it.
+        if ($resolved !== 'php' && ! is_executable($resolved)) {
+            $this->recordFailure(
+                'php-cli-binary',
+                "PhpBinary::cli() returned '{$resolved}' which is not executable. ".
+                "Detached bulk-exec will fail. Check Herd / system PHP install.",
+            );
+
+            return;
+        }
+
+        $this->pass('php-cli-binary');
+    }
+
     protected function auditStaleJobLocks(): void
     {
         $this->line('<fg=yellow>stale-job-locks</> — no orphaned cache locks blocking new bulks');
