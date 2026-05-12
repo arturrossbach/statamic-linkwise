@@ -322,7 +322,7 @@ class UrlChangerController extends CpController
         \Illuminate\Support\Facades\Cache::forget('linkwise:urlchanger:cancel');
 
         $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(PHP_BINARY);
+        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
         $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('url-changer-apply.log', 'URL Changer Apply'));
 
         exec("$php $artisan linkwise:url-changer:apply >> $log 2>&1 &");

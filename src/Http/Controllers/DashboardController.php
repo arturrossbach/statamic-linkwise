@@ -887,7 +887,7 @@ class DashboardController extends CpController
         // Spawn the check as a detached background process — web worker returns immediately.
         // This frees all session/file locks and doesn't block navigation or other CP requests.
         $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(PHP_BINARY);
+        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
         $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('check-links.log', 'Check Links'));
 
         \Illuminate\Support\Facades\Cache::put('linkwise:check:status', ['phase' => 'starting'], 300);
@@ -923,7 +923,7 @@ class DashboardController extends CpController
         // Spawn the scan as a detached background process — web worker returns immediately.
         // This frees all session/file locks and doesn't block navigation or other CP requests.
         $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(PHP_BINARY);
+        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
         $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('scan-content.log', 'Scan Content'));
 
         \Illuminate\Support\Facades\Cache::put('linkwise:scan:status', ['phase' => 'starting'], 300);
@@ -1008,7 +1008,7 @@ class DashboardController extends CpController
         \Illuminate\Support\Facades\Cache::forget('linkwise:bulkunlink:cancel');
 
         $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(PHP_BINARY);
+        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
         $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('bulk-unlink.log', 'Bulk Unlink'));
 
         exec("$php $artisan linkwise:bulk-unlink >> $log 2>&1 &");
@@ -1210,7 +1210,7 @@ class DashboardController extends CpController
         ], 600);
 
         $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(PHP_BINARY);
+        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
         $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('detail-unlink.log', 'Detail Unlink'));
 
         exec("$php $artisan linkwise:detail-unlink >> $log 2>&1 &");
