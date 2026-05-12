@@ -13,6 +13,16 @@ class EntryRecord
      *   on-demand tokenize when missing. Re-computed on every Scan Content
      *   so language/stopwords config changes propagate.
      */
+    /**
+     * @param  list<string>  $outboundLinks  Distinct target IDs (deduped). Used by
+     *   "already linked" / `in_array` checks everywhere — semantics preserved.
+     * @param  list<string>  $outboundLinkOccurrences  Target IDs PER text-node link mark
+     *   (NOT deduped). Used by LinkReport for inbound-count parity with the modal's
+     *   per-occurrence listing (Bug 2026-05-12: index column showed 3 because
+     *   outboundLinks deduplicated multi-link sources; modal showed 4 because it
+     *   walks each text-node separately). Legacy index records without this field
+     *   fall back to outboundLinks (= distinct count, the old behaviour).
+     */
     public function __construct(
         public readonly string $id,
         public readonly string $title,
@@ -25,6 +35,7 @@ class EntryRecord
         public readonly int $outboundSuggestionCount = 0,
         public readonly bool $hasTitleMatch = false,
         public readonly array $tokens = [],
+        public readonly array $outboundLinkOccurrences = [],
     ) {}
 
     /** Return a copy with an updated inbound suggestion count. */
@@ -42,6 +53,7 @@ class EntryRecord
             outboundSuggestionCount: $this->outboundSuggestionCount,
             hasTitleMatch: $this->hasTitleMatch,
             tokens: $this->tokens,
+            outboundLinkOccurrences: $this->outboundLinkOccurrences,
         );
     }
 
@@ -60,6 +72,7 @@ class EntryRecord
             outboundSuggestionCount: $count,
             hasTitleMatch: $this->hasTitleMatch,
             tokens: $this->tokens,
+            outboundLinkOccurrences: $this->outboundLinkOccurrences,
         );
     }
 
@@ -72,6 +85,7 @@ class EntryRecord
             'collection' => $this->collection,
             'text' => $this->text,
             'outbound_links' => $this->outboundLinks,
+            'outbound_link_occurrences' => $this->outboundLinkOccurrences,
             'keywords' => $this->keywords,
             'inbound_suggestion_count' => $this->inboundSuggestionCount,
             'outbound_suggestion_count' => $this->outboundSuggestionCount,
@@ -109,6 +123,7 @@ class EntryRecord
             outboundSuggestionCount: (int) ($data['outbound_suggestion_count'] ?? 0),
             hasTitleMatch: (bool) ($data['has_title_match'] ?? false),
             tokens: isset($data['tokens']) && is_array($data['tokens']) ? array_values(array_filter($data['tokens'], 'is_string')) : [],
+            outboundLinkOccurrences: isset($data['outbound_link_occurrences']) && is_array($data['outbound_link_occurrences']) ? $data['outbound_link_occurrences'] : [],
         );
     }
 }

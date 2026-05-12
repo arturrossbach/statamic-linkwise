@@ -314,7 +314,18 @@ class LinkReport
         $inbound = array_fill_keys(array_keys($this->records), 0);
 
         foreach ($this->records as $record) {
-            foreach ($record->outboundLinks as $targetId) {
+            // Prefer outboundLinkOccurrences (per text-node, NOT deduped) so
+            // an inbound source that links to the same target twice counts
+            // as 2 — matching what the modal lists per-occurrence. Legacy
+            // index records without this field (written before the field
+            // shipped) fall back to outboundLinks (distinct), preserving
+            // the pre-fix behaviour until the next full re-index.
+            // Bug 2026-05-12: index column showed 3 / modal showed 4.
+            $sourceLinks = ! empty($record->outboundLinkOccurrences)
+                ? $record->outboundLinkOccurrences
+                : $record->outboundLinks;
+
+            foreach ($sourceLinks as $targetId) {
                 if (isset($inbound[$targetId])) {
                     $inbound[$targetId]++;
                 }

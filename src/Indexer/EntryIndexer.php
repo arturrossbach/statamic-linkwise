@@ -108,6 +108,7 @@ class EntryIndexer
                 outboundSuggestionCount: $old?->outboundSuggestionCount ?? 0,
                 hasTitleMatch: $old?->hasTitleMatch ?? false,
                 tokens: $record->tokens,
+                outboundLinkOccurrences: $record->outboundLinkOccurrences,
             );
         }
 
@@ -236,6 +237,7 @@ class EntryIndexer
                 outboundSuggestionCount: $outboundCounts[$id] ?? 0,
                 hasTitleMatch: $hasTitleMatch[$id] ?? false,
                 tokens: $record->tokens,
+                outboundLinkOccurrences: $record->outboundLinkOccurrences,
             );
         }
 
@@ -289,6 +291,7 @@ class EntryIndexer
                     inboundSuggestionCount: $inboundCount,
                     outboundSuggestionCount: $outboundCount,
                     hasTitleMatch: $record->hasTitleMatch,
+                    outboundLinkOccurrences: $record->outboundLinkOccurrences,
                     tokens: $record->tokens,
                 );
                 $changed = true;
@@ -341,6 +344,7 @@ class EntryIndexer
                 inboundSuggestionCount: $record->inboundSuggestionCount,
                 outboundSuggestionCount: $record->outboundSuggestionCount,
                 hasTitleMatch: $record->hasTitleMatch,
+                outboundLinkOccurrences: $record->outboundLinkOccurrences,
                 tokens: $record->tokens,
             );
         }
@@ -362,10 +366,14 @@ class EntryIndexer
         $extracted = $this->extractBardContent($entry);
         $text = '';
         $links = [];
+        // Parallel total-occurrence list (NOT deduped) for inbound-count parity
+        // with the modal — see Bug 2026-05-12 (index=3 vs modal=4).
+        $linkOccurrences = [];
 
         foreach ($extracted['bard'] as $bardContent) {
             $text .= TextExtractor::fromBard($bardContent)."\n";
             $links = array_merge($links, TextExtractor::linksFromBard($bardContent));
+            $linkOccurrences = array_merge($linkOccurrences, TextExtractor::linksFromBardWithOccurrences($bardContent));
         }
 
         // Plain text from text/textarea/markdown fields nested in Replicator
@@ -401,6 +409,7 @@ class EntryIndexer
                     // writes can also reach.
                     if ($field->type() === 'markdown') {
                         $links = array_merge($links, TextExtractor::linksFromMarkdown($value));
+                        $linkOccurrences = array_merge($linkOccurrences, TextExtractor::linksFromMarkdownWithOccurrences($value));
                     }
                 }
             }
@@ -419,8 +428,14 @@ class EntryIndexer
             url: $entry->url(),
             collection: $entry->collectionHandle(),
             text: $cleanText,
-            outboundLinks: array_unique($links),
+            outboundLinks: array_values(array_unique($links)),
             tokens: $tokens,
+            // Total occurrences (NOT deduped) for inbound-count parity with
+            // the modal — see Bug 2026-05-12 (table=3 vs modal=4 drift).
+            // $links is the deduped list (linksFromBard/Markdown already
+            // unique each Bard subtree), $linkOccurrences is collected in
+            // parallel from the *WithOccurrences helpers.
+            outboundLinkOccurrences: array_values($linkOccurrences),
         );
     }
 

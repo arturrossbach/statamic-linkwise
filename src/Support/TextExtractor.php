@@ -41,6 +41,25 @@ class TextExtractor
     }
 
     /**
+     * Like {@see linksFromBard} but returns EVERY occurrence — one entry-id
+     * per text-node link mark — instead of deduplicating per target. Used by
+     * EntryIndexer for `outboundLinkOccurrences` so LinkReport's inbound
+     * count matches the modal's per-text-node listing (Bug 2026-05-12).
+     *
+     * @return list<string>
+     */
+    public static function linksFromBardWithOccurrences(array $bardContent): array
+    {
+        $links = [];
+
+        foreach ($bardContent as $node) {
+            static::extractLinksFromNode($node, $links);
+        }
+
+        return array_values($links);
+    }
+
+    /**
      * Extract internal links with anchor text from Bard content.
      *
      * @return array<array{entry_id: string, anchor_text: string, href: string}>
@@ -71,6 +90,22 @@ class TextExtractor
         }
 
         return array_unique($links);
+    }
+
+    /**
+     * Like {@see linksFromMarkdown} but with every match as a separate entry
+     * (no dedup). Mirrors {@see linksFromBardWithOccurrences} for outbound-
+     * link occurrence counts (Bug 2026-05-12).
+     *
+     * @return list<string>
+     */
+    public static function linksFromMarkdownWithOccurrences(string $markdown): array
+    {
+        if (preg_match_all('#\[[^\[\]]*\]\(statamic://entry::([^)]+)\)#', $markdown, $matches)) {
+            return array_values($matches[1]);
+        }
+
+        return [];
     }
 
     /**

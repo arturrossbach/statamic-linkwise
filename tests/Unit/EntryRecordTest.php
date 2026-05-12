@@ -25,6 +25,11 @@ class EntryRecordTest extends TestCase
             'collection' => 'articles',
             'text' => 'Some content here',
             'outbound_links' => ['def-456', 'ghi-789'],
+            // Per-text-node occurrences (NOT deduped) for inbound-count
+            // parity with the modal. Empty when constructed without it —
+            // legacy index records fall back to outbound_links in
+            // LinkReport (= old distinct behaviour) until next re-index.
+            'outbound_link_occurrences' => [],
             'keywords' => [],
             'inbound_suggestion_count' => 0,
             'outbound_suggestion_count' => 0,
