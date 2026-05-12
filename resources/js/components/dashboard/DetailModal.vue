@@ -153,7 +153,6 @@ import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
 import SuggestedPhrase from '../shared/SuggestedPhrase.vue';
 import BardBadge from '../shared/BardBadge.vue';
-import { applyUrlReplacements, UNLINK_SENTINEL } from '../shared/urlReplacer.js';
 import { bulkState, setHeavyState, runBulkOperation } from '../../services/bulkOperationService.js';
 import { errorToast } from '../../utils/toast.js';
 
@@ -166,6 +165,7 @@ export default {
         inboundInsertUrl: { type: String, default: '' },
         outboundInsertUrl: { type: String, default: '' },
         relinkPreviewUrl: { type: String, default: '' },
+        relinkUrl: { type: String, default: '' },
         entries: { type: Array, default: () => [] },
     },
 
@@ -465,8 +465,7 @@ export default {
             const mode = this.modal.mode;
             const sourceEntryId = this.modal.entryId;
             const entryTitle = this.modal.entryTitle || '';
-            const insertUrl = mode === 'outbound' ? this.outboundInsertUrl : this.inboundInsertUrl;
-            const previewUrl = this.relinkPreviewUrl;
+            const relinkUrl = this.relinkUrl;
             const csrfToken = Statamic.$config.get('csrfToken');
             // Capture entry-ref array so post-completion `item._unlinked` etc.
             // mutations skip cleanly if the modal has unmounted in between.
@@ -484,122 +483,38 @@ export default {
                     const entryId = mode === 'outbound' ? sourceEntryId : item.id;
                     const entryHash = this.getEntryHash(entryId);
 
-                    // Bug 17 pre-flight (2026-05-11): simulate Step 2
-                    // (link-insert) against the current entry state BEFORE
-                    // Step 1 (URL-Changer unlink) commits. Without this,
-                    // an expanded anchor that now spans an existing link
-                    // mark causes Step 1 to unlink, Step 2 to fail at the
-                    // already-linked guard, and the user is left with a
-                    // partial-state entry (old link gone, new link never
-                    // applied). The preview endpoint returns ok:false with
-                    // an actionable message (which existing link blocks
-                    // it) so the bulk service records the failure cleanly
-                    // and no mutation happens. If relinkPreviewUrl is
-                    // absent (older parent / pre-Bug-17 build), skip the
-                    // pre-flight and fall through to the legacy 2-step
-                    // path — backwards compat.
-                    if (previewUrl) {
-                        const isStatamicEntryUrl = (item.url || '').startsWith('statamic://entry::');
-                        const previewBody = {
-                            entry_id: entryId,
-                            content_hash: entryHash,
-                            anchor_text: item._anchor,
-                            sentence_context: item.sentence_context || '',
-                            // Step 1 will unlink THIS href at the known
-                            // occurrence. Telling the dry-run lets it
-                            // simulate post-Step-1 state — simple anchor
-                            // expansion within a same-target link is NOT
-                            // a false-positive refusal.
-                            original_href: item.url,
-                        };
-                        if (isStatamicEntryUrl) {
-                            previewBody.target_entry_id = item.url.replace('statamic://entry::', '');
-                        } else {
-                            previewBody.href = item.url;
-                        }
-                        let previewResponse;
-                        try {
-                            previewResponse = await fetch(previewUrl, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'X-CSRF-TOKEN': csrfToken,
-                                    'X-Requested-With': 'XMLHttpRequest',
-                                },
-                                body: JSON.stringify(previewBody),
-                            });
-                        } catch (e) {
-                            return { success: false, error: `preview failed: ${e?.message || 'network error'}` };
-                        }
-                        if (! previewResponse.ok) {
-                            return { success: false, error: `preview HTTP ${previewResponse.status}` };
-                        }
-                        let previewData;
-                        try {
-                            previewData = await previewResponse.json();
-                        } catch {
-                            return { success: false, error: 'preview returned invalid JSON' };
-                        }
-                        if (previewData.ok !== true) {
-                            // Step 2 would fail — refuse the whole re-link
-                            // to prevent the partial-state hazard. The
-                            // message is the German action-oriented copy
-                            // from the controller; the bulk service shows
-                            // it in the completion toast / drawer.
-                            return {
-                                success: false,
-                                error: previewData.message || 'Re-Link würde fehlschlagen',
-                            };
-                        }
+                    // Bug 17 Phase C (2026-05-12): single atomic call.
+                    // Backend RelinkService removes the existing link mark
+                    // and inserts the new one on the SAME in-memory entry
+                    // tree, one save, hash-checked. Replaces the previous
+                    // pre-flight + Step 1 (url-changer apply unlink) +
+                    // Step 2 (async link-insert) chain that produced four
+                    // entangled symptoms (partial-state, "removed" not
+                    // "re-linked" in activity log, Bulk-Step-2-blocks-
+                    // next-Step-1, double-toast).
+                    const isStatamicEntryUrl = (item.url || '').startsWith('statamic://entry::');
+                    const body = {
+                        entry_id: entryId,
+                        content_hash: entryHash,
+                        original_href: item.url,
+                        occurrence_index: item.occurrence_index ?? 0,
+                        original_anchor: item.anchor_text || '',
+                        new_anchor: item._anchor,
+                        sentence_context: item.sentence_context || '',
+                    };
+                    // Internal links carry target_entry_id; external links
+                    // (https://…) carry new_href. The DetailModal re-link
+                    // never changes the URL — only the anchor — so target
+                    // === original.
+                    if (isStatamicEntryUrl) {
+                        body.target_entry_id = item.url.replace('statamic://entry::', '');
+                    } else {
+                        body.new_href = item.url;
                     }
-
-                    // Step 1 — unlink current anchor at its known position.
-                    let unlinkResult;
-                    try {
-                        unlinkResult = await applyUrlReplacements(
-                            this.applyUrl,
-                            item.url,
-                            [{
-                                entry_id: entryId,
-                                field: '',
-                                field_type: '',
-                                matched_url: item.url,
-                                occurrence_index: item.occurrence_index ?? 0,
-                                anchor_text: item.anchor_text || '',
-                                new_url: UNLINK_SENTINEL,
-                            }],
-                            entryHash ? { [entryId]: entryHash } : {},
-                        );
-                    } catch (e) {
-                        return { success: false, error: `unlink failed: ${e?.message || 'unknown'}` };
-                    }
-
-                    // Refresh entry hash post-unlink so the insert below uses
-                    // the just-saved state. Skipped silently if the entries
-                    // ref no longer points at our payload (modal unmounted).
-                    if (unlinkResult?.updated_hashes && Array.isArray(entriesRef)) {
-                        for (const [eid, newHash] of Object.entries(unlinkResult.updated_hashes)) {
-                            const e = entriesRef.find(x => x.id === eid);
-                            if (e) e.content_hash = newHash;
-                        }
-                    }
-
-                    // Step 2 — re-insert with the modified anchor.
-                    const targetEntryId = item.url.replace('statamic://entry::', '');
-                    const body = mode === 'outbound'
-                        ? {
-                            entry_id: entryId,
-                            content_hash: this.getEntryHash(entryId),
-                            insertions: [{ target_entry_id: targetEntryId, anchor_text: item._anchor, sentence_context: item.sentence_context || '' }],
-                        }
-                        : {
-                            entry_hashes: { [entryId]: this.getEntryHash(entryId) },
-                            insertions: [{ source_entry_id: entryId, target_entry_id: targetEntryId, anchor_text: item._anchor, sentence_context: item.sentence_context || '' }],
-                        };
 
                     let response;
                     try {
-                        response = await fetch(insertUrl, {
+                        response = await fetch(relinkUrl, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -609,7 +524,7 @@ export default {
                             body: JSON.stringify(body),
                         });
                     } catch (e) {
-                        return { success: false, error: `insert failed: ${e?.message || 'network error'}` };
+                        return { success: false, error: `relink failed: ${e?.message || 'network error'}` };
                     }
                     if (! response.ok) {
                         return { success: false, error: `HTTP ${response.status}` };
@@ -620,28 +535,26 @@ export default {
                     } catch {
                         return { success: false, error: 'invalid server response' };
                     }
-                    // Inbound/Outbound insert endpoints are async dispatch:
-                    // they enqueue a background artisan command and return
-                    // `{success: true, message: 'started'}` immediately.
-                    // The earlier check `data.results?.[0]?.success` matched
-                    // sync-shape only, so async dispatches always reported
-                    // "insert reported no success" → false error toast,
-                    // followed by the real success toast from LinkwiseLayout's
-                    // heavy-job poller when the background command finished
-                    // (Bug 2026-05-11: re-link showed error + success on the
-                    // same operation that actually completed cleanly).
-                    //
-                    // Accept either shape: sync-success (`results[0].success`)
-                    // or dispatch-ack (`data.success === true`). Future-proof
-                    // against either endpoint moving sync↔async.
-                    const syncOk = data.results?.[0]?.success === true;
-                    const dispatchOk = data.success === true;
-                    if (! syncOk && ! dispatchOk) {
-                        return { success: false, error: data.results?.[0]?.error || data.error || 'insert reported no success' };
+                    if (data.ok !== true) {
+                        // Atomic refusal — message carries the German
+                        // action-oriented copy from RelinkService.
+                        return {
+                            success: false,
+                            error: data.message || data.reason || 'Re-Link konnte nicht ausgeführt werden',
+                        };
                     }
 
-                    // Mutate the row only when the modal is still alive — a
-                    // user who closed mid-run shouldn't get state writes
+                    // Refresh entry hash post-save so subsequent ops on
+                    // the same entry use the latest state. Skipped silently
+                    // if entries ref no longer points at our payload
+                    // (modal unmounted).
+                    if (data.new_hash && Array.isArray(entriesRef)) {
+                        const e = entriesRef.find(x => x.id === entryId);
+                        if (e) e.content_hash = data.new_hash;
+                    }
+
+                    // Mutate the row only when the modal is still alive —
+                    // a user who closed mid-run shouldn't get state writes
                     // against a detached component instance.
                     if (modalAlive()) {
                         item._unlinked = false;

@@ -256,6 +256,7 @@
             :inbound-insert-url="inboundInsertUrl"
             :outbound-insert-url="outboundInsertUrl"
             :relink-preview-url="relinkPreviewUrl"
+            :relink-url="relinkUrl"
             :entries="localEntries"
             @close="closeModal"
         />
@@ -301,6 +302,7 @@ export default {
         inboundInsertUrl: { type: String, default: '' },
         outboundInsertUrl: { type: String, default: '' },
         relinkPreviewUrl: { type: String, default: '' },
+        relinkUrl: { type: String, default: '' },
         autolinkStoreUrl: { type: String, default: '' },
         rebuildUrl: { type: String, default: '' },
         indexLastBuiltAt: { type: String, default: null },

@@ -11,6 +11,7 @@
             :inbound-insert-url="inboundInsertUrl"
             :outbound-insert-url="outboundInsertUrl"
             :relink-preview-url="relinkPreviewUrl"
+            :relink-url="relinkUrl"
             :autolink-store-url="autolinkStoreUrl"
             :rebuild-url="rebuildUrl"
             :index-last-built-at="indexLastBuiltAt"
@@ -36,6 +37,7 @@ export default {
         inboundInsertUrl: { type: String, default: '' },
         outboundInsertUrl: { type: String, default: '' },
         relinkPreviewUrl: { type: String, default: '' },
+        relinkUrl: { type: String, default: '' },
         autolinkStoreUrl: { type: String, default: '' },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },

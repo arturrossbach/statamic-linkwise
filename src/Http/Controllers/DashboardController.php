@@ -207,6 +207,7 @@ class DashboardController extends CpController
             'inboundInsertUrl' => cp_route('linkwise.inbound.insert'),
             'outboundInsertUrl' => cp_route('linkwise.outbound.insert'),
             'relinkPreviewUrl' => cp_route('linkwise.relink-preview'),
+            'relinkUrl' => cp_route('linkwise.relink'),
             'autolinkStoreUrl' => cp_route('linkwise.autolink.store'),
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
