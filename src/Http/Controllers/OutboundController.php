@@ -125,34 +125,35 @@ class OutboundController extends CpController
         $startedBy = $user?->name() ?? $user?->email() ?? null;
         $startedById = $user?->id() ?? null;
 
-        // Wipe stale terminal-status from a previous run.
-        \Illuminate\Support\Facades\Cache::forget('linkwise:outboundinsert:status');
-        \Illuminate\Support\Facades\Cache::forget('linkwise:outboundinsert:cancel');
-
-        \Illuminate\Support\Facades\Cache::put('linkwise:outboundinsert:payload', [
-            'source_mode' => 'outbound',
-            'insertions' => $insertions,
-            'entry_hashes' => $expectedHash ? [$entryId => $expectedHash] : [],
-            'entry_title' => $validated['entry_title'] ?? '',
-            'started_by' => $startedBy,
-            'started_by_id' => $startedById,
-            'reverts' => $validated['reverts'] ?? null,
-        ], 600);
-        \Illuminate\Support\Facades\Cache::put('linkwise:outboundinsert:status', [
-            'phase' => 'starting',
-            'total' => count($insertions),
-            'current' => 0,
-            'source_mode' => 'outbound',
-            'entry_title' => $validated['entry_title'] ?? '',
-            'started_by' => $startedBy,
-            'started_by_id' => $startedById,
-        ], 600);
-
-        $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
-        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('link-insert.log', 'Link Insert'));
-
-        exec("$php $artisan linkwise:link-insert >> $log 2>&1 &");
+        // REV-XC-01 (2026-05-13): the previous 5-step boilerplate (cache-
+        // forget stale status/cancel → put-payload → put-initial-status →
+        // escapeshell args → exec) lived inline at 9 controller sites.
+        // BulkJobDispatcher::dispatch owns the shape now; this site stays
+        // a thin payload-assembly + dispatch.
+        \Arturrossbach\Linkwise\Support\BulkJobDispatcher::dispatch(
+            kind: 'outboundinsert',
+            command: 'linkwise:link-insert',
+            payload: [
+                'source_mode' => 'outbound',
+                'insertions' => $insertions,
+                'entry_hashes' => $expectedHash ? [$entryId => $expectedHash] : [],
+                'entry_title' => $validated['entry_title'] ?? '',
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+                'reverts' => $validated['reverts'] ?? null,
+            ],
+            initialStatus: [
+                'phase' => 'starting',
+                'total' => count($insertions),
+                'current' => 0,
+                'source_mode' => 'outbound',
+                'entry_title' => $validated['entry_title'] ?? '',
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+            ],
+            logFile: 'link-insert.log',
+            logLabel: 'Link Insert',
+        );
 
         return response()->json(['success' => true, 'message' => 'Outbound insert started']);
     }

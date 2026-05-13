@@ -65,8 +65,13 @@ class RelinkService
      *                                     wrong-occurrence even when index alone matches)
      * @param  string  $newAnchor          The anchor text Step-C wraps
      * @param  string  $newHref            The link href Step-C inserts
-     * @param  string|null  $sentenceContext  Surrounding sentence at scan time;
-     *                                        used as context-fingerprint guard during insert
+     * @param  string|null  $sentenceContext  Surrounding sentence captured at scan-time.
+     *   Carried into the activity-log snapshot's Context column so the revert
+     *   drawer can show the editor's view at apply-time, even after the entry
+     *   has changed. NOT a guard during insert — that role moved to Step A's
+     *   exact-position output (Bug 17-20 position-passing refactor,
+     *   2026-05-12). REV-RL-03 cleared the older "context-fingerprint guard"
+     *   docblock that lied about this param's purpose.
      * @param  string|null  $expectedHash   When set, refuses if entry has changed since load
      *
      * @return array{ok: bool, reason?: string, blocking_href?: string, message?: string, new_hash?: string}
@@ -81,7 +86,6 @@ class RelinkService
         ?string $sentenceContext = null,
         ?string $expectedHash = null,
         ?string $reverts = null,
-        ?int $anchorOffsetInContext = null,
     ): array {
         // Idempotency — user clicked re-link without changing anchor or
         // target. Cheap to handle here; prevents activity-log spam.
@@ -106,16 +110,6 @@ class RelinkService
             ];
         }
 
-        try {
-            $fields = $entry->blueprint()->fields()->all();
-        } catch (\Throwable) {
-            return [
-                'ok' => false,
-                'reason' => 'entry_not_found',
-                'message' => 'Eintrag-Schema konnte nicht geladen werden.',
-            ];
-        }
-
         // ─── Step A: remove the original link ──────────────────────────
         //
         // Walk fields in their natural order. First field whose walker
@@ -126,56 +120,47 @@ class RelinkService
         // didReplace=false in UrlReplacer is intentionally combined-catchall
         // (anchor mismatch + occurrence out of range collapse into one
         // "stale modal" user signal — see C1 tinker verification notes).
-        $removalField = null;
-        $removalFieldType = null;
-        $removalPosition = null;
-        foreach ($fields as $handle => $field) {
-            $value = $entry->get($handle);
-            $type = $field->type();
-
-            if ($type === 'bard' && is_array($value) && ! empty($value)) {
+        //
+        // REV-RL-02 (2026-05-13): field-type cascade extracted to
+        // EntryFieldWalker::firstMutation. Helper iterates blueprint fields,
+        // calls our per-type callback, writes back on first mutation +
+        // returns {handle, field_type, result}. Callback returns
+        // ['value' => $newValue, 'position' => $position] on success or
+        // null to skip — the empty-value + title-handle guards are now
+        // handled by the helper, not by us.
+        $mutation = \Arturrossbach\Linkwise\Support\EntryFieldWalker::firstMutation(
+            $entry,
+            onBard: function (array $value) use ($originalHref, $occurrenceIndex, $originalAnchor): ?array {
                 [$modified, $did, $position] = $this->urlReplacer->replaceNthInBard(
                     $value, $originalHref, $originalHref, UrlHelper::UNLINK, $occurrenceIndex, $originalAnchor
                 );
-                if ($did) {
-                    $entry->set($handle, $modified);
-                    $removalField = $handle;
-                    $removalFieldType = 'bard';
-                    $removalPosition = $position;
-                    break;
-                }
-            } elseif ($type === 'replicator' && is_array($value) && ! empty($value)) {
+                return $did ? ['value' => $modified, 'position' => $position] : null;
+            },
+            onReplicator: function (array $value) use ($originalHref, $occurrenceIndex, $originalAnchor): ?array {
                 [$modified, $did, $position] = $this->urlReplacer->replaceNthInReplicator(
                     $value, $originalHref, $originalHref, UrlHelper::UNLINK, $occurrenceIndex, $originalAnchor
                 );
-                if ($did) {
-                    $entry->set($handle, $modified);
-                    $removalField = $handle;
-                    $removalFieldType = 'replicator';
-                    $removalPosition = $position;
-                    break;
-                }
-            } elseif ($type === 'markdown' && is_string($value) && ! empty($value) && $handle !== 'title') {
+                return $did ? ['value' => $modified, 'position' => $position] : null;
+            },
+            onMarkdown: function (string $value) use ($originalHref, $occurrenceIndex, $originalAnchor): ?array {
                 [$modified, $did, $position] = $this->urlReplacer->replaceNthInMarkdown(
                     $value, $originalHref, UrlHelper::UNLINK, $occurrenceIndex, $originalAnchor
                 );
-                if ($did) {
-                    $entry->set($handle, $modified);
-                    $removalField = $handle;
-                    $removalFieldType = 'markdown';
-                    $removalPosition = $position;
-                    break;
-                }
-            }
-        }
+                return $did ? ['value' => $modified, 'position' => $position] : null;
+            },
+        );
 
-        if ($removalField === null) {
+        if ($mutation === null) {
             return [
                 'ok' => false,
                 'reason' => 'entry_changed',
                 'message' => 'Der ursprüngliche Link wurde nicht gefunden — Eintrag wurde inzwischen geändert. Bitte Modal schließen und neu öffnen.',
             ];
         }
+
+        $removalField = $mutation['handle'];
+        $removalFieldType = $mutation['field_type'];
+        $removalPosition = $mutation['result']['position'];
 
         // ─── Step B+C combined: insert at position (Bug 17–20 root refactor) ─
         //

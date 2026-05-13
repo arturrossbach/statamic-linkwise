@@ -9,6 +9,7 @@ use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
+use Arturrossbach\Linkwise\Support\BulkStatusWriter;
 use Arturrossbach\Linkwise\Support\JobLock;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Statamic\Facades\Entry;
@@ -122,33 +123,26 @@ class LinkInsertCommand extends Command
             startedById: $startedById,
         );
 
-        Cache::put($statusKey, [
-            'phase' => 'running',
-            'current' => 0,
-            'total' => $total,
+        // REV-OB-01 (2026-05-13): BulkStatusWriter replaces 7 near-identical
+        // Cache::put($statusKey, [...]) sites with a single helper. Context
+        // fields stay constant across all phase writes; per-phase methods
+        // (running/cancelled/indexing/done) own the shape + TTL + heartbeat
+        // + done-mirror invariants. Adding a new status field is now a 1-
+        // place edit instead of 7.
+        $status = new BulkStatusWriter($statusKey, [
             'source_mode' => $sourceMode,
             'entry_title' => $entryTitle,
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
-            'heartbeat' => time(),
-        ], 600);
+        ]);
+
+        $status->running(current: 0, total: $total);
 
         foreach ($insertions as $i => $insertion) {
             // Cancel check at the item boundary (cheap, responsive).
             if (Cache::get($cancelKey)) {
                 Cache::forget($cancelKey);
-                Cache::put($statusKey, [
-                    'phase' => 'cancelled',
-                    'total' => $total,
-                    'current' => $i,
-                    'succeeded' => $succeeded,
-                    'skipped' => $skipped,
-                    'errors' => $errors,
-                    'source_mode' => $sourceMode,
-                    'entry_title' => $entryTitle,
-                    'started_by' => $startedBy,
-                    'started_by_id' => $startedById,
-                ], 300);
+                $status->cancelled($i, $total, $succeeded, $skipped, $errors);
                 $this->finalizeIndex(array_keys($affectedIds));
 
                 return self::SUCCESS;
@@ -172,18 +166,7 @@ class LinkInsertCommand extends Command
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                     $skipped++;
                     $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'missing_link_target');
-                    Cache::put($statusKey, [
-                        'phase' => 'running',
-                        'current' => $i + 1,
-                        'total' => $total,
-                        'succeeded' => $succeeded,
-                        'skipped' => $skipped,
-                        'source_mode' => $sourceMode,
-                        'entry_title' => $entryTitle,
-                        'started_by' => $startedBy,
-                        'started_by_id' => $startedById,
-                        'heartbeat' => time(),
-                    ], 600);
+                    $status->running($i + 1, $total, $succeeded, $skipped);
                     continue;
                 }
 
@@ -207,18 +190,7 @@ class LinkInsertCommand extends Command
                         $skipRec = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
                         $revertSkippedRecords[] = $skipRec;
                         $bulkSkippedRecords[] = $skipRec;
-                        Cache::put($statusKey, [
-                            'phase' => 'running',
-                            'current' => $i + 1,
-                            'total' => $total,
-                            'succeeded' => $succeeded,
-                            'skipped' => $skipped,
-                            'source_mode' => $sourceMode,
-                            'entry_title' => $entryTitle,
-                            'started_by' => $startedBy,
-                            'started_by_id' => $startedById,
-                            'heartbeat' => time(),
-                        ], 600);
+                        $status->running($i + 1, $total, $succeeded, $skipped);
                         continue;
                     }
                 }
@@ -302,34 +274,12 @@ class LinkInsertCommand extends Command
                 Log::warning('[Linkwise] LinkInsertCommand item-error: '.$e->getMessage());
             }
 
-            Cache::put($statusKey, [
-                'phase' => 'running',
-                'current' => $i + 1,
-                'total' => $total,
-                'succeeded' => $succeeded,
-                'skipped' => $skipped,
-                'source_mode' => $sourceMode,
-                'entry_title' => $entryTitle,
-                'started_by' => $startedBy,
-                'started_by_id' => $startedById,
-                'heartbeat' => time(),
-            ], 600);
+            $status->running($i + 1, $total, $succeeded, $skipped);
         }
 
         // Flip to 'indexing' before finalizeIndex so the banner shows
         // "Finalizing index…" instead of stuck N/N during the rebuild.
-        Cache::put($statusKey, [
-            'phase' => 'indexing',
-            'current' => $total,
-            'total' => $total,
-            'succeeded' => $succeeded,
-            'skipped' => $skipped,
-            'source_mode' => $sourceMode,
-            'entry_title' => $entryTitle,
-            'started_by' => $startedBy,
-            'started_by_id' => $startedById,
-            'heartbeat' => time(),
-        ], 600);
+        $status->indexing($total, $succeeded, $skipped);
 
         $this->finalizeIndex(array_keys($affectedIds));
 
@@ -359,46 +309,7 @@ class LinkInsertCommand extends Command
             app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
         }
 
-        Cache::put($statusKey, [
-            'phase' => 'done',
-            'total' => $total,
-            'current' => $total,
-            'succeeded' => $succeeded,
-            'skipped' => $skipped,
-            'errors' => $errors,
-            'source_mode' => $sourceMode,
-            'entry_title' => $entryTitle,
-            // Root-level heartbeat: the bulkStatus controller maps the whole
-            // cache to the frontend `extra` field, so the frontend dedup-
-            // signature's `tExtra.heartbeat` reads from HERE. Without this,
-            // back-to-back identical-outcome inserts produced the same
-            // signature and the second toast + banner were suppressed.
-            // Bug 2026-05-11.
-            'heartbeat' => time(),
-            // 'extra' is what LinkwiseLayout's completionLabel/completionVariant
-            // read. Without it ($status.extra || {}), succeeded/skipped/errors
-            // are invisible to the toast helper → wrong success-variant +
-            // generic copy. Mirror the top-level fields here so banner +
-            // toast carry the real numbers + reason. Real bug 2026-05-10:
-            // outbound insert with succeeded=0/skipped=1 produced NO toast
-            // at all because the layer-adapter saw zeroes everywhere.
-            //
-            // 'heartbeat' makes the run uniquely identifiable in the toast-
-            // signature so repeated identical-outcome runs (e.g. skipped:1
-            // on the same anchor twice) don't get dedup-suppressed.
-            'extra' => [
-                'succeeded' => $succeeded,
-                'skipped' => $skipped,
-                'errors' => $errors,
-                'source_mode' => $sourceMode,
-                'entry_title' => $entryTitle,
-                'started_by' => $startedBy,
-                'started_by_id' => $startedById,
-                'heartbeat' => time(),
-            ],
-            'started_by' => $startedBy,
-            'started_by_id' => $startedById,
-        ], 300);
+        $status->done($total, $succeeded, $skipped, $errors);
         Cache::forget($payloadKey);
 
         return self::SUCCESS;

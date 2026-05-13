@@ -43,10 +43,10 @@ class BardLinkInserter
      *   the guard, the wrap only happens at the position whose surrounding
      *   text matches the captured context. Mismatch → return null.
      */
-    public static function insertLinkWithHref(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?int $anchorOffsetInContext = null): ?array
+    public static function insertLinkWithHref(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
         foreach ($bardContent as $i => $node) {
-            $result = static::processNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+            $result = static::processNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
             if ($result !== null) {
                 $bardContent[$i] = $result;
@@ -513,11 +513,11 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    public static function canInsertLinkIntoBardContent(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?int $anchorOffsetInContext = null): array
+    public static function canInsertLinkIntoBardContent(array $bardContent, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
     {
         $bestFailure = null;
         foreach ($bardContent as $node) {
-            $result = static::analyzeBardNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+            $result = static::analyzeBardNode($node, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
             if ($result['ok'] ?? false) {
                 return $result;
             }
@@ -535,7 +535,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    protected static function analyzeBardNode(array $node, string $anchorText, string $href, bool $caseSensitive, ?string $expectedSentenceContext, ?int $anchorOffsetInContext = null): array
+    protected static function analyzeBardNode(array $node, string $anchorText, string $href, bool $caseSensitive, ?string $expectedSentenceContext): array
     {
         // Mirror the processNode skip-list — code blocks, hrs, images,
         // replicator 'set' nodes. Stay in sync if the list ever changes.
@@ -548,7 +548,7 @@ class BardLinkInserter
         }
 
         // First: this node's direct children (= the actual wrap target).
-        $direct = static::findValidMatchPosition($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+        $direct = static::findValidMatchPosition($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext);
         if ($direct['ok'] ?? false) {
             return $direct;
         }
@@ -556,7 +556,7 @@ class BardLinkInserter
 
         // Then: recurse into child nodes that may have their own content.
         foreach ($node['content'] as $child) {
-            $nested = static::analyzeBardNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+            $nested = static::analyzeBardNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
             if ($nested['ok'] ?? false) {
                 return $nested;
             }
@@ -571,7 +571,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
-    public static function canInsertLinkIntoReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?int $anchorOffsetInContext = null): array
+    public static function canInsertLinkIntoReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
     {
         $bestFailure = null;
 
@@ -584,9 +584,9 @@ class BardLinkInserter
                     continue;
                 }
                 if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+                    $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
                 } elseif (static::looksLikeReplicatorContent($value)) {
-                    $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+                    $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
                 } else {
                     continue;
                 }
@@ -933,7 +933,7 @@ class BardLinkInserter
      * inserts in isolation without disk-mutating an entry. Production code
      * still goes through insertLinkIntoEntryWithHref.
      */
-    public static function processReplicatorWithHref(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?int $anchorOffsetInContext = null): ?array
+    public static function processReplicatorWithHref(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
         foreach ($sets as $i => $set) {
             if (! is_array($set)) {
@@ -958,7 +958,7 @@ class BardLinkInserter
                 }
 
                 if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $modified = static::insertLinkWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+                    $modified = static::insertLinkWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                     if ($modified !== null) {
                         $sets[$i][$key] = $modified;
@@ -966,7 +966,7 @@ class BardLinkInserter
                         return $sets;
                     }
                 } elseif (static::looksLikeReplicatorContent($value)) {
-                    $modified = static::processReplicatorWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+                    $modified = static::processReplicatorWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                     if ($modified !== null) {
                         $sets[$i][$key] = $modified;
@@ -984,7 +984,7 @@ class BardLinkInserter
      * Process a single ProseMirror node, looking for anchor text in its children.
      * Returns the modified node, or null if not found.
      */
-    protected static function processNode(array $node, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?int $anchorOffsetInContext = null): ?array
+    protected static function processNode(array $node, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
         // Don't recurse into nodes whose contents must stay untouched. Code blocks
         // are the obvious one — wrapping inline links inside SQL/JS code corrupts
@@ -995,7 +995,7 @@ class BardLinkInserter
 
         // Process nodes with content (paragraph, heading, etc.)
         if (isset($node['content']) && is_array($node['content'])) {
-            $result = static::findAndLinkInChildren($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+            $result = static::findAndLinkInChildren($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
             if ($result !== null) {
                 $node['content'] = $result;
@@ -1005,7 +1005,7 @@ class BardLinkInserter
 
             // Recurse into child nodes that may have their own content
             foreach ($node['content'] as $j => $child) {
-                $result = static::processNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+                $result = static::processNode($child, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
                 if ($result !== null) {
                     $node['content'][$j] = $result;
@@ -1027,9 +1027,9 @@ class BardLinkInserter
      * walker (this method) and the dry-run preview ({@see canInsertLinkIntoEntry})
      * share it so they can't drift out of sync silently.
      */
-    protected static function findAndLinkInChildren(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?int $anchorOffsetInContext = null): ?array
+    protected static function findAndLinkInChildren(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
-        $match = static::findValidMatchPosition($children, $anchorText, $href, $caseSensitive, $expectedSentenceContext, $anchorOffsetInContext);
+        $match = static::findValidMatchPosition($children, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
         if (! ($match['ok'] ?? false)) {
             return null;
@@ -1095,7 +1095,7 @@ class BardLinkInserter
      *
      * @return array{ok:bool, pos?:int, startNodeIndex?:int, endNodeIndex?:int, startOffset?:int, endOffset?:int, reason?:string, blocking_href?:string}
      */
-    protected static function findValidMatchPosition(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null, ?int $anchorOffsetInContext = null): array
+    protected static function findValidMatchPosition(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
     {
         // Build concatenated text from child text nodes
         $fullText = '';
