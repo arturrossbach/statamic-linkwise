@@ -65,8 +65,13 @@ class RelinkService
      *                                     wrong-occurrence even when index alone matches)
      * @param  string  $newAnchor          The anchor text Step-C wraps
      * @param  string  $newHref            The link href Step-C inserts
-     * @param  string|null  $sentenceContext  Surrounding sentence at scan time;
-     *                                        used as context-fingerprint guard during insert
+     * @param  string|null  $sentenceContext  Surrounding sentence captured at scan-time.
+     *   Carried into the activity-log snapshot's Context column so the revert
+     *   drawer can show the editor's view at apply-time, even after the entry
+     *   has changed. NOT a guard during insert — that role moved to Step A's
+     *   exact-position output (Bug 17-20 position-passing refactor,
+     *   2026-05-12). REV-RL-03 cleared the older "context-fingerprint guard"
+     *   docblock that lied about this param's purpose.
      * @param  string|null  $expectedHash   When set, refuses if entry has changed since load
      *
      * @return array{ok: bool, reason?: string, blocking_href?: string, message?: string, new_hash?: string}
