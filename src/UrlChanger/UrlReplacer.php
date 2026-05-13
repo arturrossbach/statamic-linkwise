@@ -13,9 +13,23 @@ class UrlReplacer
 {
     protected string $mode = 'smart';
 
+    /**
+     * REV-UC-01 Phase A (2026-05-13): find-only walker family lives in
+     * UrlMatcher. UrlReplacer keeps its public find* methods as backward-
+     * compatible pass-throughs so existing callers (audits, tests) don't
+     * break. The mode is mirrored on set so both objects stay in sync.
+     */
+    protected UrlMatcher $matcher;
+
+    public function __construct()
+    {
+        $this->matcher = new UrlMatcher;
+    }
+
     public function setMode(string $mode): self
     {
         $this->mode = $mode;
+        $this->matcher->setMode($mode);
 
         return $this;
     }
@@ -504,60 +518,8 @@ class UrlReplacer
      */
     public function hrefMatches(string $href, string $search): bool
     {
-        // Empty search means "list all links" — independent of mode. Without
-        // this short-circuit, exact-mode + empty search would compare every
-        // href against '' and match nothing, producing a confusing empty list
-        // when the user just wanted to see everything.
-        if ($search === '') {
-            // Same exclusions as smart mode — internal-only protocols don't
-            // belong in a "all links" view.
-            return ! str_starts_with($href, 'mailto:')
-                && ! str_starts_with($href, 'tel:')
-                && ! str_starts_with($href, '#')
-                && ! str_starts_with($href, 'statamic://');
-        }
-
-        // Exact mode: simple string comparison
-        if ($this->mode === 'exact') {
-            return $href === $search;
-        }
-
-        // Smart mode (default): domain-based + substring fallback
-        if (str_starts_with($href, 'mailto:') || str_starts_with($href, 'tel:') || str_starts_with($href, '#')) {
-            return false;
-        }
-
-        if (str_starts_with($href, 'statamic://') || str_starts_with($search, 'statamic://')) {
-            return str_starts_with($search, 'statamic://') && $href === $search;
-        }
-
-        $searchDomain = self::extractDomain($search);
-        $hrefDomain = self::extractDomain($href);
-
-        // If we can extract domains from both, do domain-based matching
-        if ($searchDomain && $hrefDomain && $searchDomain === $hrefDomain) {
-            $searchPath = $this->extractPath($search);
-            if (empty($searchPath) || $searchPath === '/') {
-                return true;
-            }
-
-            return str_starts_with($this->extractPath($href), $searchPath);
-        }
-
-        // Fallback: substring match
-        if (str_contains($search, '.') && $hrefDomain) {
-            $searchLower = mb_strtolower(preg_replace('#^(https?://|www\.)#i', '', $search));
-            $fullHost = 'www.'.$hrefDomain;
-
-            $pos = mb_stripos($fullHost, $searchLower);
-            if ($pos !== false && ($pos === 0 || $fullHost[$pos - 1] === '.')) {
-                return true;
-            }
-
-            return mb_stripos($this->extractPath($href), $search) !== false;
-        }
-
-        return mb_stripos($href, $search) !== false;
+        // REV-UC-01 Phase A: delegated to UrlMatcher.
+        return $this->matcher->hrefMatches($href, $search);
     }
 
     /**
@@ -617,12 +579,8 @@ class UrlReplacer
 
     protected function extractPath(string $url): string
     {
-        $parseable = $url;
-        if (! preg_match('#^[a-z][a-z0-9+\-.]*://#i', $url)) {
-            $parseable = 'https://'.$url;
-        }
-
-        return parse_url($parseable, PHP_URL_PATH) ?? '';
+        // REV-UC-01 Phase A: moved to UrlMatcher (public static).
+        return UrlMatcher::extractPath($url);
     }
 
     // ─── Core Process ──────────────────────────────────────────────────────────
@@ -753,61 +711,18 @@ class UrlReplacer
     // ─── Bard ──────────────────────────────────────────────────────────────────
 
     /**
-     * Find all link marks matching the search in Bard content.
-     * Each occurrence gets a sequential index for targeted replacement.
-     *
-     * @return array<array{anchor_text: string, matched_url: string, occurrence_index: int}>
+     * REV-UC-01 Phase A (2026-05-13): find-only family delegated to
+     * UrlMatcher. These pass-through methods keep the public API stable
+     * for existing callers (tests, audits, other internal consumers).
      */
     public function findInBard(array $bardContent, string $search): array
     {
-        $occurrences = [];
-        $counter = ['i' => 0];
-
-        foreach ($bardContent as $node) {
-            $this->findInNode($node, $search, $occurrences, $counter);
-        }
-
-        return $occurrences;
+        return $this->matcher->findInBard($bardContent, $search);
     }
 
     protected function findInNode(array $node, string $search, array &$occurrences, array &$counter): void
     {
-        if (isset($node['marks'])) {
-            foreach ($node['marks'] as $mark) {
-                if (($mark['type'] ?? '') === 'link') {
-                    $href = $mark['attrs']['href'] ?? '';
-                    if ($this->hrefMatches($href, $search)) {
-                        $occurrences[] = [
-                            'anchor_text' => $node['text'] ?? '',
-                            'matched_url' => $href,
-                            'occurrence_index' => $counter['i'],
-                        ];
-                        $counter['i']++;
-                    }
-                }
-            }
-        }
-
-        if (isset($node['content'])) {
-            foreach ($node['content'] as $child) {
-                $this->findInNode($child, $search, $occurrences, $counter);
-            }
-        }
-
-        // Bard 'set' nodes (Peak Card, pull-quote, button) carry their
-        // fields under attrs.values. Without walking these, URLs linked
-        // inside set-nested Bard fragments were invisible to URL-Changer:
-        // preview showed N occurrences, apply rewrote N occurrences,
-        // user thought "all good" — but the URLs inside Peak Cards
-        // remained at the old href, silently. Symmetric set-walk added
-        // here AND in replace*InNode below so find/replace stay in sync.
-        foreach (\Arturrossbach\Linkwise\Support\BardWalker::setChildren($node) as $bardFragment) {
-            foreach ($bardFragment as $child) {
-                if (is_array($child)) {
-                    $this->findInNode($child, $search, $occurrences, $counter);
-                }
-            }
-        }
+        $this->matcher->findInNode($node, $search, $occurrences, $counter);
     }
 
     /**
@@ -855,36 +770,12 @@ class UrlReplacer
 
     public function findInReplicator(array $sets, string $search): array
     {
-        $occurrences = [];
-        $counter = ['i' => 0];
-
-        $this->findInReplicatorRecursive($sets, $search, $occurrences, $counter);
-
-        return $occurrences;
+        return $this->matcher->findInReplicator($sets, $search);
     }
 
     protected function findInReplicatorRecursive(array $sets, string $search, array &$occurrences, array &$counter): void
     {
-        foreach ($sets as $set) {
-            if (! is_array($set)) {
-                continue;
-            }
-
-            foreach ($set as $key => $value) {
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
-                    continue;
-                }
-
-                if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    // Use the shared counter across all nested Bard fields
-                    foreach ($value as $node) {
-                        $this->findInNode($node, $search, $occurrences, $counter);
-                    }
-                } elseif (isset($value[0]['type'], $value[0]['id'])) {
-                    $this->findInReplicatorRecursive($value, $search, $occurrences, $counter);
-                }
-            }
-        }
+        $this->matcher->findInReplicatorRecursive($sets, $search, $occurrences, $counter);
     }
 
     public function replaceInReplicator(array $sets, string $search, string $replace): array
@@ -919,28 +810,7 @@ class UrlReplacer
      */
     public function findInMarkdown(string $markdown, string $search): array
     {
-        $occurrences = [];
-        $index = 0;
-
-        // Match all Markdown links: [text](url). occurrence_index counts ONLY
-        // hrefMatches-positives so it aligns with replaceNthInMarkdown which
-        // counts the same way (oldUrl-restricted pattern only fires on matches).
-        if (preg_match_all('#\[([^\[\]]*)\]\(([^)]+)\)#', $markdown, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $match) {
-                $href = $match[2];
-                if ($this->hrefMatches($href, $search)) {
-                    $occurrences[] = [
-                        'anchor_text' => $match[1],
-                        'matched_url' => $href,
-                        'occurrence_index' => $index,
-                        'context' => ContextExtractor::extract($markdown, $match[1]),
-                    ];
-                    $index++;
-                }
-            }
-        }
-
-        return $occurrences;
+        return $this->matcher->findInMarkdown($markdown, $search);
     }
 
     /**
