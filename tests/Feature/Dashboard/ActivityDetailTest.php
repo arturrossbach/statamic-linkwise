@@ -38,6 +38,26 @@ class ActivityDetailTest extends TestCase
         $this->withoutMiddleware();
     }
 
+    /**
+     * Extend the base {@see TestCase::defineRoutes()} side-load with a
+     * stub for the production-prefixed route name `statamic.cp.linkwise.
+     * urlchanger` so {@see Statamic::cpRoute()} (which prepends `statamic.
+     * cp.`) resolves without throwing. Our routes/cp.php registers the
+     * unprefixed `linkwise.urlchanger` only — production's CP-prefix gets
+     * added by Statamic::additionalCpRoutes() which doesn't boot in
+     * Orchestra Testbench.
+     *
+     * Scoped to this Test-Class so other Feature-Suites aren't affected.
+     * Phase B extraction won't need this — `cp_route` calls stay in the
+     * controller layer; the helper becomes pure.
+     */
+    protected function defineRoutes($router): void
+    {
+        parent::defineRoutes($router);
+        $router->get('___test-stub/url-changer', fn () => '')
+            ->name('statamic.cp.linkwise.urlchanger');
+    }
+
     public function test_activity_detail_returns_404_when_snapshot_id_unknown(): void
     {
         $spy = $this->bindSnapshotSpy();
@@ -378,6 +398,33 @@ class ActivityDetailTest extends TestCase
         $response = $this->getJson(route('linkwise.activity.detail', ['id' => 'snap-1']));
 
         $this->assertNull($response->json('deep_link_url_changer'));
+    }
+
+    public function test_activity_detail_wraps_non_null_deep_link_search_into_url_changer_route(): void
+    {
+        // Pin the wrap contract: when deepLinkSearchFor returns non-null,
+        // the controller emits `cp_route('linkwise.urlchanger').'?search='.
+        // urlencode($term)`. Phase B extraction may move the helper into
+        // a service — the wrap-code in the controller's JSON response
+        // must keep building the same URL shape.
+        //
+        // Note: the `statamic.cp.linkwise.urlchanger` alias is registered
+        // in this class's defineRoutes() override (the test-routes file
+        // only side-loads unprefixed names; production's CP-prefix layer
+        // doesn't boot in Orchestra Testbench).
+        $spy = $this->bindSnapshotSpy();
+        $spy->shouldReceive('get')->andReturn($this->baseSnapshot([
+            'kind' => 'urlchanger',
+            'summary' => ['search' => '/old-blog?id=42'],
+        ]));
+        $spy->shouldReceive('compareToCurrent')->andReturn([]);
+
+        $response = $this->getJson(route('linkwise.activity.detail', ['id' => 'snap-1']));
+
+        $deepLink = $response->json('deep_link_url_changer');
+        $this->assertNotNull($deepLink, 'Non-null helper return must emit a deep-link URL');
+        $this->assertStringContainsString('?search='.urlencode('/old-blog?id=42'), $deepLink,
+            'Search term must be urlencoded and appended as ?search=');
     }
 
     public function test_mark_reverted_returns_404_when_snapshot_id_unknown(): void
