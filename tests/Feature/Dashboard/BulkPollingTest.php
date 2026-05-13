@@ -465,6 +465,49 @@ class BulkPollingTest extends TestCase
         $this->assertSame('My Article', $payload['entry_title']);
     }
 
+    public function test_detail_unlink_async_clears_stale_terminal_status_before_dispatch(): void
+    {
+        // Asymmetric-cleanup pin (advisor pre-merge gate flag, Phase A.2).
+        // detailUnlinkAsync explicitly Cache::forget('linkwise:detailunlink:
+        // status') + 'linkwise:detailunlink:cancel' BEFORE writing the new
+        // status (DashboardController:1190-1191). bulkUnlink does NOT do this
+        // — only forgets the cancel key (line 1008), leaving any stale
+        // terminal status visible until the new starting-status write
+        // completes.
+        //
+        // The asymmetry is intentional: detail-unlink is dispatched from a
+        // modal that immediately starts polling, so a millisecond of stale
+        // 'done'/'cancelled' would fire a wrong completion toast. bulkUnlink
+        // dispatches from a full-page flow where the user navigates anyway.
+        //
+        // Pin so Phase-B refactor (likely vereinheitlicht via shared helper)
+        // doesn't silently DRY this away. Documented as known asymmetry in
+        // architectural_health.md Klasse 1.aa.
+        Cache::put('linkwise:detailunlink:status', [
+            'phase' => 'done',
+            'message' => 'stale terminal from a previous run',
+        ], 600);
+        Cache::put('linkwise:detailunlink:cancel', true, 60);
+
+        $this->postJson(route('linkwise.detail-unlink.async'), [
+            'replacements' => [[
+                'entry_id' => 'e1',
+                'matched_url' => 'https://example.com',
+                'occurrence_index' => 0,
+            ]],
+        ])->assertStatus(200);
+
+        // Status was REPLACED (not just-merged) — stale 'done' message gone.
+        $status = Cache::get('linkwise:detailunlink:status');
+        $this->assertSame('starting', $status['phase']);
+        $this->assertArrayNotHasKey('message', $status,
+            'Stale message from previous run must NOT bleed through');
+        // Cancel flag from a previous run was also forgotten — new run isn't
+        // pre-cancelled the moment it starts.
+        $this->assertNull(Cache::get('linkwise:detailunlink:cancel'),
+            'Stale cancel-flag must be cleared so the new dispatch isn\'t pre-cancelled');
+    }
+
     public function test_detail_unlink_async_carries_reverts_lineage_pointer(): void
     {
         // Activity-Log Revert flow passes `reverts` so the new snapshot
