@@ -289,6 +289,97 @@ class ActivityDetailTest extends TestCase
         $this->assertSame('Other User', $skip['modified_by']);
     }
 
+    public function test_activity_detail_preserves_bulk_skipped_records_through_enrichment(): void
+    {
+        // bulk_skipped is a PARALLEL enrichment loop to revert_skipped
+        // (DashboardController:659-676 vs 635-652) — separate bug-line:
+        // commit ccd4423 (Bug 9 "bulk endpoints skip conflicts per-record")
+        // + 543202c ("per-entry skips during bulk runs"). Drift between
+        // the two loops during Phase-B extraction would be silent. Pin
+        // each loop independently.
+        $spy = $this->bindSnapshotSpy();
+        $spy->shouldReceive('get')->andReturn($this->baseSnapshot([
+            'bulk_skipped' => [
+                [
+                    'entry_id' => 'entry-stuck',
+                    'entry_title' => 'Article with anchor conflict',
+                    'reason' => 'anchor_not_found',
+                    'modified_at' => '2026-04-01 11:30:00',
+                ],
+            ],
+        ]));
+        $spy->shouldReceive('compareToCurrent')->andReturn([]);
+
+        $response = $this->getJson(route('linkwise.activity.detail', ['id' => 'snap-1']));
+
+        $skip = $response->json('snapshot.bulk_skipped.0');
+        $this->assertSame('entry-stuck', $skip['entry_id']);
+        $this->assertSame('Article with anchor conflict', $skip['entry_title']);
+        $this->assertSame('anchor_not_found', $skip['reason']);
+    }
+
+    public function test_activity_detail_does_not_corrupt_top_level_snapshot_items_during_enrichment(): void
+    {
+        // Top-level snap.items is enriched in a SEPARATE loop (lines 595-627)
+        // from the per-entry items loop (lines 550-578). The drawer's
+        // `operationSummary` reads snap.items directly. Pin: enrichment
+        // adds *_title/*_edit_url fields when resolvable, leaves originals
+        // intact when Entry::find misses, never mutates the existing keys
+        // and never crashes on the statamic://entry::UUID pattern.
+        //
+        // Note: kind=inboundinsert keeps deepLinkSearchFor on the null path
+        // — cp_route would otherwise fire and the test-env routing quirk
+        // (unprefixed `linkwise.*` vs production's `statamic.cp.linkwise.*`)
+        // would throw. The kind-switch itself is pinned in the
+        // ActivityDeepLinkSearchTest unit suite.
+        $spy = $this->bindSnapshotSpy();
+        $spy->shouldReceive('get')->andReturn($this->baseSnapshot([
+            'kind' => 'inboundinsert',
+            'items' => [
+                [
+                    'entry_id' => 'entry-a',
+                    'anchor' => 'click here',
+                    'url' => 'statamic://entry::aaa-bbb-ccc',
+                    'new_url' => 'https://example.com/external',
+                ],
+            ],
+        ]));
+        $spy->shouldReceive('compareToCurrent')->andReturn([]);
+
+        $response = $this->getJson(route('linkwise.activity.detail', ['id' => 'snap-1']));
+
+        $response->assertStatus(200);
+        $topItem = $response->json('snapshot.items.0');
+        $this->assertSame('entry-a', $topItem['entry_id']);
+        $this->assertSame('click here', $topItem['anchor']);
+        $this->assertSame('statamic://entry::aaa-bbb-ccc', $topItem['url']);
+        $this->assertSame('https://example.com/external', $topItem['new_url']);
+        // Enrichment fields are absent when Entry::find misses (synthetic
+        // UUIDs aren't in the Stache). The fields would appear under
+        // `url_title` / `url_edit_url` etc. if resolution succeeded —
+        // pinning their conditional appearance proves the loop scans the
+        // configured field list ['url', 'matched_url', 'new_url',
+        // 'target_entry_id'] without crashing.
+        $this->assertArrayNotHasKey('url_title', $topItem);
+    }
+
+    public function test_activity_detail_deep_link_is_null_for_kinds_without_search_term(): void
+    {
+        // inboundinsert + outboundinsert + multi-rule applyrule explicitly
+        // return null from deepLinkSearchFor — no single URL across items.
+        // Pin: drawer's "Find these in URL Changer" button stays hidden.
+        $spy = $this->bindSnapshotSpy();
+        $spy->shouldReceive('get')->andReturn($this->baseSnapshot([
+            'kind' => 'inboundinsert',
+            'items' => [['entry_id' => 'e-1', 'url' => 'https://example.com']],
+        ]));
+        $spy->shouldReceive('compareToCurrent')->andReturn([]);
+
+        $response = $this->getJson(route('linkwise.activity.detail', ['id' => 'snap-1']));
+
+        $this->assertNull($response->json('deep_link_url_changer'));
+    }
+
     public function test_mark_reverted_returns_404_when_snapshot_id_unknown(): void
     {
         $spy = $this->bindSnapshotSpy();
