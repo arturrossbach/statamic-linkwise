@@ -1095,20 +1095,6 @@ class BardLinkInserter
     }
 
     /**
-     * Check if a node is already linked to the exact same href.
-     */
-    protected static function isLinkedToHref(array $node, string $href): bool
-    {
-        foreach ($node['marks'] ?? [] as $mark) {
-            if (($mark['type'] ?? '') === 'link' && ($mark['attrs']['href'] ?? '') === $href) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * Remove all link marks from a marks array (to prevent duplicates).
      */
     protected static function stripLinkMarks(array $marks): array
