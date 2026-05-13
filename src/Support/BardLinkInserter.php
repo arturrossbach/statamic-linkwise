@@ -4,6 +4,7 @@ namespace Arturrossbach\Linkwise\Support;
 
 use Arturrossbach\Linkwise\Support\Bard\AnchorPositionFinder;
 use Arturrossbach\Linkwise\Support\Markdown\MarkdownLinkInserter;
+use Arturrossbach\Linkwise\Support\Replicator\ReplicatorLinkRouter;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Arturrossbach\Linkwise\Support\UrlHelper;
 use Statamic\Entries\Entry;
@@ -266,10 +267,10 @@ class BardLinkInserter
                     $touched = true;
                 }
             } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
-                $before = static::countLinksToInReplicator($value, $href);
-                $modified = static::processAllInReplicator($value, $anchorText, $href, $caseSensitive);
+                $before = ReplicatorLinkRouter::countLinksToInReplicator($value, $href);
+                $modified = ReplicatorLinkRouter::processAllInReplicator($value, $anchorText, $href, $caseSensitive);
                 if ($modified !== null) {
-                    $after = static::countLinksToInReplicator($modified, $href);
+                    $after = ReplicatorLinkRouter::countLinksToInReplicator($modified, $href);
                     $totalInserted += max(0, $after - $before);
                     $entry->set($handle, $modified);
                     $touched = true;
@@ -293,8 +294,15 @@ class BardLinkInserter
         return $totalInserted;
     }
 
-    /** Count link marks pointing at $href in a Bard subtree. */
-    protected static function countLinksTo(array $bardContent, string $href): int
+    /**
+     * Count link marks pointing at $href in a Bard subtree.
+     *
+     * Public so {@see ReplicatorLinkRouter::countLinksToInReplicator} can
+     * call back into the Bard primitive after navigating through the
+     * Replicator structure — Replicator → Bard is the one-way routing
+     * direction of the REV-OB-03 split.
+     */
+    public static function countLinksTo(array $bardContent, string $href): int
     {
         $count = 0;
         foreach ($bardContent as $node) {
@@ -311,60 +319,6 @@ class BardLinkInserter
         }
 
         return $count;
-    }
-
-    /** Count link marks pointing at $href anywhere in a replicator structure. */
-    protected static function countLinksToInReplicator(array $sets, string $href): int
-    {
-        $count = 0;
-        foreach ($sets as $set) {
-            if (! is_array($set)) {
-                continue;
-            }
-            foreach ($set as $key => $value) {
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
-                    continue;
-                }
-                if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $count += static::countLinksTo($value, $href);
-                } elseif (static::looksLikeReplicatorContent($value)) {
-                    $count += static::countLinksToInReplicator($value, $href);
-                }
-            }
-        }
-
-        return $count;
-    }
-
-    /** Multi-insert across nested Bard fragments inside a replicator. */
-    protected static function processAllInReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false): ?array
-    {
-        $modified = false;
-        foreach ($sets as $i => $set) {
-            if (! is_array($set)) {
-                continue;
-            }
-            foreach ($set as $key => $value) {
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
-                    continue;
-                }
-                if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $result = static::insertAllLinksWithHref($value, $anchorText, $href, $caseSensitive);
-                    if ($result !== null) {
-                        $sets[$i][$key] = $result;
-                        $modified = true;
-                    }
-                } elseif (static::looksLikeReplicatorContent($value)) {
-                    $result = static::processAllInReplicator($value, $anchorText, $href, $caseSensitive);
-                    if ($result !== null) {
-                        $sets[$i][$key] = $result;
-                        $modified = true;
-                    }
-                }
-            }
-        }
-
-        return $modified ? $sets : null;
     }
 
     public static function insertLinkIntoEntryWithHref(string $sourceEntryId, string $anchorText, string $href, bool $caseSensitive = false, bool $save = true, ?string $expectedSentenceContext = null): bool
@@ -572,34 +526,12 @@ class BardLinkInserter
      *
      * @return array{ok:bool, reason?:string, blocking_href?:string}
      */
+    /**
+     * @see ReplicatorLinkRouter::canInsertLinkIntoReplicator — implementation home post-REV-OB-03 Phase B.
+     */
     public static function canInsertLinkIntoReplicator(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
     {
-        $bestFailure = null;
-
-        foreach ($sets as $set) {
-            if (! is_array($set)) {
-                continue;
-            }
-            foreach ($set as $key => $value) {
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
-                    continue;
-                }
-                if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $result = static::canInsertLinkIntoBardContent($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
-                } elseif (static::looksLikeReplicatorContent($value)) {
-                    $result = static::canInsertLinkIntoReplicator($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
-                } else {
-                    continue;
-                }
-
-                if ($result['ok'] ?? false) {
-                    return $result;
-                }
-                $bestFailure = AnchorPositionFinder::pickWorseFailure($bestFailure, $result);
-            }
-        }
-
-        return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
+        return ReplicatorLinkRouter::canInsertLinkIntoReplicator($sets, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
     }
 
     /**
@@ -619,58 +551,11 @@ class BardLinkInserter
     }
 
     /**
-     * Process a Replicator field value with custom href.
-     */
-    /**
-     * @internal Public to allow the insert-parity audit to test replicator
-     * inserts in isolation without disk-mutating an entry. Production code
-     * still goes through insertLinkIntoEntryWithHref.
+     * @see ReplicatorLinkRouter::processReplicatorWithHref — implementation home post-REV-OB-03 Phase B.
      */
     public static function processReplicatorWithHref(array $sets, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
-        foreach ($sets as $i => $set) {
-            if (! is_array($set)) {
-                continue;
-            }
-
-            foreach ($set as $key => $value) {
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) {
-                    continue;
-                }
-
-                // Plain-string fields nested in a replicator (Peak Card
-                // headings, button labels, accordion plaintext bodies, …)
-                // are NOT linked: at the value layer we cannot tell a
-                // markdown-rendered set field apart from a plain `text`
-                // field, and writing `[anchor](url)` into a plaintext
-                // template surfaces as visible literal syntax. Bard
-                // fragments inside the set are still walked below — those
-                // carry structured link marks and are always safe.
-                if (! is_array($value) || empty($value)) {
-                    continue;
-                }
-
-                if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    $modified = static::insertLinkWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
-
-                    if ($modified !== null) {
-                        $sets[$i][$key] = $modified;
-
-                        return $sets;
-                    }
-                } elseif (static::looksLikeReplicatorContent($value)) {
-                    $modified = static::processReplicatorWithHref($value, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
-
-                    if ($modified !== null) {
-                        $sets[$i][$key] = $modified;
-
-                        return $sets;
-                    }
-                }
-            }
-        }
-
-        return null;
+        return ReplicatorLinkRouter::processReplicatorWithHref($sets, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
     }
 
     /**
@@ -884,13 +769,6 @@ class BardLinkInserter
         return array_values(array_filter($marks, fn ($m) => ($m['type'] ?? '') !== 'link'));
     }
 
-    protected static function looksLikeReplicatorContent(array $value): bool
-    {
-        $first = reset($value);
-
-        return is_array($first) && isset($first['type']) && isset($first['id']);
-    }
-
     // ─── Position-based insert (Commit B of Bug 17–20 root refactor) ─────
     //
     // The methods below take an EXPLICIT (paragraph_path, char_start, char_end)
@@ -1016,44 +894,11 @@ class BardLinkInserter
     }
 
     /**
-     * Insert a link at a position inside a Replicator value.
-     *
-     * @param  list<array{set_index: int, key: string}>  $replicatorPath
-     *
-     * @return array{ok: bool, content?: array, reason?: string, blocking_href?: string}
+     * @see ReplicatorLinkRouter::insertLinkAtPositionInReplicator — implementation home post-REV-OB-03 Phase B.
      */
     public static function insertLinkAtPositionInReplicator(array $sets, string $anchorText, string $href, array $replicatorPath, array $paragraphPath, int $charStart, int $charEnd): array
     {
-        if (empty($replicatorPath)) {
-            return ['ok' => false, 'reason' => 'invalid_position'];
-        }
-
-        // Navigate the replicator path to the innermost Bard array, by-reference.
-        $cursor = &$sets;
-        $depth = count($replicatorPath);
-        for ($i = 0; $i < $depth - 1; $i++) {
-            $step = $replicatorPath[$i];
-            if (! isset($cursor[$step['set_index']][$step['key']]) || ! is_array($cursor[$step['set_index']][$step['key']])) {
-                return ['ok' => false, 'reason' => 'invalid_position'];
-            }
-            $cursor = &$cursor[$step['set_index']][$step['key']];
-        }
-        $lastStep = $replicatorPath[$depth - 1];
-        $bardKey = $lastStep['key'];
-        $setIndex = $lastStep['set_index'];
-        if (! isset($cursor[$setIndex][$bardKey]) || ! is_array($cursor[$setIndex][$bardKey])) {
-            return ['ok' => false, 'reason' => 'invalid_position'];
-        }
-
-        $result = static::insertLinkAtPositionInBard(
-            $cursor[$setIndex][$bardKey], $anchorText, $href, $paragraphPath, $charStart, $charEnd,
-        );
-        if (! ($result['ok'] ?? false)) {
-            return $result;
-        }
-        $cursor[$setIndex][$bardKey] = $result['content'];
-
-        return ['ok' => true, 'content' => $sets];
+        return ReplicatorLinkRouter::insertLinkAtPositionInReplicator($sets, $anchorText, $href, $replicatorPath, $paragraphPath, $charStart, $charEnd);
     }
 
     /**
