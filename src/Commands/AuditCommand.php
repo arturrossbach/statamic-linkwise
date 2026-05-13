@@ -1603,35 +1603,113 @@ class AuditCommand extends Command
         foreach ($snapshots as $row) {
             $snap = $store->get($row['id']);
             if (! is_array($snap)) continue;
-            $phase = $snap['completion_stats']['phase'] ?? null;
-            if ($phase !== 'done') continue; // skip in-flight / cancelled
 
-            $succeeded = (int) ($snap['completion_stats']['succeeded'] ?? -1);
-            $items = $snap['items'] ?? [];
-            if (! is_array($items)) $items = [];
-            $itemsCount = count($items);
-            $itemsTrimmed = (bool) ($snap['items_trimmed'] ?? false);
+            $verdict = self::classifyApplyCounterSnapshot($snap);
 
-            // items_trimmed=true means the bulk hit the per-snapshot cap
-            // (e.g. a 5000-write batch). The trim is intentional; comparison
-            // with succeeded would be guaranteed to fail. Skip those — the
-            // forensic trail is incomplete by design, not by bug.
-            if ($itemsTrimmed) {
-                $this->pass('apply-counter-honesty');
-                continue;
-            }
-
-            if ($itemsCount !== $succeeded) {
-                $kind = (string) ($snap['kind'] ?? '?');
-                $startedBy = (string) ($snap['started_by'] ?? '?');
-                $this->recordFailure(
-                    'apply-counter-honesty',
-                    "snapshot {$row['id']} ({$kind} by {$startedBy}): items.length={$itemsCount} but completion_stats.succeeded={$succeeded}",
-                );
-            } else {
-                $this->pass('apply-counter-honesty');
+            switch ($verdict['action']) {
+                case 'pass':
+                    $this->pass('apply-counter-honesty');
+                    break;
+                case 'fail':
+                    $kind = (string) ($snap['kind'] ?? '?');
+                    $startedBy = (string) ($snap['started_by'] ?? '?');
+                    $this->recordFailure(
+                        'apply-counter-honesty',
+                        "snapshot {$row['id']} ({$kind} by {$startedBy}): {$verdict['reason']}",
+                    );
+                    break;
+                case 'skip-legacy':
+                case 'skip-trimmed':
+                case 'skip-in-flight':
+                    // Not auditable for honesty by design; not a failure.
+                    // skip-legacy specifically eliminates the 16 stale
+                    // snapshots from 2026-05-09/10/11 that were keeping
+                    // the audit dashboard red for 4 days. REV-UC-04.
+                    break;
             }
         }
+    }
+
+    /**
+     * Snapshots written before this date used a pre-append-on-success code
+     * path that recorded items without incrementing succeeded (UrlChanger,
+     * DetailUnlink). The honesty check would forever fail on those even
+     * though the data is correct in the new schema. Skip everything older.
+     *
+     * Format: YYYYMMDD — compared against the leading 8 chars of the
+     * snapshot ID, which is itself a date-prefixed identifier.
+     */
+    public const APPLY_COUNTER_HONESTY_CUTOFF_DATE = '20260512';
+
+    /**
+     * Pure classification of a single bulk-snapshot for the apply-counter-
+     * honesty audit. Extracted from auditApplyCounterHonesty so the
+     * decision logic is unit-testable without bootstrapping
+     * BulkSnapshotStore + Laravel cache.
+     *
+     * Returns one of:
+     *   - ['action' => 'pass', 'reason' => '']            items.length matches succeeded
+     *   - ['action' => 'fail', 'reason' => '...']         real mismatch
+     *   - ['action' => 'skip-legacy', 'reason' => '...']  succeeded=-1 sentinel
+     *                                                     OR snapshot-ID dates
+     *                                                     before the
+     *                                                     append-on-success
+     *                                                     migration
+     *   - ['action' => 'skip-trimmed', 'reason' => '...'] items_trimmed=true
+     *   - ['action' => 'skip-in-flight', 'reason' => ''] phase != done
+     *
+     * @param  array<string, mixed>  $snap
+     * @return array{action: string, reason: string}
+     */
+    public static function classifyApplyCounterSnapshot(array $snap): array
+    {
+        $phase = $snap['completion_stats']['phase'] ?? null;
+        if ($phase !== 'done') {
+            return ['action' => 'skip-in-flight', 'reason' => ''];
+        }
+
+        $itemsTrimmed = (bool) ($snap['items_trimmed'] ?? false);
+        if ($itemsTrimmed) {
+            return ['action' => 'skip-trimmed', 'reason' => 'items_trimmed=true; forensic trail incomplete by design'];
+        }
+
+        // Date-prefixed snapshot IDs older than the append-on-success
+        // migration record items without bumping succeeded — historical
+        // artifacts, not bugs in current code. ID format:
+        // YYYYMMDD-HHMMSS-hex. We compare the leading 8 chars.
+        $snapshotId = $snap['id'] ?? '';
+        if (is_string($snapshotId) && strlen($snapshotId) >= 8) {
+            $datePrefix = substr($snapshotId, 0, 8);
+            if (ctype_digit($datePrefix) && $datePrefix < self::APPLY_COUNTER_HONESTY_CUTOFF_DATE) {
+                return [
+                    'action' => 'skip-legacy',
+                    'reason' => "snapshot dated $datePrefix predates append-on-success migration (cutoff "
+                        .self::APPLY_COUNTER_HONESTY_CUTOFF_DATE.')',
+                ];
+            }
+        }
+
+        // succeeded=-1 is a sentinel value written by a pre-refactor code
+        // path. Belt-and-suspenders with the date check above for snapshots
+        // whose IDs don't follow the date-prefix convention.
+        $succeeded = $snap['completion_stats']['succeeded'] ?? null;
+        if ($succeeded === -1) {
+            return ['action' => 'skip-legacy', 'reason' => 'succeeded=-1 (legacy sentinel from pre-refactor snapshots)'];
+        }
+
+        $succeeded = (int) $succeeded;
+        $items = $snap['items'] ?? [];
+        if (! is_array($items)) $items = [];
+        $itemsCount = count($items);
+
+        if ($itemsCount === $succeeded) {
+            return ['action' => 'pass', 'reason' => ''];
+        }
+
+        return [
+            'action' => 'fail',
+            'reason' => "items.length={$itemsCount} but completion_stats.succeeded={$succeeded}",
+        ];
     }
 
     // ──────────────────────────────────────────────────────────────────

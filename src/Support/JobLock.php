@@ -96,22 +96,81 @@ class JobLock
     {
         $startedBy = $active['status']['started_by'] ?? null;
         $startedById = $active['status']['started_by_id'] ?? null;
+        $phase = $active['status']['phase'] ?? null;
+        $current = isset($active['status']['current']) ? (int) $active['status']['current'] : null;
+        $total = isset($active['status']['total']) ? (int) $active['status']['total'] : null;
         $currentUserId = auth()->user()?->id();
-
-        // Skip "started by NAME" when the current user IS the owner — they
-        // already know they triggered it. Frontend would otherwise show
-        // "started by Artur" to Artur which is just noise.
-        $byClause = ($startedBy && $startedById !== $currentUserId)
-            ? ' — started by '.$startedBy
-            : '';
 
         return [
             'error' => 'busy',
             'active_job' => $active['name'],
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
-            'message' => 'Another bulk operation is running ('.$active['label'].$byClause.'). Wait for it to finish before starting a new one.',
+            'message' => self::buildBusyMessage(
+                label: $active['label'],
+                phase: is_string($phase) ? $phase : null,
+                current: $current,
+                total: $total,
+                startedBy: is_string($startedBy) ? $startedBy : null,
+                isOwner: $startedBy !== null && $startedById === $currentUserId,
+            ),
         ];
+    }
+
+    /**
+     * Build the user-facing 409-busy message.
+     *
+     * REV-BJ-03 (2026-05-13): the global JobLock is INTENTIONAL — index
+     * integrity depends on serialized writes to the JSON index file.
+     * Editors who hit a 409 need to know (1) this is normal not stuck,
+     * (2) WHO else is editing, (3) WHAT they're doing and HOW FAR ALONG,
+     * (4) WHAT to do (wait). Previously the message was "Another bulk
+     * operation is running (LABEL). Wait..." — no progress, no phase,
+     * no rationale.
+     *
+     * Pure-static + parameter-passed so it's unit-testable without
+     * bootstrapping auth() / Cache.
+     */
+    public static function buildBusyMessage(
+        string $label,
+        ?string $phase,
+        ?int $current,
+        ?int $total,
+        ?string $startedBy,
+        bool $isOwner,
+    ): string {
+        // "started by NAME" — only when the current user is NOT the owner.
+        // Showing the user their own name as the conflict source is noise.
+        $byClause = ($startedBy !== null && ! $isOwner)
+            ? ' — started by '.$startedBy
+            : '';
+
+        // Progress: only when both current and total are known and total > 0.
+        $progressClause = '';
+        if ($current !== null && $total !== null && $total > 0) {
+            $progressClause = ' ('.$current.'/'.$total.')';
+        }
+
+        // Phase-specific verb + action guidance.
+        switch ($phase) {
+            case 'indexing':
+                // Index-rebuild — cannot cancel, almost done.
+                return "{$label}{$byClause} is finalizing (Index rebuild{$progressClause}). "
+                    .'This step is short — wait for it to finish before starting a new bulk.';
+            case 'starting':
+                // Just dispatched — no progress yet.
+                return "{$label}{$byClause} is starting. "
+                    .'Wait for it to finish before starting a new bulk operation.';
+            case 'cancelled':
+                // Transient — should clear shortly.
+                return "{$label}{$byClause} is cancelling. "
+                    .'Wait a moment for it to release.';
+            case 'running':
+            default:
+                return "{$label}{$byClause} is running{$progressClause}. "
+                    .'Wait for it to finish before starting a new bulk operation '
+                    .'(serialized by design to keep the link index consistent).';
+        }
     }
 
     /**

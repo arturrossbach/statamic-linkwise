@@ -96,20 +96,15 @@ class EntryIndexer
 
         foreach ($records as $id => $record) {
             $old = $oldRecords[$id] ?? null;
-            $enriched[$id] = new EntryRecord(
-                id: $record->id,
-                title: $record->title,
-                url: $record->url,
-                collection: $record->collection,
-                text: $record->text,
-                outboundLinks: $record->outboundLinks,
-                keywords: $record->keywords,
-                inboundSuggestionCount: $old?->inboundSuggestionCount ?? 0,
-                outboundSuggestionCount: $old?->outboundSuggestionCount ?? 0,
-                hasTitleMatch: $old?->hasTitleMatch ?? false,
-                tokens: $record->tokens,
-                outboundLinkOccurrences: $record->outboundLinkOccurrences,
-            );
+            // Carry over the three engine-computed fields from the previous
+            // index; everything else (id/title/url/collection/text/keywords/
+            // outboundLinks/tokens/outboundLinkOccurrences) stays on $record.
+            // REV-DR-03: `with()` collapses the manual 12-field copy.
+            $enriched[$id] = $record->with([
+                'inboundSuggestionCount' => $old?->inboundSuggestionCount ?? 0,
+                'outboundSuggestionCount' => $old?->outboundSuggestionCount ?? 0,
+                'hasTitleMatch' => $old?->hasTitleMatch ?? false,
+            ]);
         }
 
         return $enriched;
@@ -225,20 +220,12 @@ class EntryIndexer
 
         $enriched = [];
         foreach ($records as $id => $record) {
-            $enriched[$id] = new EntryRecord(
-                id: $record->id,
-                title: $record->title,
-                url: $record->url,
-                collection: $record->collection,
-                text: $record->text,
-                outboundLinks: $record->outboundLinks,
-                keywords: $record->keywords,
-                inboundSuggestionCount: $inboundCounts[$id] ?? 0,
-                outboundSuggestionCount: $outboundCounts[$id] ?? 0,
-                hasTitleMatch: $hasTitleMatch[$id] ?? false,
-                tokens: $record->tokens,
-                outboundLinkOccurrences: $record->outboundLinkOccurrences,
-            );
+            // REV-DR-03: was 13-line `new EntryRecord(...)` field-by-field copy.
+            $enriched[$id] = $record->with([
+                'inboundSuggestionCount' => $inboundCounts[$id] ?? 0,
+                'outboundSuggestionCount' => $outboundCounts[$id] ?? 0,
+                'hasTitleMatch' => $hasTitleMatch[$id] ?? false,
+            ]);
         }
 
         return $enriched;
@@ -280,20 +267,11 @@ class EntryIndexer
 
             // Update the index record so counts persist on reload
             if ($record->inboundSuggestionCount !== $inboundCount || $record->outboundSuggestionCount !== $outboundCount) {
-                $records[$entryId] = new EntryRecord(
-                    id: $record->id,
-                    title: $record->title,
-                    url: $record->url,
-                    collection: $record->collection,
-                    text: $record->text,
-                    outboundLinks: $record->outboundLinks,
-                    keywords: $record->keywords,
-                    inboundSuggestionCount: $inboundCount,
-                    outboundSuggestionCount: $outboundCount,
-                    hasTitleMatch: $record->hasTitleMatch,
-                    outboundLinkOccurrences: $record->outboundLinkOccurrences,
-                    tokens: $record->tokens,
-                );
+                // REV-DR-03: was 13-line `new EntryRecord(...)` field-by-field copy.
+                $records[$entryId] = $record->with([
+                    'inboundSuggestionCount' => $inboundCount,
+                    'outboundSuggestionCount' => $outboundCount,
+                ]);
                 $changed = true;
             }
         }
@@ -333,20 +311,11 @@ class EntryIndexer
         // upstream, let downstream stages override only what they own.
         $enriched = [];
         foreach ($records as $id => $record) {
-            $enriched[$id] = new EntryRecord(
-                id: $record->id,
-                title: $record->title,
-                url: $record->url,
-                collection: $record->collection,
-                text: $record->text,
-                outboundLinks: $record->outboundLinks,
-                keywords: $allKeywords[$id] ?? [],
-                inboundSuggestionCount: $record->inboundSuggestionCount,
-                outboundSuggestionCount: $record->outboundSuggestionCount,
-                hasTitleMatch: $record->hasTitleMatch,
-                outboundLinkOccurrences: $record->outboundLinkOccurrences,
-                tokens: $record->tokens,
-            );
+            // REV-DR-03: was 13-line `new EntryRecord(...)` — only keywords
+            // change here, every other field flows through unchanged.
+            $enriched[$id] = $record->with([
+                'keywords' => $allKeywords[$id] ?? [],
+            ]);
         }
 
         return $enriched;
