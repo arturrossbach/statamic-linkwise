@@ -2,6 +2,7 @@
 
 namespace Arturrossbach\Linkwise\Support;
 
+use Arturrossbach\Linkwise\Support\Bard\AnchorPositionFinder;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Arturrossbach\Linkwise\Support\UrlHelper;
 use Statamic\Entries\Entry;
@@ -168,7 +169,7 @@ class BardLinkInserter
                 if ($pos === false) {
                     break;
                 }
-                if (static::isAtWordBoundary($text, $pos, $anchorLen)) {
+                if (AnchorPositionFinder::isAtWordBoundary($text, $pos, $anchorLen)) {
                     $matches[] = $pos;
                 }
                 $offset = $pos + $anchorLen;
@@ -500,7 +501,7 @@ class BardLinkInserter
                 return ['ok' => true];
             }
 
-            $bestFailure = static::pickWorseFailure($bestFailure, $result);
+            $bestFailure = AnchorPositionFinder::pickWorseFailure($bestFailure, $result);
         }
 
         return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
@@ -521,7 +522,7 @@ class BardLinkInserter
             if ($result['ok'] ?? false) {
                 return $result;
             }
-            $bestFailure = static::pickWorseFailure($bestFailure, $result);
+            $bestFailure = AnchorPositionFinder::pickWorseFailure($bestFailure, $result);
         }
 
         return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
@@ -548,7 +549,7 @@ class BardLinkInserter
         }
 
         // First: this node's direct children (= the actual wrap target).
-        $direct = static::findValidMatchPosition($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+        $direct = AnchorPositionFinder::find($node['content'], $anchorText, $href, $caseSensitive, $expectedSentenceContext);
         if ($direct['ok'] ?? false) {
             return $direct;
         }
@@ -560,7 +561,7 @@ class BardLinkInserter
             if ($nested['ok'] ?? false) {
                 return $nested;
             }
-            $bestFailure = static::pickWorseFailure($bestFailure, $nested);
+            $bestFailure = AnchorPositionFinder::pickWorseFailure($bestFailure, $nested);
         }
 
         return $bestFailure;
@@ -594,55 +595,13 @@ class BardLinkInserter
                 if ($result['ok'] ?? false) {
                     return $result;
                 }
-                $bestFailure = static::pickWorseFailure($bestFailure, $result);
+                $bestFailure = AnchorPositionFinder::pickWorseFailure($bestFailure, $result);
             }
         }
 
         return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
     }
 
-    /**
-     * Severity comparator for dry-run failure reasons.
-     *
-     * Severity (high → low):
-     *   crosses_existing_link > already_linked_to_target > context_mismatch > anchor_not_found
-     *
-     * Rationale: a "crosses_existing_link" against a DIFFERENT target is
-     * the most actionable surface (toast names the blocking link).
-     * "already_linked_to_target" is a no-op vs an error semantically;
-     * we still surface it so the user sees they're not getting a fresh
-     * wrap, but it loses to a crosses-link finding elsewhere in the
-     * entry. "context_mismatch" beats "anchor_not_found" because it's
-     * more specific (anchor exists somewhere, just not in the captured
-     * sentence's range).
-     *
-     * @param  array{ok:bool, reason?:string, blocking_href?:string}|null  $current
-     * @param  array{ok:bool, reason?:string, blocking_href?:string}  $candidate
-     * @return array{ok:bool, reason?:string, blocking_href?:string}
-     */
-    protected static function pickWorseFailure(?array $current, array $candidate): array
-    {
-        if ($current === null) {
-            return $candidate;
-        }
-        $rank = [
-            'anchor_not_found' => 0,
-            'context_mismatch' => 1,
-            'already_linked_to_target' => 2,
-            'crosses_existing_link' => 3,
-        ];
-        $rankCurrent = $rank[$current['reason'] ?? ''] ?? 0;
-        $rankCandidate = $rank[$candidate['reason'] ?? ''] ?? 0;
-
-        return $rankCandidate > $rankCurrent ? $candidate : $current;
-    }
-
-    /**
-     * Insert a link into Markdown content by replacing the first occurrence of anchor text.
-     */
-    /**
-     * Check if a match position is at word boundaries (not inside another word).
-     */
     /**
      * Build a "flat" version of markdown where [anchor](url) collapses to
      * just `anchor`, plus a position map raw_offset → flat_offset (or null
@@ -693,54 +652,6 @@ class BardLinkInserter
     }
 
     /**
-     * When the captured sentence_context spans paragraph boundaries (legacy
-     * extractContext output joined paragraphs with "\n"), the needle cannot
-     * be found inside any single paragraph and the wrap silently fails. This
-     * helper isolates the line that actually contains the anchor so the
-     * fingerprint guard can still operate. New post-fix contexts are always
-     * single-line and pass through unchanged.
-     */
-    protected static function narrowContextToAnchorLine(string $needle, string $anchorText): string
-    {
-        if ($needle === '' || ! str_contains($needle, "\n")) {
-            return $needle;
-        }
-
-        $lines = explode("\n", $needle);
-        foreach ($lines as $line) {
-            if (mb_stripos($line, $anchorText) !== false) {
-                return trim($line);
-            }
-        }
-
-        // Anchor isn't in any line: leave needle unchanged so the caller's
-        // mb_stripos returns false → return null → no silent wrap.
-        return $needle;
-    }
-
-    protected static function isAtWordBoundary(string $text, int $pos, int $length): bool
-    {
-        // Check character before the match
-        if ($pos > 0) {
-            $before = mb_substr($text, $pos - 1, 1);
-            if (preg_match('/[\p{L}\p{N}]/u', $before)) {
-                return false;
-            }
-        }
-
-        // Check character after the match
-        $afterPos = $pos + $length;
-        if ($afterPos < mb_strlen($text)) {
-            $after = mb_substr($text, $afterPos, 1);
-            if (preg_match('/[\p{L}\p{N}]/u', $after)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
      * Multi-insert variant: wrap EVERY valid unlinked occurrence with a link.
      * Returns null if no insertion was made.
      */
@@ -774,7 +685,7 @@ class BardLinkInserter
                 break;
             }
 
-            if (! static::isAtWordBoundary($markdown, $pos, $anchorLen)) {
+            if (! AnchorPositionFinder::isAtWordBoundary($markdown, $pos, $anchorLen)) {
                 $offset = $pos + $anchorLen;
 
                 continue;
@@ -851,7 +762,7 @@ class BardLinkInserter
             // succeed at all; otherwise mb_stripos returns false and the
             // wrap silently skips. New contexts (post-fix extractContext)
             // are already single-line and pass through unchanged.
-            $needle = static::narrowContextToAnchorLine($needle, $anchorText);
+            $needle = AnchorPositionFinder::narrowContextToAnchorLine($needle, $anchorText);
             if ($needle !== '' && mb_strlen($needle) >= mb_strlen($anchorText)) {
                 $rangeStart = mb_stripos($markdown, $needle);
                 if ($rangeStart !== false) {
@@ -900,7 +811,7 @@ class BardLinkInserter
                 return null;
             }
 
-            if (static::isAtWordBoundary($markdown, $pos, $anchorLen)) {
+            if (AnchorPositionFinder::isAtWordBoundary($markdown, $pos, $anchorLen)) {
                 $inSkipRange = false;
                 foreach ($skipRanges as [$start, $end]) {
                     if ($pos >= $start && $pos < $end) {
@@ -1023,13 +934,13 @@ class BardLinkInserter
      * Handles text spanning across multiple text nodes and node splitting.
      *
      * Validation logic (word-boundary, context-fingerprint, already-linked
-     * guard) lives in {@see findValidMatchPosition} — both the mutating
+     * guard) lives in {@see AnchorPositionFinder::find()} — both the mutating
      * walker (this method) and the dry-run preview ({@see canInsertLinkIntoEntry})
      * share it so they can't drift out of sync silently.
      */
     protected static function findAndLinkInChildren(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?array
     {
-        $match = static::findValidMatchPosition($children, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
+        $match = AnchorPositionFinder::find($children, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
 
         if (! ($match['ok'] ?? false)) {
             return null;
@@ -1061,243 +972,6 @@ class BardLinkInserter
 
         // Anchor spans multiple text nodes — add link mark to each
         return static::linkAcrossNodes($children, $startNodeIndex, $startOffset, $endNodeIndex, $endOffset, $linkMark);
-    }
-
-    /**
-     * Locate the first valid occurrence of $anchorText in a children array,
-     * applying the same gates the mutating walker enforces:
-     *   - word-boundary on both ends
-     *   - no cross of a non-text-node marker
-     *   - inside the supplied sentence-context range (if provided)
-     *   - no existing link mark on the affected text nodes
-     *
-     * Returns either an `ok=true` struct carrying the node positions the
-     * caller needs to wrap, or an `ok=false` struct carrying a typed
-     * failure reason so RelinkService can produce an
-     * actionable error message instead of a generic "would fail".
-     *
-     * Reason taxonomy:
-     *   - `anchor_not_found` — anchor text not present, OR only present
-     *     inside a larger word (no word-boundary match).
-     *   - `context_mismatch` — the captured sentence_context isn't in the
-     *     current content, OR all word-boundary occurrences land outside
-     *     the sentence's [start, end] range (= scan is stale).
-     *   - `crosses_existing_link` — anchor would wrap text that already
-     *     carries a link mark to a DIFFERENT href. `blocking_href` names
-     *     the existing target so the toast can identify it.
-     *   - `already_linked_to_target` — same, but the existing link points
-     *     at the very target we'd insert. `blocking_href` is set, equals
-     *     the requested href.
-     *
-     * Severity: crosses_existing_link > already_linked_to_target >
-     * context_mismatch > anchor_not_found — the loop returns the most
-     * actionable reason seen across all occurrences.
-     *
-     * @return array{ok:bool, pos?:int, startNodeIndex?:int, endNodeIndex?:int, startOffset?:int, endOffset?:int, reason?:string, blocking_href?:string}
-     */
-    protected static function findValidMatchPosition(array $children, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): array
-    {
-        // Build concatenated text from child text nodes
-        $fullText = '';
-        $nodeMap = []; // Maps char offset to [childIndex, offsetInNode]
-
-        foreach ($children as $i => $child) {
-            if (($child['type'] ?? '') !== 'text' || ! isset($child['text'])) {
-                // Non-text node acts as a boundary
-                $fullText .= "\0";
-                $nodeMap[] = ['index' => -1, 'offset' => 0];
-
-                continue;
-            }
-
-            $text = $child['text'];
-            $len = mb_strlen($text);
-
-            for ($c = 0; $c < $len; $c++) {
-                $nodeMap[] = ['index' => $i, 'offset' => $c];
-            }
-
-            $fullText .= $text;
-        }
-
-        // Context-fingerprint guard: when the caller knows the sentence the
-        // anchor was scanned in, the wrap MUST land at a position whose
-        // surrounding text contains that sentence. If the entry now has a
-        // SECOND occurrence of the anchor (e.g. user prepended one), the
-        // naive "wrap first match" would silently mutate the wrong one.
-        // We compute the allowed character range here once; positions
-        // outside it are rejected below.
-        $contextRange = null;
-        if ($expectedSentenceContext !== null && $expectedSentenceContext !== '') {
-            // The scan often returns sentence-context with a leading "…" /
-            // ellipsis (ContextExtractor truncation). Strip those before
-            // matching so a literal substring search lines up.
-            $needle = trim(str_replace(['…', '...'], '', $expectedSentenceContext));
-            // Defense-in-depth: stale records may carry multi-line context
-            // (cross-paragraph blob from a buggy older extractContext build).
-            // Narrow to the line containing the anchor so the search can
-            // succeed inside a single paragraph's $fullText.
-            $needle = static::narrowContextToAnchorLine($needle, $anchorText);
-            if ($needle !== '' && mb_strlen($needle) >= mb_strlen($anchorText)) {
-                $rangeStart = mb_stripos($fullText, $needle);
-                if ($rangeStart === false) {
-                    // Sentence not present in current content → scan is
-                    // stale, refuse to wrap anything. Caller surfaces this
-                    // as "context changed, refresh and retry".
-                    return ['ok' => false, 'reason' => 'context_mismatch'];
-                }
-                $contextRange = ['start' => $rangeStart, 'end' => $rangeStart + mb_strlen($needle)];
-            }
-        }
-
-        $anchorLen = mb_strlen($anchorText);
-        $offset = 0;
-        $bestFailure = null; // most-informative failure reason seen so far
-
-        // Walk all occurrences — accept the first that sits at a word boundary,
-        // doesn't cross a non-text-node marker, sits inside the context range,
-        // and isn't already linked. "database" must skip "databases" and hit
-        // the standalone "Database" next.
-        while (true) {
-            $found = $caseSensitive
-                ? mb_strpos($fullText, $anchorText, $offset)
-                : mb_stripos($fullText, $anchorText, $offset);
-
-            if ($found === false) {
-                // Exhausted occurrences — surface best failure tracked, or
-                // anchor_not_found if every occurrence was rejected at the
-                // word-boundary / null-byte gate (= no real anchor present).
-                return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
-            }
-
-            // Word-boundary + cross-null-byte gates mean "not a real
-            // occurrence" → don't update bestFailure, just advance.
-            if (! static::isAtWordBoundary($fullText, $found, $anchorLen)) {
-                $offset = $found + $anchorLen;
-
-                continue;
-            }
-            if (str_contains(mb_substr($fullText, $found, $anchorLen), "\0")) {
-                $offset = $found + $anchorLen;
-
-                continue;
-            }
-
-            // Context-range check — outside-range matches are a different
-            // occurrence than the one the scan captured. Record as
-            // context_mismatch and keep walking; a later occurrence might
-            // pass or yield a stronger reason (crosses_existing_link).
-            if ($contextRange !== null
-                && ($found < $contextRange['start'] || $found + $anchorLen > $contextRange['end'])) {
-                if ($bestFailure === null) {
-                    $bestFailure = ['ok' => false, 'reason' => 'context_mismatch'];
-                }
-                $offset = $found + $anchorLen;
-
-                continue;
-            }
-
-            $startMap = $nodeMap[$found];
-            $endMap = $nodeMap[$found + $anchorLen - 1];
-
-            if ($startMap['index'] === -1 || $endMap['index'] === -1) {
-                // Anchor straddles a non-text boundary marker — same severity
-                // as no occurrence.
-                $offset = $found + $anchorLen;
-
-                continue;
-            }
-
-            // Already-linked guard — REFUSE to mutate any text node that
-            // already carries a link mark, regardless of href.
-            //
-            // History:
-            // - Bug B (2026-05-08): partial-overlap split would tear an
-            //   existing link apart ("Brauner-Zucker-Speck-Kekse"
-            //   → "Brauner"=NEW + "-Zucker-Speck-Kekse"=OLD). Fixed for
-            //   partial overlaps only — fully-covered matches still ran
-            //   a "URL upgrade" that silently replaced the href.
-            // - 2026-05-10: insert-parity audit + user feedback — silent
-            //   URL-upgrade is the same bug-class as silent wrong-link
-            //   unlink. USP is "kein silent overwrite". ANY existing link
-            //   mark on an affected node = skip. Power-user wanting to
-            //   remap an anchor uses URL-Changer to remove the old links
-            //   first, then re-runs the rule. Two explicit steps, no
-            //   surprise data loss.
-            //
-            // Bug 17 (2026-05-11): we now also capture the blocking href
-            // so RelinkService can name it in an actionable
-            // error message ("Anchor überlappt mit Link auf 'X'") rather
-            // than a generic "would fail".
-            //
-            // When the anchor span crosses MULTIPLE link marks (the Bug 17
-            // Repro A shape — anchor expanded to cover an existing
-            // different-target link adjacent to a same-target one), prefer
-            // the DIFFERENT-target href as the blocker: that's the actual
-            // conflict the user has to resolve, not the same-target no-op
-            // they'd implicitly clear via Step 1 anyway.
-            $startIdx = $startMap['index'];
-            $endIdx = $endMap['index'];
-            $blockingHref = null;
-            $sameTargetHref = null;
-
-            for ($idx = $startIdx; $idx <= $endIdx; $idx++) {
-                $child = $children[$idx];
-                foreach ($child['marks'] ?? [] as $m) {
-                    if (($m['type'] ?? '') !== 'link') {
-                        continue;
-                    }
-                    $thisHref = $m['attrs']['href'] ?? '';
-
-                    if ($thisHref !== $href) {
-                        // Different target — strongest blocker, stop early.
-                        $blockingHref = $thisHref;
-                        break 2;
-                    }
-                    if ($sameTargetHref === null) {
-                        $sameTargetHref = $thisHref;
-                    }
-                }
-            }
-
-            // Fall back to same-target only when no different-target mark
-            // was seen across the span.
-            if ($blockingHref === null) {
-                $blockingHref = $sameTargetHref;
-            }
-
-            if ($blockingHref !== null) {
-                $reason = ($blockingHref === $href) ? 'already_linked_to_target' : 'crosses_existing_link';
-                $candidate = ['ok' => false, 'reason' => $reason, 'blocking_href' => $blockingHref];
-
-                // crosses_existing_link is the strongest reason — it
-                // overrides every weaker one. already_linked_to_target
-                // beats context_mismatch / anchor_not_found, but loses to
-                // a different-href crosses-link in case both occurrences
-                // exist (we want to name the conflict, not the no-op).
-                $currentReason = $bestFailure['reason'] ?? null;
-                if ($currentReason === null
-                    || $currentReason === 'anchor_not_found'
-                    || $currentReason === 'context_mismatch'
-                    || ($currentReason === 'already_linked_to_target' && $reason === 'crosses_existing_link')) {
-                    $bestFailure = $candidate;
-                }
-
-                $offset = $found + $anchorLen;
-
-                continue;
-            }
-
-            // All checks passed — valid match
-            return [
-                'ok' => true,
-                'pos' => $found,
-                'startNodeIndex' => $startIdx,
-                'endNodeIndex' => $endIdx,
-                'startOffset' => $startMap['offset'],
-                'endOffset' => $endMap['offset'] + 1,
-            ];
-        }
     }
 
     /**
