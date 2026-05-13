@@ -114,6 +114,39 @@ class BulkUnlinkCommand extends Command
             ], 600);
 
             try {
+                $entryId = $r['entry_id'] ?? '';
+
+                // Pre-flight hash check (REV-BJ-04, 2026-05-13). CLAUDE.md
+                // "Bulk-Write-Path Standard" Punkt 2: verifyHashes per-record
+                // in the loop, never fail-fast 409 in the controller. Without
+                // this, BulkUnlink was the only mutating bulk command that
+                // ignored its own entry_hashes payload — the late check
+                // inside UrlReplacer::applySelected uses the disk-hash
+                // captured at SafeEntrySaver::load() time, NOT the editor's
+                // frontend-hash from when they clicked. Concurrent edits
+                // therefore landed silently: the unlink applied against a
+                // newer state than the editor saw, sometimes hitting a link
+                // they never selected. feedback_no_silent_overwrite.md.
+                //
+                // Pattern mirrors LinkInsertCommand Z. 199–224 exactly so
+                // the skip-with-reason 'modified' lands in the same drawer
+                // table across all 5 bulk commands.
+                if ($entryId !== ''
+                    && isset($entryHashes[$entryId])
+                    && $entryHashes[$entryId] !== ''
+                ) {
+                    $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes(
+                        [$entryId => $entryHashes[$entryId]],
+                    );
+                    if (! empty($conflicts)) {
+                        $msg = 'Entry was modified — please reload';
+                        $errors[$msg] = ($errors[$msg] ?? 0) + 1;
+                        $skipped++;
+                        $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                        continue;
+                    }
+                }
+
                 $result = $this->replacer->applySelected($r['search'] ?? $r['matched_url'], [$r]);
                 $this->brokenReport->removeLink($r['entry_id'], $r['matched_url']);
 
