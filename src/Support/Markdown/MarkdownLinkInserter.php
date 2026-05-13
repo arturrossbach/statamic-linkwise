@@ -19,6 +19,36 @@ use Arturrossbach\Linkwise\Support\Bard\AnchorPositionFinder;
 class MarkdownLinkInserter
 {
     /**
+     * Compute the char-offset ranges of existing `[anchor](url)` Markdown
+     * links in the input string. Used by every insert variant to skip
+     * occurrences inside an existing link (prevents nested
+     * `[[anchor](url)](url)` corruption AND lets the position-API name
+     * the blocking href on overlap).
+     *
+     * Regex uses the strict bracket-class `[^\[\]]*` (CommonMark-aligned —
+     * Bard's markdown serializer never produces nested `[…[…]…]` shapes
+     * inside the anchor segment). prose-peak-test corpus + content/ + test
+     * fixtures grep'd 2026-05-13 — zero hits for nested brackets, so the
+     * stricter regex is the defensible default.
+     *
+     * @return array<int, array{0:int, 1:int}>  list of [charStart, charEnd] pairs (mb-char offsets, end-exclusive)
+     */
+    private static function existingLinkSkipRanges(string $markdown): array
+    {
+        $ranges = [];
+        if (preg_match_all('/\[[^\[\]]*\]\([^)]+\)/u', $markdown, $matches, PREG_OFFSET_CAPTURE)) {
+            foreach ($matches[0] as [$text, $byteOffset]) {
+                // PCRE returns byte offsets — convert to mb char offsets so
+                // they line up with mb_strlen/mb_substr arithmetic.
+                $charOffset = mb_strlen(substr($markdown, 0, $byteOffset));
+                $ranges[] = [$charOffset, $charOffset + mb_strlen($text)];
+            }
+        }
+
+        return $ranges;
+    }
+
+    /**
      * Single-insert: wrap the FIRST valid unlinked occurrence of $anchorText
      * with `[anchor](href)`. Returns null if no valid occurrence exists.
      *
@@ -41,21 +71,14 @@ class MarkdownLinkInserter
             return null; // Already linked
         }
 
-        // Build skip-ranges for existing markdown links — both the anchor
-        // text and the URL portion are off-limits. Without this, a candidate
-        // matching a substring of an existing link's anchor (e.g. "development"
-        // landing inside `[Modern web development](url)`) or its URL portion
-        // (e.g. "statamic" landing inside `statamic://entry::uuid`) would
-        // silently corrupt the content with nested `[[anchor]](url)](url)`
-        // syntax. Same pattern as insertAllLinksIntoMarkdown — single-insert
-        // path was missing it, the multi-insert path always had it.
-        $skipRanges = [];
-        if (preg_match_all('/\[[^\]]*\]\([^\)]+\)/u', $markdown, $matches, PREG_OFFSET_CAPTURE)) {
-            foreach ($matches[0] as [$text, $byteOffset]) {
-                $charOffset = mb_strlen(substr($markdown, 0, $byteOffset));
-                $skipRanges[] = [$charOffset, $charOffset + mb_strlen($text)];
-            }
-        }
+        // Skip-ranges for existing markdown links — both the anchor text
+        // and the URL portion are off-limits. Without this, a candidate
+        // matching a substring of an existing link's anchor (e.g.
+        // "development" landing inside `[Modern web development](url)`)
+        // or its URL portion (e.g. "statamic" landing inside
+        // `statamic://entry::uuid`) would silently corrupt the content
+        // with nested `[[anchor]](url)](url)` syntax.
+        $skipRanges = static::existingLinkSkipRanges($markdown);
 
         // Context-fingerprint guard — Markdown twin of the Bard-side
         // guard in {@see AnchorPositionFinder::find}. When the scan
@@ -164,16 +187,8 @@ class MarkdownLinkInserter
             return null;
         }
 
-        // Build a set of byte-ranges that are inside existing markdown links —
-        // we skip occurrences inside those so we don't double-wrap.
-        $skipRanges = [];
-        if (preg_match_all('/\[[^\]]*\]\([^\)]+\)/u', $markdown, $matches, PREG_OFFSET_CAPTURE)) {
-            foreach ($matches[0] as [$text, $byteOffset]) {
-                // Convert byte offset to mb char offset for consistency with mb_substr
-                $charOffset = mb_strlen(substr($markdown, 0, $byteOffset));
-                $skipRanges[] = [$charOffset, $charOffset + mb_strlen($text)];
-            }
-        }
+        // Skip-ranges of existing markdown links — we don't double-wrap.
+        $skipRanges = static::existingLinkSkipRanges($markdown);
 
         $offset = 0;
         $inserts = [];
@@ -238,8 +253,11 @@ class MarkdownLinkInserter
         }
 
         // Already-linked guard: if the [charStart..charEnd] range sits inside
-        // an existing `[anchor](url)`, refuse. Lightweight check: scan all
-        // `[…](…)` matches with PREG_OFFSET_CAPTURE; if any overlaps, refuse.
+        // an existing `[anchor](url)`, refuse. Inline regex (not shared via
+        // existingLinkSkipRanges) because this caller needs the matched
+        // link text to extract the blocking_href for the error response —
+        // range-only would lose the URL portion the toast wants to name.
+        // Both regex variants use the strict `[^\[\]]*` bracket class.
         if (preg_match_all('#\[[^\[\]]*\]\([^)]+\)#', $markdown, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
             foreach ($matches as $m) {
                 $mStart = $m[0][1];
