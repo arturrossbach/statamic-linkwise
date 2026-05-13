@@ -122,6 +122,31 @@ class ReplicatorLinkRouterPinTest extends TestCase
         $this->assertSame('invalid_position', $result['reason']);
     }
 
+    /**
+     * Pins the non-array guard at {@see ReplicatorLinkRouter::insertLinkAtPositionInReplicator}
+     * line ~227: when the bardKey exists but holds a scalar (e.g. a misnamed text
+     * field where a Bard array was expected), the router must refuse, not crash.
+     * Same failure-mode as missing-key but a distinct guard branch — pinned so a
+     * future tightening doesn't silently swallow the scalar shape.
+     */
+    public function test_position_invalid_when_bard_key_is_not_array(): void
+    {
+        $sets = [['type' => 't', 'id' => 's', 'body' => 'oops-this-is-a-string-not-bard']];
+
+        $result = BardLinkInserter::insertLinkAtPositionInReplicator(
+            $sets,
+            'foo',
+            self::HREF,
+            replicatorPath: [['set_index' => 0, 'key' => 'body']],
+            paragraphPath: [0],
+            charStart: 0,
+            charEnd: 3,
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('invalid_position', $result['reason']);
+    }
+
     public function test_position_nested_replicator_two_levels(): void
     {
         $sets = [
