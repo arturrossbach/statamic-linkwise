@@ -31,6 +31,27 @@ class AutoLinkApplier
     /**
      * Apply a single rule to all matching entries.
      *
+     * ─── Spec: Occurrence-Auswahl pro Beitrag ────────────────────────────
+     *
+     * Eine Rule verlinkt **die erste Fundstelle** des Keywords pro Beitrag.
+     * Wenn das Keyword "Setup" mehrfach im Beitrag vorkommt, wird die erste
+     * gültige Stelle (Wortgrenze + nicht bereits verlinkt + nicht in Skip-
+     * Range) gewrapped — keine Heuristik die "die passendste Stelle" wählt.
+     *
+     * Begründung (REV-AL-03, 2026-05-13): AutoLink-Rules sind vom User
+     * explizit definiert ("verlinke dieses Keyword mit dieser URL"). Der
+     * User hat schon entschieden was er will; das Tool muss nicht raten,
+     * welche Fundstelle die "passendste" ist. Plus: "first match wins" ist
+     * ein verständliches mentales Modell — alternative Heuristiken würden
+     * ihre eigene Bug-Klasse erzeugen ("warum DIESE Stelle?").
+     *
+     * Wenn die erste Fundstelle nicht passt, kann der User manuell über
+     * den Re-Link-Flow verschieben.
+     *
+     * Diese Semantik ist Teil der V1-Spec, nicht Implementations-Zufall.
+     *
+     * ─────────────────────────────────────────────────────────────────────
+     *
      * @param  ?callable  $shouldCancel  Optional cancel hook. Polled at each
      *                                   record boundary; when it returns true
      *                                   the loop exits early and `$result['cancelled']`
