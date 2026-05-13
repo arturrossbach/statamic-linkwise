@@ -1253,6 +1253,126 @@ class BardLinkInserterTest extends TestCase
         $this->assertSame('statamic://entry::other-target', $result['blocking_href']);
     }
 
+    public function test_dry_run_crosses_existing_link_beats_context_mismatch(): void
+    {
+        // Failure-ranking edge — paragraph A has an outside-context
+        // occurrence (yields context_mismatch from findValidMatchPosition),
+        // paragraph B carries the expected sentence and an occurrence
+        // crossing a DIFFERENT-target link (yields crosses_existing_link).
+        // pickWorseFailure must surface crosses_existing_link so the toast
+        // names the real blocker, not the stale context.
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Earlier reference to Redis Setup Guide elsewhere.'],
+                ],
+            ],
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'The captured sentence about '],
+                    [
+                        'type' => 'text',
+                        'text' => 'Redis Setup Guide',
+                        'marks' => [[
+                            'type' => 'link',
+                            'attrs' => ['href' => 'statamic://entry::other-target'],
+                        ]],
+                    ],
+                    ['type' => 'text', 'text' => ' here.'],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+            false,
+            'The captured sentence about Redis Setup Guide here.',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('crosses_existing_link', $result['reason']);
+        $this->assertSame('statamic://entry::other-target', $result['blocking_href']);
+    }
+
+    public function test_dry_run_already_linked_to_target_beats_context_mismatch(): void
+    {
+        // Failure-ranking edge — paragraph A is outside-context
+        // (context_mismatch), paragraph B carries the captured sentence
+        // but the occurrence is already wrapped in a link to OUR target
+        // (already_linked_to_target). already_linked_to_target outranks
+        // context_mismatch so the toast says "already linked" rather than
+        // "context changed".
+        $bard = [
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'Earlier reference to Redis Setup Guide elsewhere.'],
+                ],
+            ],
+            [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => 'The captured sentence about '],
+                    [
+                        'type' => 'text',
+                        'text' => 'Redis Setup Guide',
+                        'marks' => [[
+                            'type' => 'link',
+                            'attrs' => ['href' => 'statamic://entry::target-123'],
+                        ]],
+                    ],
+                    ['type' => 'text', 'text' => ' here.'],
+                ],
+            ],
+        ];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+            false,
+            'The captured sentence about Redis Setup Guide here.',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('already_linked_to_target', $result['reason']);
+        $this->assertSame('statamic://entry::target-123', $result['blocking_href']);
+    }
+
+    public function test_dry_run_context_mismatch_beats_anchor_not_found_inside_paragraph(): void
+    {
+        // Failure-ranking edge — single paragraph contains the needle
+        // sentence ("Tail-of-paragraph marker.") plus ONE anchor
+        // occurrence sitting OUTSIDE the needle's character range.
+        // Inside findValidMatchPosition: walker tracks bestFailure =
+        // context_mismatch from the outside-range occurrence, then
+        // exhausts occurrences. The "return bestFailure ?? anchor_not_found"
+        // fallback must honor bestFailure — otherwise the user gets a
+        // generic "anchor not found" toast for a sentence that IS still
+        // there, just shifted.
+        $bard = [[
+            'type' => 'paragraph',
+            'content' => [
+                ['type' => 'text', 'text' => 'Intro mentions Redis Setup Guide here. Tail-of-paragraph marker.'],
+            ],
+        ]];
+
+        $result = BardLinkInserter::canInsertLinkIntoBardContent(
+            $bard,
+            'Redis Setup Guide',
+            'statamic://entry::target-123',
+            false,
+            'Tail-of-paragraph marker.',
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('context_mismatch', $result['reason']);
+    }
+
     public function test_dry_run_ok_when_anchor_appears_outside_existing_link(): void
     {
         // Same anchor twice — once already linked, once free standing.
