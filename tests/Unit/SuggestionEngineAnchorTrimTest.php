@@ -41,7 +41,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
 
     public function test_strips_leading_stopword(): void
     {
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('the documentation');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('the documentation');
 
         $this->assertSame('documentation', $trimmed);
         $this->assertSame(4, $shift, '"the " consumed before "documentation"');
@@ -49,7 +49,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
 
     public function test_strips_trailing_stopword(): void
     {
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('documentation the');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('documentation the');
 
         $this->assertSame('documentation', $trimmed);
         $this->assertSame(0, $shift, 'Trailing trim does not shift the start');
@@ -63,7 +63,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
         // recognises "die" as a stopword (no punctuation to strip on it
         // here) and the kept boundary word then has its trailing comma
         // stripped on cleanup. Real-world result: "Dokumentation".
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('Dokumentation, die');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('Dokumentation, die');
 
         $this->assertSame('Dokumentation', $trimmed);
         $this->assertSame(0, $shift);
@@ -75,7 +75,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
         // helper, parts[0] = "die," would not match the stopword list
         // (which contains the bare "die") so the trim wouldn't happen
         // at all. With stripPunct, "die," → "die" → stopword → drop.
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('die, Dokumentation');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('die, Dokumentation');
 
         $this->assertSame('Dokumentation', $trimmed);
         $this->assertSame(5, $shift, '"die, " (5 chars) consumed before "Dokumentation"');
@@ -86,7 +86,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
         // Single-word anchor with attached comma — no stopwords to drop,
         // but the boundary cleanup must still strip the trailing comma.
         // Trailing punctuation never belongs inside the <a> anchor.
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('documentation,');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('documentation,');
 
         $this->assertSame('documentation', $trimmed);
         $this->assertSame(0, $shift);
@@ -96,7 +96,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
     {
         // Bracketed phrase: "(documentation)" — the parens belong outside
         // the anchor span. leadingShift must reflect the consumed "(".
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('(documentation)');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('(documentation)');
 
         $this->assertSame('documentation', $trimmed);
         $this->assertSame(1, $shift, 'Leading "(" consumed; offset advances by 1');
@@ -110,7 +110,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
         // content word IS a legit anchor (German title "Anleitung, die
         // wirklich hilft" should yield anchor "Anleitung", not the
         // untrimmed two-word "die Anleitung").
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('die Anleitung');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('die Anleitung');
 
         $this->assertSame('Anleitung', $trimmed);
         $this->assertSame(4, $shift);
@@ -120,7 +120,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
     {
         // Walk-forward consumes everything → first > last → bail to
         // original. A trim that empties the anchor is meaningless.
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('die der das');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('die der das');
 
         $this->assertSame('die der das', $trimmed);
         $this->assertSame(0, $shift);
@@ -131,7 +131,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
         // Only boundary stopwords are dropped. "Anleitung der API" stays
         // intact — the "der" carries grammatical meaning between two
         // content words and removing it would break the phrase.
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('Anleitung der API');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('Anleitung der API');
 
         $this->assertSame('Anleitung der API', $trimmed);
         $this->assertSame(0, $shift);
@@ -145,7 +145,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
         // of everything before parts[startIdx]. Caller adds this to the
         // raw match offset so the trimmed anchor still points at the
         // right span.
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('the, documentation');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('the, documentation');
 
         $this->assertSame('documentation', $trimmed);
         $this->assertSame(5, $shift, '"the, " (4 + 1 space) consumed');
@@ -153,7 +153,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
 
     public function test_handles_empty_input(): void
     {
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('');
 
         $this->assertSame('', $trimmed);
         $this->assertSame(0, $shift);
@@ -163,7 +163,7 @@ class SuggestionEngineAnchorTrimTest extends TestCase
     {
         // Sanity: leading + trailing stopwords AND attached punctuation
         // on both ends — exercises every branch in one shot.
-        [$trimmed, $shift] = $this->engine->trimBoundaryStopwords('the, Dokumentation, die');
+        [$trimmed, $shift] = \Arturrossbach\Linkwise\Support\TextNormalizer::trimBoundaryStopwords('the, Dokumentation, die');
 
         $this->assertSame('Dokumentation', $trimmed);
         $this->assertSame(5, $shift, '"the, " consumed; trailing ", die" stripped + comma cleanup');
