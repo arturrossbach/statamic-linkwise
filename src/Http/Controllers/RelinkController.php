@@ -46,19 +46,22 @@ class RelinkController extends CpController
             'target_entry_id' => ['nullable', 'string', 'max:64'],
             'new_href' => ['nullable', 'string', 'max:2048'],
 
-            // Scan-time sentence around the anchor; context-fingerprint
-            // guard during insert to prevent silent wrong-occurrence wrap.
+            // Scan-time sentence around the anchor; carried into the
+            // activity-log snapshot's Context column. Originally a context-
+            // fingerprint guard during insert; after the position-passing
+            // refactor (Bug 17-20 root fix) the insert no longer needs it
+            // and Step C uses the EXACT position returned by Step A.
+            // Still validated + forwarded so reverts can show the same
+            // context the editor saw at scan-time.
             'sentence_context' => ['nullable', 'string', 'max:1024'],
 
-            // Bug 19 fix: anchor's character offset inside the captured
-            // sentence_context. The context is a ±N-char window that can
-            // span multiple identical occurrences; this offset pins the
-            // valid match to the exact in-window position so a shrink-
-            // re-link cannot wander to an earlier word-boundary match.
-            // Optional — frontend sends null when extractor couldn't
-            // pin the offset, in which case the old window-only filter
-            // applies (Bug 19 unfixable in that case, but rare).
-            'anchor_offset_in_context' => ['nullable', 'integer', 'min:0'],
+            // Note (REV-RL-01, 2026-05-13): the frontend still may send
+            // `anchor_offset_in_context` because DashboardController emits
+            // it for highlight-rendering. We accept-and-ignore via Laravel's
+            // implicit "extra fields are not forwarded by $validated"
+            // semantics — no validation rule, no service-call parameter.
+            // Removed in REV-RL-01 sweep along with the matching 9
+            // BardLinkInserter signatures + RelinkService param.
 
             // When this re-link is itself the revert of a recorded
             // relink snapshot, carries that snapshot's id. RelinkService
@@ -88,9 +91,6 @@ class RelinkController extends CpController
             sentenceContext: $validated['sentence_context'] ?? null,
             expectedHash: $validated['content_hash'] ?? null,
             reverts: $validated['reverts'] ?? null,
-            anchorOffsetInContext: isset($validated['anchor_offset_in_context'])
-                ? (int) $validated['anchor_offset_in_context']
-                : null,
         );
 
         return response()->json($result);

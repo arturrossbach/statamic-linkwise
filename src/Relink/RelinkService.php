@@ -81,7 +81,6 @@ class RelinkService
         ?string $sentenceContext = null,
         ?string $expectedHash = null,
         ?string $reverts = null,
-        ?int $anchorOffsetInContext = null,
     ): array {
         // Idempotency — user clicked re-link without changing anchor or
         // target. Cheap to handle here; prevents activity-log spam.
