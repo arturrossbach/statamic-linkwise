@@ -29,6 +29,14 @@ class AnchorPositionFinder
      * for the anchor, or a structured failure with the most-informative
      * reason among rejected occurrences.
      *
+     * Parity-twin: {@see \Arturrossbach\Linkwise\Support\Markdown\MarkdownLinkInserter::insertLinkIntoMarkdown}
+     * implements the equivalent walk for raw-markdown strings (same
+     * needle-search loop, same word-boundary gate, same context-range
+     * guard, but a different already-linked test that scans `[…](…)`
+     * syntax instead of structured `link` marks). Any new gate or
+     * failure-reason added here MUST land on both sides — Klasse-1
+     * pattern in [[architectural_health]].
+     *
      * @param  array  $children  Bard children (text + non-text nodes mixed)
      * @param  string  $anchorText  Plain anchor string to find
      * @param  string  $href  Target URL — only used to distinguish

@@ -52,6 +52,11 @@ class MarkdownLinkInserter
      * Single-insert: wrap the FIRST valid unlinked occurrence of $anchorText
      * with `[anchor](href)`. Returns null if no valid occurrence exists.
      *
+     * Parity-twin: {@see \Arturrossbach\Linkwise\Support\Bard\AnchorPositionFinder::find}
+     * implements the equivalent walk for Bard ProseMirror children. Any
+     * new gate or failure-reason added there MUST land here too —
+     * Klasse-1 pattern in [[architectural_health]].
+     *
      * Honors the same gates the Bard walker does:
      *   - word-boundary on both ends (\p{L}\p{N})
      *   - skip occurrences sitting inside an existing `[…](…)` link (both
