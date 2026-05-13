@@ -14,22 +14,27 @@ class UrlReplacer
     protected string $mode = 'smart';
 
     /**
-     * REV-UC-01 Phase A (2026-05-13): find-only walker family lives in
-     * UrlMatcher. UrlReplacer keeps its public find* methods as backward-
-     * compatible pass-throughs so existing callers (audits, tests) don't
-     * break. The mode is mirrored on set so both objects stay in sync.
+     * REV-UC-01 Phase A+B (2026-05-13): find-only walker family lives in
+     * UrlMatcher; ReplaceNth+Position family lives in UrlReplacerWithPosition.
+     * UrlReplacer keeps its public methods as backward-compatible pass-
+     * throughs so existing callers (audits, tests, RelinkService) don't
+     * break. setMode synchronizes all three so href-matching stays in sync.
      */
     protected UrlMatcher $matcher;
+
+    protected UrlReplacerWithPosition $positionReplacer;
 
     public function __construct()
     {
         $this->matcher = new UrlMatcher;
+        $this->positionReplacer = new UrlReplacerWithPosition($this->matcher);
     }
 
     public function setMode(string $mode): self
     {
         $this->mode = $mode;
         $this->matcher->setMode($mode);
+        $this->positionReplacer->setMode($mode);
 
         return $this;
     }
@@ -190,158 +195,14 @@ class UrlReplacer
      */
     public function replaceNthInBard(array $bardContent, string $search, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
     {
-        $counter = [
-            'i' => 0,
-            'replaced' => false,
-            'actually_replaced' => false,
-            // Position-capture (Bug 17–20 root refactor 2026-05-12):
-            'captured_path' => null,     // path from $bardContent root TO the matched text-node
-            'captured_text_node' => null, // the text-node's text content (for char-offset re-resolution)
-        ];
-
-        foreach ($bardContent as $i => $node) {
-            $bardContent[$i] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor, [$i]);
-            if ($counter['actually_replaced']) {
-                $position = $this->resolvePositionFromCapture($bardContent, $counter);
-
-                return [$bardContent, true, $position];
-            }
-        }
-
-        return [$bardContent, false, null];
+        // REV-UC-01 Phase B: delegated to UrlReplacerWithPosition.
+        return $this->positionReplacer->replaceNthInBard($bardContent, $search, $oldUrl, $newUrl, $targetIndex, $expectedAnchor);
     }
 
-    /**
-     * Convert the captured node-path into a (paragraph_path, char_start, char_end)
-     * triple. The text-node sits at the end of $capturedPath; its parent is the
-     * paragraph-like block (one level up). char_start is computed by summing the
-     * mb_strlen of the parent's preceding text-children.
-     *
-     * @return array{paragraph_path: list<int>, char_start: int, char_end: int}|null
-     */
-    protected function resolvePositionFromCapture(array $bardContent, array $counter): ?array
-    {
-        $path = $counter['captured_path'] ?? null;
-        $text = $counter['captured_text_node'] ?? null;
-        if ($path === null || $text === null || count($path) < 2) {
-            return null;
-        }
-
-        // The matched text-node is at $path; its parent (paragraph) is $path
-        // minus the last index. Walk to the parent to compute char offset.
-        $childIndex = array_pop($path);
-        $parent = $bardContent;
-        $node = ['content' => $bardContent]; // synthetic root for path traversal
-        $segments = [];
-        foreach ($path as $segment) {
-            $segments[] = $segment;
-        }
-        // Walk into bardContent following $segments
-        $cursor = ['content' => $bardContent];
-        foreach ($segments as $seg) {
-            if (! isset($cursor['content'][$seg])) {
-                return null;
-            }
-            $cursor = $cursor['content'][$seg];
-        }
-        // $cursor is now the parent paragraph-like block
-        $children = $cursor['content'] ?? [];
-        $charStart = 0;
-        for ($i = 0; $i < $childIndex; $i++) {
-            $sibling = $children[$i] ?? null;
-            if (is_array($sibling) && isset($sibling['text'])) {
-                $charStart += mb_strlen($sibling['text']);
-            }
-        }
-
-        return [
-            'paragraph_path' => $segments,
-            'char_start' => $charStart,
-            'char_end' => $charStart + mb_strlen($text),
-        ];
-    }
-
-    protected function replaceNthInNode(array $node, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter, ?string $expectedAnchor = null, array $pathSoFar = []): array
-    {
-        if ($counter['replaced']) {
-            return $node;
-        }
-
-        if (isset($node['marks'])) {
-            foreach ($node['marks'] as $j => $mark) {
-                if (($mark['type'] ?? '') === 'link') {
-                    $href = $mark['attrs']['href'] ?? '';
-                    if ($this->hrefMatches($href, $search)) {
-                        if ($counter['i'] === $targetIndex) {
-                            // Anchor-fingerprint guard. If the scan recorded
-                            // the link as wrapping "Original" but this node
-                            // wraps "Different", the user is looking at stale
-                            // data — refuse to mutate. occurrence_index alone
-                            // can't distinguish between "the same link, moved"
-                            // and "a different link with the same URL", which
-                            // is the same thing once the user only has ONE
-                            // link to that URL: the index matches no matter
-                            // where they moved it.
-                            $nodeText = (string) ($node['text'] ?? '');
-                            // Trim both sides — the guard's intent is
-                            // semantic ("scan recorded X, node wraps Y
-                            // ≠ X"). The indexer normalises anchors
-                            // (trim, whitespace-collapse), Bard text-
-                            // nodes preserve raw bytes. Byte-exact
-                            // false-positives on legit re-links where
-                            // the marked text-node carries trailing
-                            // whitespace (Bug 17 follow-up 2026-05-12).
-                            $anchorMismatch = $expectedAnchor !== null
-                                && trim($nodeText) !== trim($expectedAnchor);
-                            if (! $anchorMismatch && $href === $oldUrl) {
-                                if ($newUrl === UrlHelper::UNLINK) {
-                                    array_splice($node['marks'], $j, 1);
-                                    if (empty($node['marks'])) {
-                                        unset($node['marks']);
-                                    }
-                                } else {
-                                    $node['marks'][$j]['attrs']['href'] = $newUrl;
-                                }
-                                $counter['actually_replaced'] = true;
-                                // Capture position for Step C — the text-node
-                                // we just modified IS the anchor location. Path
-                                // is the breadcrumb from $bardContent root down
-                                // to THIS text-node. Text is the node's raw
-                                // text (anchor) for char-offset reconstruction.
-                                $counter['captured_path'] = $pathSoFar;
-                                $counter['captured_text_node'] = $nodeText;
-                            }
-                            $counter['replaced'] = true;
-
-                            return $node;
-                        }
-                        $counter['i']++;
-                    }
-                }
-            }
-        }
-
-        if (isset($node['content'])) {
-            foreach ($node['content'] as $i => $child) {
-                $node['content'][$i] = $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor, array_merge($pathSoFar, [$i]));
-                if ($counter['replaced']) {
-                    return $node;
-                }
-            }
-        }
-
-        return \Arturrossbach\Linkwise\Support\BardWalker::mapSetChildren(
-            $node,
-            // BardWalker::mapSetChildren is for set-node `attrs.values` — a
-            // nested ProseMirror subtree. We don't extend $pathSoFar here
-            // because the position-shape only supports `content` traversal;
-            // matches inside set-attrs.values get a path that's not navigable
-            // from $bardContent root, and Step C falls back to find-first
-            // for that rare case. Documenting the limitation here.
-            fn (array $child) => $this->replaceNthInNode($child, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor),
-            fn (): bool => $counter['replaced'],
-        );
-    }
+    // REV-UC-01 Phase B (2026-05-13): resolvePositionFromCapture +
+    // replaceNthInNode are now private helpers inside
+    // UrlReplacerWithPosition. The public replaceNthIn* methods on
+    // UrlReplacer pass-through to that class.
 
     /**
      * Replace the Nth link matching oldUrl in Replicator content.
@@ -357,89 +218,7 @@ class UrlReplacer
      */
     public function replaceNthInReplicator(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
     {
-        $counter = [
-            'i' => 0,
-            'replaced' => false,
-            'actually_replaced' => false,
-            'captured_path' => null,
-            'captured_text_node' => null,
-            'captured_replicator_path' => null, // breadcrumb of (set_index, key) when match is inside a replicator-nested Bard
-            'captured_bard_root' => null,        // the Bard array containing the match — needed to resolve char offset
-        ];
-        $sets = $this->replaceNthInReplicatorRecursive($sets, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor, []);
-
-        if (! $counter['actually_replaced']) {
-            return [$sets, false, null];
-        }
-
-        // Resolve position from the captured Bard root + path. The Bard root
-        // we captured is the POST-modification snapshot; same shape as the
-        // direct-Bard case so we can reuse resolvePositionFromCapture.
-        $bardPosition = $this->resolvePositionFromCapture($counter['captured_bard_root'], $counter);
-        if ($bardPosition === null) {
-            return [$sets, true, null];
-        }
-
-        return [
-            $sets,
-            true,
-            [
-                'replicator_path' => $counter['captured_replicator_path'] ?? [],
-                'paragraph_path' => $bardPosition['paragraph_path'],
-                'char_start' => $bardPosition['char_start'],
-                'char_end' => $bardPosition['char_end'],
-            ],
-        ];
-    }
-
-
-    protected function replaceNthInReplicatorRecursive(array $sets, string $search, string $oldUrl, string $newUrl, int $targetIndex, array &$counter, ?string $expectedAnchor = null, array $replicatorPathSoFar = []): array
-    {
-        foreach ($sets as $i => $set) {
-            if (! is_array($set) || $counter['replaced']) {
-                continue;
-            }
-
-            foreach ($set as $key => $value) {
-                if ($counter['replaced']) {
-                    break;
-                }
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true) || ! is_array($value) || empty($value)) {
-                    continue;
-                }
-
-                if (ProseMirrorTypes::looksLikeBardContent($value)) {
-                    foreach ($value as $ni => $node) {
-                        $value[$ni] = $this->replaceNthInNode($node, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor, [$ni]);
-                        if ($counter['replaced']) {
-                            $sets[$i][$key] = $value;
-                            // Capture the replicator-path + the Bard root that
-                            // holds the modified node — Step C will need both
-                            // to navigate from $sets root to the text-node.
-                            if ($counter['actually_replaced'] && $counter['captured_replicator_path'] === null) {
-                                $counter['captured_replicator_path'] = array_merge(
-                                    $replicatorPathSoFar,
-                                    [['set_index' => $i, 'key' => $key]],
-                                );
-                                $counter['captured_bard_root'] = $value;
-                            }
-
-                            return $sets;
-                        }
-                    }
-                } elseif (isset($value[0]['type'], $value[0]['id'])) {
-                    $sets[$i][$key] = $this->replaceNthInReplicatorRecursive(
-                        $value, $search, $oldUrl, $newUrl, $targetIndex, $counter, $expectedAnchor,
-                        array_merge($replicatorPathSoFar, [['set_index' => $i, 'key' => $key]]),
-                    );
-                    if ($counter['replaced']) {
-                        return $sets;
-                    }
-                }
-            }
-        }
-
-        return $sets;
+        return $this->positionReplacer->replaceNthInReplicator($sets, $search, $oldUrl, $newUrl, $targetIndex, $expectedAnchor);
     }
 
     /**
@@ -457,47 +236,7 @@ class UrlReplacer
      */
     public function replaceNthInMarkdown(string $markdown, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
     {
-        $escaped = preg_quote($oldUrl, '#');
-
-        // preg_match_all w/ PREG_OFFSET_CAPTURE gives us byte offsets per
-        // match — preg_replace_callback alone can't. We need the offset to
-        // populate $position for Step C.
-        if (! preg_match_all('#\[([^\[\]]*)\]\('.$escaped.'\)#', $markdown, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
-            return [$markdown, false, null];
-        }
-        if (! isset($matches[$targetIndex])) {
-            return [$markdown, false, null];
-        }
-
-        $target = $matches[$targetIndex];
-        $fullMatch = $target[0][0];
-        $matchOffset = $target[0][1];
-        $anchor = $target[1][0];
-
-        // Anchor-fingerprint guard. See replaceNthInBard rationale.
-        // Trim both sides — the indexer normalises, raw markdown bytes
-        // don't. Byte-exact false-positives on legit re-links with
-        // trailing-whitespace anchors. Mirror of the trim-compare in
-        // replaceNthInNode.
-        if ($expectedAnchor !== null && trim($anchor) !== trim($expectedAnchor)) {
-            return [$markdown, false, null];
-        }
-
-        $replacement = $newUrl === UrlHelper::UNLINK ? $anchor : '['.$anchor.']('.$newUrl.')';
-        $result = substr_replace($markdown, $replacement, $matchOffset, strlen($fullMatch));
-
-        // Position points at where the anchor text sits in the RESULT string.
-        // - UNLINK: the bare anchor replaces `[anchor](url)`, so its start is
-        //   $matchOffset; length = strlen($anchor).
-        // - URL-change: the anchor still sits inside the new `[anchor](newurl)`
-        //   at the SAME relative offset (1 char in after the `[`).
-        $anchorStartInResult = $newUrl === UrlHelper::UNLINK ? $matchOffset : $matchOffset + 1;
-        $position = [
-            'char_start' => $anchorStartInResult,
-            'char_end' => $anchorStartInResult + strlen($anchor),
-        ];
-
-        return [$result, true, $position];
+        return $this->positionReplacer->replaceNthInMarkdown($markdown, $oldUrl, $newUrl, $targetIndex, $expectedAnchor);
     }
 
     /**
