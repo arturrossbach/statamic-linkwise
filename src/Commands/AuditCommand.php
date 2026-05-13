@@ -828,6 +828,27 @@ class AuditCommand extends Command
                         continue;
                     }
 
+                    // REV-DR-02 audit refinement (2026-05-13): partial-overlap
+                    // hits are conservative warnings, not bugs. The walker
+                    // (findValidMatchPosition) explicitly skips positions
+                    // inside existing link marks and finds a safe occurrence
+                    // when one exists. If canInsertLinkIntoEntry returns
+                    // ok=true, the suggestion WILL insert at a safe position
+                    // — the overlap-in-other-link is irrelevant noise.
+                    //
+                    // Promote to FAILURE only when NO safe position exists
+                    // (= every occurrence sits inside an existing link).
+                    // Those are the structurally problematic cases the audit
+                    // was built to catch. The merely-conservative overlaps
+                    // pass silently.
+                    $canInsert = \Arturrossbach\Linkwise\Support\BardLinkInserter::canInsertLinkIntoEntry(
+                        $record->id, $anchor, $newHref,
+                    );
+                    if ($canInsert['ok'] ?? false) {
+                        $this->pass('suggestions-safety');
+                        continue;
+                    }
+
                     $first = $hits[0];
                     $detail = sprintf(
                         "'%s' on '%s' → entry %s: anchor sits inside existing link '%s' (linked text \"%s\") — partial overlap, would split",

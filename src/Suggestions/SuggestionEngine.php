@@ -5,6 +5,7 @@ namespace Arturrossbach\Linkwise\Suggestions;
 use Arturrossbach\Linkwise\Indexer\EntryRecord;
 use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
 use Arturrossbach\Linkwise\NLP\Stemmer;
+use Arturrossbach\Linkwise\Support\TextNormalizer;
 use Arturrossbach\Linkwise\NLP\Stopwords;
 use Arturrossbach\Linkwise\Support\ContextExtractor;
 
@@ -61,7 +62,7 @@ class SuggestionEngine
      */
     public function suggest(string $text, array $index, ?string $excludeEntryId = null, array $alreadyLinkedIds = [], ?int $maxSuggestions = null): array
     {
-        $normalizedText = $this->normalize($text);
+        $normalizedText = TextNormalizer::normalize($text);
         $suggestions = [];
 
         // If excludeEntryId is in the index, also exclude its outbound links
@@ -93,7 +94,7 @@ class SuggestionEngine
         $targetCollections = $this->getConfigArray('linkwise.target_collections');
 
         // Tokenize source text once for keyword matching (stemmed + original mapping)
-        [$sourceTokens, $stemToOriginal] = $this->tokenizeWithMapping($text);
+        [$sourceTokens, $stemToOriginal] = TextNormalizer::tokenizeWithMapping($text);
 
         // Load all custom target keywords once (not per entry)
         $allCustomKeywords = [];
@@ -248,7 +249,7 @@ class SuggestionEngine
     protected function findMatches(string $normalizedText, string $originalText, EntryRecord $record): array
     {
         $phrases = $this->generateMatchPhrases($record->title);
-        $titleWordCount = count(explode(' ', $this->normalize($record->title)));
+        $titleWordCount = count(explode(' ', TextNormalizer::normalize($record->title)));
         $suggestions = [];
 
         foreach ($phrases as $phrase) {
@@ -294,7 +295,7 @@ class SuggestionEngine
                     // Trim leading/trailing stopwords from the matched span
                     // (e.g. "als gleichberechtigter Bestandteil" → "gleich-
                     // berechtigter Bestandteil"). Middle stopwords stay.
-                    [$trimmed, $shift] = $this->trimBoundaryStopwords($anchorText);
+                    [$trimmed, $shift] = TextNormalizer::trimBoundaryStopwords($anchorText);
                     $anchorText = $trimmed;
                     $position = $this->byteToCharOffset($originalText, $m[1]) + $shift;
                     $context = $this->extractContext($originalText, $position, mb_strlen($anchorText));
@@ -493,7 +494,7 @@ class SuggestionEngine
         foreach ($candidates as $candidate) {
             $keyword = $candidate['keyword'];
 
-            if (mb_strlen($keyword) < 2 || $this->isStopword(mb_strtolower($keyword))) {
+            if (mb_strlen($keyword) < 2 || TextNormalizer::isStopword(mb_strtolower($keyword))) {
                 continue;
             }
 
@@ -665,7 +666,7 @@ class SuggestionEngine
         // Strategy 2: Grab the adjacent significant word from the original text
         // Look for "word keyword" or "keyword word" where word is not a stopword
         $escaped = preg_quote($primaryKeyword, '/');
-        $stopwords = $this->getStopwords();
+        $stopwords = TextNormalizer::getStopwords();
 
         // Try "preceding_word keyword" first (more natural as anchor: "coding agents")
         $pattern = '/\b([\p{L}\p{N}-]+)\s+' . $escaped . '\b/iu';
@@ -706,11 +707,11 @@ class SuggestionEngine
     protected function findUnorderedStemMatch(string $originalText, EntryRecord $record, int $titleWordCount): ?Suggestion
     {
         $stemmer = new Stemmer;
-        $normalizedTitle = $this->normalize($record->title);
+        $normalizedTitle = TextNormalizer::normalize($record->title);
         $titleWords = explode(' ', $normalizedTitle);
 
         // Get content words from title (skip stopwords)
-        $titleContentWords = array_filter($titleWords, fn ($w) => $w !== '' && ! $this->isStopword($w));
+        $titleContentWords = array_filter($titleWords, fn ($w) => $w !== '' && ! TextNormalizer::isStopword($w));
         $titleContentWords = array_values($titleContentWords);
 
         if (count($titleContentWords) < 2) {
@@ -928,7 +929,7 @@ class SuggestionEngine
         // Extract content words (non-stopwords) and their stems
         $contentParts = [];
         foreach ($words as $word) {
-            if ($this->isStopword($word)) {
+            if (TextNormalizer::isStopword($word)) {
                 continue;
             }
             $stem = $stemmer->stem($word);
@@ -955,7 +956,7 @@ class SuggestionEngine
      */
     public function generateMatchPhrases(string $title): array
     {
-        $normalized = $this->normalize($title);
+        $normalized = TextNormalizer::normalize($title);
         $words = explode(' ', $normalized);
         $phrases = [];
 
@@ -963,14 +964,14 @@ class SuggestionEngine
         $phrases[] = $normalized;
 
         // Title with leading stopwords stripped
-        $core = $this->stripLeadingStopwords($words);
+        $core = TextNormalizer::stripLeadingStopwords($words);
 
         if ($core !== $normalized && str_word_count($core) >= $this->minPhraseWords) {
             $phrases[] = $core;
         }
 
         // Title with trailing stopwords stripped
-        $coreTail = $this->stripTrailingStopwords($words);
+        $coreTail = TextNormalizer::stripTrailingStopwords($words);
 
         if ($coreTail !== $normalized && $coreTail !== $core && str_word_count($coreTail) >= $this->minPhraseWords) {
             $phrases[] = $coreTail;
@@ -978,7 +979,7 @@ class SuggestionEngine
 
         // Both leading and trailing stripped
         $coreWords = explode(' ', $core);
-        $coreBoth = $this->stripTrailingStopwords($coreWords);
+        $coreBoth = TextNormalizer::stripTrailingStopwords($coreWords);
 
         if ($coreBoth !== $core && $coreBoth !== $coreTail && str_word_count($coreBoth) >= $this->minPhraseWords) {
             $phrases[] = $coreBoth;
@@ -1001,7 +1002,7 @@ class SuggestionEngine
         //       a content word at a boundary.
         $minLen = max(2, $this->minPhraseWords);
         if (count($words) >= max(3, $minLen + 1)) {
-            $significantWords = array_filter($words, fn ($w) => ! $this->isStopword($w));
+            $significantWords = array_filter($words, fn ($w) => ! TextNormalizer::isStopword($w));
 
             if (count($significantWords) >= 2) {
                 for ($len = count($words) - 1; $len >= $minLen; $len--) {
@@ -1013,7 +1014,7 @@ class SuggestionEngine
                         // boundary content words intact across language modes.
                         $allStopwords = true;
                         foreach ($slice as $w) {
-                            if ($w !== '' && ! $this->isStopword($w)) {
+                            if ($w !== '' && ! TextNormalizer::isStopword($w)) {
                                 $allStopwords = false;
                                 break;
                             }
@@ -1033,154 +1034,13 @@ class SuggestionEngine
         return $phrases;
     }
 
-    /**
-     * Normalize text for matching: lowercase, collapse whitespace, strip punctuation.
-     */
-    public function normalize(string $text): string
-    {
-        $text = mb_strtolower($text);
-        // Replace punctuation with spaces (keep hyphens between words)
-        $text = preg_replace('/[^\p{L}\p{N}\s-]/u', ' ', $text);
-        // Collapse whitespace
-        $text = preg_replace('/\s+/', ' ', $text);
-
-        return trim($text);
-    }
-
-    /**
-     * Tokenize text into significant, stemmed words (for keyword matching).
-     */
-    protected function tokenize(string $text): array
-    {
-        [$stemmed] = $this->tokenizeWithMapping($text);
-
-        return $stemmed;
-    }
-
-    /**
-     * Tokenize and stem text, returning both stemmed tokens and a stem→original mapping.
-     *
-     * @return array{0: string[], 1: array<string, string>}  [stemmedTokens, stemToOriginal]
-     */
-    protected function tokenizeWithMapping(string $text): array
-    {
-        $normalized = $this->normalize($text);
-        $words = explode(' ', $normalized);
-
-        $filtered = array_values(array_filter($words, fn ($w) => $w !== '' && ! $this->isStopword($w)));
-
-        $stemmer = new Stemmer;
-        $stemmed = [];
-        $stemToOriginal = [];
-
-        foreach ($filtered as $word) {
-            $stem = $stemmer->stem($word);
-            $stemmed[] = $stem;
-            // Keep first occurrence's original form (most natural for anchor text)
-            if (! isset($stemToOriginal[$stem])) {
-                $stemToOriginal[$stem] = $word;
-            }
-        }
-
-        return [$stemmed, $stemToOriginal];
-    }
-
-    protected function stripLeadingStopwords(array $words): string
-    {
-        while (! empty($words) && $this->isStopword($words[0])) {
-            array_shift($words);
-        }
-
-        return implode(' ', $words);
-    }
-
-    /**
-     * Trim leading + trailing stopwords from a matched anchor span. Middle
-     * stopwords stay — "interne Verlinkung als Bestandteil" is a legitimate
-     * highlight where "als" connects two content words. Only the dangling
-     * boundary stopwords ("als gleichberechtigter Bestandteil" → "gleich-
-     * berechtigter Bestandteil", "interne Verlinkung als" → "interne
-     * Verlinkung") get cleaned up.
-     *
-     * Returns [trimmedAnchor, leadingOffset] — the offset is the byte/char
-     * shift the caller must add to the original match position so the
-     * trimmed anchor still points at the right span. Falls back to the
-     * original if trimming would leave fewer than 2 words.
-     *
-     * @return array{0: string, 1: int}  [trimmedText, leadingShiftChars]
-     */
-    public function trimBoundaryStopwords(string $anchor): array
-    {
-        // Preserve original whitespace/punctuation between words by working
-        // on a regex split that captures separators.
-        $parts = preg_split('/(\s+)/u', $anchor, -1, PREG_SPLIT_DELIM_CAPTURE);
-        if (! is_array($parts) || empty($parts)) {
-            return [$anchor, 0];
-        }
-        // $parts alternates: word, sep, word, sep, ...
-        // Word indexes are even (0,2,4,...).
-        $wordIndexes = [];
-        foreach ($parts as $i => $p) {
-            if ($i % 2 === 0 && $p !== '') $wordIndexes[] = $i;
-        }
-        if (empty($wordIndexes)) {
-            return [$anchor, 0];
-        }
-        // Stopword check ignores attached punctuation: "die," and "die." both
-        // count as the German stopword "die". Otherwise "Dokumentation, die"
-        // would never trim because the trailing word is "die" with no
-        // attached punctuation but real-world matches like "Dokumentation, die"
-        // (split: ["Dokumentation," " " "die"]) need both sides cleaned.
-        $stripPunct = fn (string $w): string => preg_replace('/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u', '', mb_strtolower($w));
-
-        // Walk forward, drop while leading word is a stopword (with attached
-        // punctuation stripped before the check).
-        $first = 0;
-        while ($first < count($wordIndexes)
-            && $this->isStopword($stripPunct($parts[$wordIndexes[$first]]))) {
-            $first++;
-        }
-        // Walk backward, drop while trailing word is a stopword.
-        $last = count($wordIndexes) - 1;
-        while ($last >= $first
-            && $this->isStopword($stripPunct($parts[$wordIndexes[$last]]))) {
-            $last--;
-        }
-        // Empty result (every word was a stopword) → keep original. A single
-        // content word IS allowed to survive the trim — that's still a
-        // legitimate anchor (e.g. "Dokumentation" for the title "Dokumentation,
-        // die wirklich gelesen wird").
-        if ($last < $first) {
-            return [$anchor, 0];
-        }
-        $startIdx = $wordIndexes[$first];
-        $endIdx = $wordIndexes[$last];
-        // Strip leading and trailing non-letter characters from the final
-        // boundary words too — "Dokumentation," → "Dokumentation". Trailing
-        // commas/periods don't belong in a hyperlink anchor.
-        $leadingPunctRe = '/^[^\p{L}\p{N}]+/u';
-        $trailingPunctRe = '/[^\p{L}\p{N}]+$/u';
-        $leadingPunctShift = 0;
-        if (preg_match($leadingPunctRe, $parts[$startIdx], $m)) {
-            $leadingPunctShift = mb_strlen($m[0]);
-            $parts[$startIdx] = mb_substr($parts[$startIdx], $leadingPunctShift);
-        }
-        $parts[$endIdx] = preg_replace($trailingPunctRe, '', $parts[$endIdx]);
-
-        $leadingShift = mb_strlen(implode('', array_slice($parts, 0, $startIdx))) + $leadingPunctShift;
-        $trimmed = implode('', array_slice($parts, $startIdx, $endIdx - $startIdx + 1));
-
-        return [$trimmed, $leadingShift];
-    }
-
-    protected function stripTrailingStopwords(array $words): string
-    {
-        while (! empty($words) && $this->isStopword(end($words))) {
-            array_pop($words);
-        }
-
-        return implode(' ', $words);
-    }
+    // REV-DR-02 Phase A (2026-05-13): 8 normalization/tokenization methods
+    // moved to Arturrossbach\Linkwise\Support\TextNormalizer.
+    // Removed here: normalize, tokenize, tokenizeWithMapping,
+    // stripLeadingStopwords, trimBoundaryStopwords, stripTrailingStopwords,
+    // isStopword, getStopwords. SuggestionEngine retained ~200 lines of
+    // pure orchestration + match-finding; the stateless helpers live in
+    // their own file with their own tests.
 
     /**
      * Extract surrounding context around a match position.
@@ -1303,7 +1163,7 @@ class SuggestionEngine
 
     protected function isStopword(string $word): bool
     {
-        return in_array($word, $this->getStopwords(), true);
+        return in_array($word, TextNormalizer::getStopwords(), true);
     }
 
     protected function getStopwords(): array

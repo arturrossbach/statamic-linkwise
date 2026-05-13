@@ -229,156 +229,52 @@ class InboundEngine
 
     /**
      * Check if a specific anchor text is already inside a link in an entry's content.
+     *
+     * REV-IB-02 (2026-05-13): switched from loose anchor-word-overlap
+     * semantics to strict via BardLinkInserter::canInsertLinkIntoEntry.
+     * The old loose check returned true if ANY word of $anchorText
+     * overlapped with ANY linked text in the entry — which silently
+     * dropped Inbound suggestions like "Redis Setup" whenever "Setup"
+     * happened to be linked anywhere else in the source entry to an
+     * unrelated target. prose-peak-test had 11 such silent skips out
+     * of 65 raw suggestions (~17%).
+     *
+     * Strict semantics: use the production dry-run insert path. If the
+     * dry-run can wrap the anchor, the anchor is NOT yet linked. If it
+     * fails because the span overlaps an existing link mark, the anchor
+     * IS linked. Other failure reasons (anchor not found in text,
+     * context mismatch) mean "not currently linked".
      */
     public function anchorIsLinkedInEntry(string $entryId, string $anchorText): bool
     {
-        $entry = Entry::find($entryId);
+        // Marker href: synthetic entry id that cannot match any real link.
+        // canInsertLinkIntoEntry only consults the marker to distinguish
+        // 'already_linked_to_target' (= linked to THIS href) from
+        // 'crosses_existing_link' (= linked to a DIFFERENT href). With a
+        // synthetic marker, the former is impossible — all real conflicts
+        // surface as the latter.
+        $marker = 'statamic://entry::__link_presence_check__';
 
-        if (! $entry) {
-            return false;
+        $result = \Arturrossbach\Linkwise\Support\BardLinkInserter::canInsertLinkIntoEntry(
+            $entryId,
+            $anchorText,
+            $marker,
+        );
+
+        if ($result['ok'] ?? false) {
+            return false; // dry-run could wrap → anchor is NOT yet linked
         }
 
-        try {
-            $fields = $entry->blueprint()->fields()->all();
-        } catch (\Throwable) {
-            return false;
-        }
+        $reason = $result['reason'] ?? '';
 
-        foreach ($fields as $handle => $field) {
-            $value = $entry->get($handle);
-
-            if ($field->type() === 'bard' && is_array($value) && ! empty($value)) {
-                if ($this->bardHasLinkedText($value, $anchorText)) {
-                    return true;
-                }
-            } elseif ($field->type() === 'replicator' && is_array($value) && ! empty($value)) {
-                if ($this->replicatorHasLinkedAnchor($value, $anchorText)) {
-                    return true;
-                }
-            } elseif ($field->type() === 'markdown'
-                && is_string($value) && ! empty($value) && $handle !== 'title') {
-                // Only `markdown` fields can host a markdown-syntax link that
-                // Linkwise will respect. `text` / `textarea` are plaintext per
-                // Statamic's contract — the retreat in BardLinkInserter does
-                // not write markdown syntax there, so checking for it here
-                // would be inconsistent with the write side.
-                if ($this->markdownHasLinkedOverlap($value, $anchorText)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        // Anchor span overlaps an existing link mark in either direction.
+        return in_array($reason, ['crosses_existing_link', 'already_linked_to_target'], true);
     }
 
-    /**
-     * Recursively walk a Replicator value tree, returning true if any nested
-     * Bard tree OR plain-string field already contains a link with an anchor
-     * overlapping the supplied anchorText. Plain strings are checked the
-     * same way markdown fields are — covers Peak Cards heading/text,
-     * accordion bodies, button labels and similar nested user content.
-     */
-    protected function replicatorHasLinkedAnchor(array $sets, string $anchorText): bool
-    {
-        foreach ($sets as $set) {
-            if (! is_array($set)) {
-                continue;
-            }
-            foreach ($set as $key => $val) {
-                if (in_array($key, UrlHelper::REPLICATOR_META_KEYS, true)) {
-                    continue;
-                }
-
-                if (is_string($val)) {
-                    if ($val === '') {
-                        continue;
-                    }
-                    if ($this->markdownHasLinkedOverlap($val, $anchorText)) {
-                        return true;
-                    }
-                    continue;
-                }
-
-                if (! is_array($val) || empty($val)) {
-                    continue;
-                }
-
-                if (\Arturrossbach\Linkwise\Support\ProseMirrorTypes::looksLikeBardContent($val)) {
-                    if ($this->bardHasLinkedText($val, $anchorText)) {
-                        return true;
-                    }
-                } elseif (isset($val[0]['type'], $val[0]['id'])) {
-                    if ($this->replicatorHasLinkedAnchor($val, $anchorText)) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Check if any word in the anchor text overlaps with linked text in Bard content.
-     *
-     * Traversal lives in BardWalker — walks both nested $content and Bard
-     * 'set' attrs.values uniformly. This method's job is just the "is the
-     * visited node a linked text-node whose text shares a word with our
-     * anchor" predicate. Plain-string values inside Bard sets (button
-     * labels, headings) are handled by the parent replicatorHasLinkedAnchor
-     * which already routes them through markdownHasLinkedOverlap; BardWalker
-     * skips them on this side.
-     */
-    protected function bardHasLinkedText(array $content, string $anchorText): bool
-    {
-        $anchorWords = preg_split('/\s+/', mb_strtolower($anchorText));
-
-        return \Arturrossbach\Linkwise\Support\BardWalker::walk($content, function (array $node) use ($anchorWords): bool {
-            if (! isset($node['text'], $node['marks'])) {
-                return false;
-            }
-            $hasLink = false;
-            foreach ($node['marks'] as $mark) {
-                if (($mark['type'] ?? '') === 'link') {
-                    $hasLink = true;
-                    break;
-                }
-            }
-            if (! $hasLink) {
-                return false;
-            }
-            $linkedWords = preg_split('/\s+/', mb_strtolower($node['text']));
-            foreach ($anchorWords as $w) {
-                if ($w !== '' && in_array($w, $linkedWords, true)) {
-                    return true;
-                }
-            }
-
-            return false;
-        });
-    }
-
-    /**
-     * Check if any word in the anchor text overlaps with a Markdown link's text.
-     */
-    protected function markdownHasLinkedOverlap(string $markdown, string $anchorText): bool
-    {
-        // Extract all link texts from Markdown: [link text](url)
-        if (! preg_match_all('/\[([^\[\]]+)\]\([^)]+\)/', $markdown, $matches)) {
-            return false;
-        }
-
-        $anchorWords = preg_split('/\s+/', mb_strtolower($anchorText));
-
-        foreach ($matches[1] as $linkText) {
-            $linkedWords = preg_split('/\s+/', mb_strtolower($linkText));
-            foreach ($anchorWords as $w) {
-                if ($w !== '' && in_array($w, $linkedWords, true)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
+    // REV-IB-02 (2026-05-13): three loose-overlap walkers
+    // (bardHasLinkedText / replicatorHasLinkedAnchor / markdownHasLinkedOverlap)
+    // were removed here. The loose semantic — "any word of anchor overlaps
+    // with any link text" — produced silent missing suggestions and
+    // duplicated the strict canInsertLinkInto* family in BardLinkInserter.
+    // anchorIsLinkedInEntry now delegates to that family directly.
 }

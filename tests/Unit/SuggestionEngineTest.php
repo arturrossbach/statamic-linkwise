@@ -189,8 +189,9 @@ class SuggestionEngineTest extends TestCase
 
     public function test_normalize_lowercases_and_strips_punctuation(): void
     {
-        $this->assertSame('hello world', $this->engine->normalize('Hello, World!'));
-        $this->assertSame('redis-cache setup', $this->engine->normalize('Redis-Cache Setup'));
+        // REV-DR-02 Phase A: normalize() moved to TextNormalizer (static).
+        $this->assertSame('hello world', \Arturrossbach\Linkwise\Support\TextNormalizer::normalize('Hello, World!'));
+        $this->assertSame('redis-cache setup', \Arturrossbach\Linkwise\Support\TextNormalizer::normalize('Redis-Cache Setup'));
     }
 
     public function test_handles_empty_text(): void
