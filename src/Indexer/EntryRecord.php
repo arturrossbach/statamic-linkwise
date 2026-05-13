@@ -38,42 +38,68 @@ class EntryRecord
         public readonly array $outboundLinkOccurrences = [],
     ) {}
 
+    /**
+     * Return a copy of this record with the named fields overridden.
+     *
+     * Single source-of-truth for "build a new record from $this with one or
+     * more field changes" — replaces the manual-full-field-copy pattern
+     * that was inlined at 5+ production sites (EntryIndexer's
+     * preserveSuggestionCounts / enrichWithSuggestionCountsStreamed /
+     * computeSuggestionCountsForEntries / enrichWithKeywords, plus
+     * EntryIndexSubscriber's per-save re-construct). Each of those sites
+     * had to list every EntryRecord field by name; when a field was added
+     * (outboundLinkOccurrences, 2026-05-12) the subscriber forgot it and
+     * silent count-drift shipped to production. Klasse-4 in
+     * architectural_health.md. REV-DR-03 in docs/ARCHITECTURE_REVIEW.md.
+     *
+     * Unknown keys throw — typoed override names would silently no-op
+     * otherwise, which is the same failure shape we're trying to eliminate.
+     *
+     * @param  array<string, mixed>  $overrides  field-name => new-value map
+     * @throws \InvalidArgumentException  on unknown override keys
+     */
+    public function with(array $overrides): self
+    {
+        static $allowed = [
+            'id', 'title', 'url', 'collection', 'text',
+            'outboundLinks', 'keywords',
+            'inboundSuggestionCount', 'outboundSuggestionCount',
+            'hasTitleMatch', 'tokens', 'outboundLinkOccurrences',
+        ];
+
+        $unknown = array_diff(array_keys($overrides), $allowed);
+        if (! empty($unknown)) {
+            throw new \InvalidArgumentException(
+                'EntryRecord::with(): unknown field(s): '.implode(', ', $unknown)
+            );
+        }
+
+        return new self(
+            id: $overrides['id'] ?? $this->id,
+            title: $overrides['title'] ?? $this->title,
+            url: array_key_exists('url', $overrides) ? $overrides['url'] : $this->url,
+            collection: $overrides['collection'] ?? $this->collection,
+            text: $overrides['text'] ?? $this->text,
+            outboundLinks: $overrides['outboundLinks'] ?? $this->outboundLinks,
+            keywords: $overrides['keywords'] ?? $this->keywords,
+            inboundSuggestionCount: $overrides['inboundSuggestionCount'] ?? $this->inboundSuggestionCount,
+            outboundSuggestionCount: $overrides['outboundSuggestionCount'] ?? $this->outboundSuggestionCount,
+            hasTitleMatch: $overrides['hasTitleMatch'] ?? $this->hasTitleMatch,
+            tokens: $overrides['tokens'] ?? $this->tokens,
+            outboundLinkOccurrences: $overrides['outboundLinkOccurrences'] ?? $this->outboundLinkOccurrences,
+        );
+    }
+
     /** Return a copy with an updated inbound suggestion count. */
     public function withInboundSuggestionCount(int $count): self
     {
-        return new self(
-            id: $this->id,
-            title: $this->title,
-            url: $this->url,
-            collection: $this->collection,
-            text: $this->text,
-            outboundLinks: $this->outboundLinks,
-            keywords: $this->keywords,
-            inboundSuggestionCount: $count,
-            outboundSuggestionCount: $this->outboundSuggestionCount,
-            hasTitleMatch: $this->hasTitleMatch,
-            tokens: $this->tokens,
-            outboundLinkOccurrences: $this->outboundLinkOccurrences,
-        );
+        return $this->with(['inboundSuggestionCount' => $count]);
     }
 
     /** Return a copy with an updated outbound suggestion count. */
     public function withOutboundSuggestionCount(int $count): self
     {
-        return new self(
-            id: $this->id,
-            title: $this->title,
-            url: $this->url,
-            collection: $this->collection,
-            text: $this->text,
-            outboundLinks: $this->outboundLinks,
-            keywords: $this->keywords,
-            inboundSuggestionCount: $this->inboundSuggestionCount,
-            outboundSuggestionCount: $count,
-            hasTitleMatch: $this->hasTitleMatch,
-            tokens: $this->tokens,
-            outboundLinkOccurrences: $this->outboundLinkOccurrences,
-        );
+        return $this->with(['outboundSuggestionCount' => $count]);
     }
 
     public function toArray(): array

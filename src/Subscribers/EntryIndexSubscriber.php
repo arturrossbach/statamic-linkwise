@@ -67,32 +67,22 @@ class EntryIndexSubscriber
                 // by the suggestion-engine pass, not by content
                 // walking). Without preserving here, every editor save
                 // resets that entry's dashboard counts to 0/0/false
-                // until the next full Scan Content rebuild — confusing
-                // for the user and inconsistent with how full-rebuild
-                // (EntryIndexer::enrichWithKeywords, fixed earlier today
-                // by the same defensive pattern) handles it.
-                $record = new EntryRecord(
-                    id: $record->id,
-                    title: $record->title,
-                    url: $record->url,
-                    collection: $record->collection,
-                    text: $record->text,
-                    outboundLinks: $record->outboundLinks,
-                    keywords: $keywords,
-                    inboundSuggestionCount: $previous?->inboundSuggestionCount ?? 0,
-                    outboundSuggestionCount: $previous?->outboundSuggestionCount ?? 0,
-                    hasTitleMatch: $previous?->hasTitleMatch ?? false,
-                    // Forward tokens from the freshly-indexed $record, NOT
-                    // from $previous — title/text just changed, the previous
-                    // tokens are stale. indexEntry already tokenized using
-                    // the current title+text via the standard pipeline.
-                    tokens: $record->tokens,
-                    // Forward occurrences from freshly-indexed $record. Missed
-                    // this on the inbound-count fix (commit f57bc85) — per-save
-                    // re-index dropped the field, drift came back. Re-added
-                    // 2026-05-12 as a follow-up.
-                    outboundLinkOccurrences: $record->outboundLinkOccurrences,
-                );
+                // until the next full Scan Content rebuild.
+                //
+                // REV-DR-03 (2026-05-13): was 15-line `new EntryRecord(...)`
+                // field-by-field copy. Missing outboundLinkOccurrences here
+                // caused inbound-count drift (commit f57bc85) — `with()`
+                // collapses the override to the three engine-computed
+                // fields we actually need to roll back from $previous;
+                // every other field flows through unchanged from the
+                // freshly-indexed $record. Adding a new EntryRecord field
+                // no longer requires editing this file.
+                $record = $record->with([
+                    'keywords' => $keywords,
+                    'inboundSuggestionCount' => $previous?->inboundSuggestionCount ?? 0,
+                    'outboundSuggestionCount' => $previous?->outboundSuggestionCount ?? 0,
+                    'hasTitleMatch' => $previous?->hasTitleMatch ?? false,
+                ]);
 
                 $records[$record->id] = $record;
             } else {
