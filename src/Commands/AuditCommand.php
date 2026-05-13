@@ -830,7 +830,7 @@ class AuditCommand extends Command
 
                     // REV-DR-02 audit refinement (2026-05-13): partial-overlap
                     // hits are conservative warnings, not bugs. The walker
-                    // (findValidMatchPosition) explicitly skips positions
+                    // (AnchorPositionFinder::find) explicitly skips positions
                     // inside existing link marks and finds a safe occurrence
                     // when one exists. If canInsertLinkIntoEntry returns
                     // ok=true, the suggestion WILL insert at a safe position

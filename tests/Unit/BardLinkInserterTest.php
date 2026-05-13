@@ -1256,11 +1256,12 @@ class BardLinkInserterTest extends TestCase
     public function test_dry_run_crosses_existing_link_beats_context_mismatch(): void
     {
         // Failure-ranking edge — paragraph A has an outside-context
-        // occurrence (yields context_mismatch from findValidMatchPosition),
+        // occurrence (yields context_mismatch from AnchorPositionFinder::find),
         // paragraph B carries the expected sentence and an occurrence
         // crossing a DIFFERENT-target link (yields crosses_existing_link).
-        // pickWorseFailure must surface crosses_existing_link so the toast
-        // names the real blocker, not the stale context.
+        // AnchorPositionFinder::pickWorseFailure must surface
+        // crosses_existing_link so the toast names the real blocker, not
+        // the stale context.
         $bard = [
             [
                 'type' => 'paragraph',
@@ -1348,7 +1349,7 @@ class BardLinkInserterTest extends TestCase
         // Failure-ranking edge — single paragraph contains the needle
         // sentence ("Tail-of-paragraph marker.") plus ONE anchor
         // occurrence sitting OUTSIDE the needle's character range.
-        // Inside findValidMatchPosition: walker tracks bestFailure =
+        // Inside AnchorPositionFinder::find: walker tracks bestFailure =
         // context_mismatch from the outside-range occurrence, then
         // exhausts occurrences. The "return bestFailure ?? anchor_not_found"
         // fallback must honor bestFailure — otherwise the user gets a
@@ -1451,7 +1452,7 @@ class BardLinkInserterTest extends TestCase
     {
         // Parity contract: if the mutating walker returns null, the dry-run
         // MUST return ok:false. Catches future drift between the two paths
-        // — the entire reason findValidMatchPosition was extracted.
+        // — the entire reason AnchorPositionFinder was extracted.
         $bard = [[
             'type' => 'paragraph',
             'content' => [
