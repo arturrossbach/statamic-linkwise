@@ -34,8 +34,7 @@ class BardLinkInserter
 
     /**
      * Insert a link with a custom href (for external URLs or entry references).
-     */
-    /**
+     *
      * @param  string|null  $expectedSentenceContext  When set, the anchor MUST
      *   sit inside a text region whose surrounding text contains the supplied
      *   sentence context. This is the visual-truth guard: scan captured the
@@ -603,11 +602,17 @@ class BardLinkInserter
         return $bestFailure ?? ['ok' => false, 'reason' => 'anchor_not_found'];
     }
 
+    /**
+     * @see MarkdownLinkInserter::insertAllLinksIntoMarkdown — implementation home post-REV-OB-03 Phase A.
+     */
     public static function insertAllLinksIntoMarkdown(string $markdown, string $anchorText, string $href, bool $caseSensitive = false): ?string
     {
         return MarkdownLinkInserter::insertAllLinksIntoMarkdown($markdown, $anchorText, $href, $caseSensitive);
     }
 
+    /**
+     * @see MarkdownLinkInserter::insertLinkIntoMarkdown — implementation home post-REV-OB-03 Phase A.
+     */
     public static function insertLinkIntoMarkdown(string $markdown, string $anchorText, string $href, bool $caseSensitive = false, ?string $expectedSentenceContext = null): ?string
     {
         return MarkdownLinkInserter::insertLinkIntoMarkdown($markdown, $anchorText, $href, $caseSensitive, $expectedSentenceContext);
@@ -1051,6 +1056,9 @@ class BardLinkInserter
         return ['ok' => true, 'content' => $sets];
     }
 
+    /**
+     * @see MarkdownLinkInserter::insertLinkAtPositionInMarkdown — implementation home post-REV-OB-03 Phase A.
+     */
     public static function insertLinkAtPositionInMarkdown(string $markdown, string $anchorText, string $href, int $charStart, int $charEnd): array
     {
         return MarkdownLinkInserter::insertLinkAtPositionInMarkdown($markdown, $anchorText, $href, $charStart, $charEnd);

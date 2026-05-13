@@ -57,10 +57,11 @@ class MarkdownLinkInserter
             }
         }
 
-        // Context-fingerprint guard — see findAndLinkInChildren for full
-        // rationale. When the scan captured the anchor in a specific
-        // sentence, the wrap MUST land inside that sentence's range,
-        // not on a different occurrence of the same anchor.
+        // Context-fingerprint guard — Markdown twin of the Bard-side
+        // guard in {@see AnchorPositionFinder::find}. When the scan
+        // captured the anchor in a specific sentence, the wrap MUST
+        // land inside that sentence's range, not on a different
+        // occurrence of the same anchor.
         $contextRange = null;
         if ($expectedSentenceContext !== null && $expectedSentenceContext !== '') {
             $needle = trim(str_replace(['…', '...'], '', $expectedSentenceContext));
@@ -274,7 +275,7 @@ class MarkdownLinkInserter
      *
      * @return array{0: string, 1: array<int, int|null>}
      */
-    protected static function flattenMarkdownLinks(string $markdown): array
+    private static function flattenMarkdownLinks(string $markdown): array
     {
         $flat = '';
         $rawToFlat = [];
