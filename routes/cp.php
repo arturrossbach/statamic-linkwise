@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use Arturrossbach\Linkwise\Http\Controllers\AutoLinkController;
+use Arturrossbach\Linkwise\Http\Controllers\AutoLink\AutoLinkApplySyncController;
 use Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController;
 use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
 use Arturrossbach\Linkwise\Http\Controllers\IgnoredLinkController;
@@ -140,7 +141,7 @@ Route::middleware('can:manage linkwise')->group(function () {
         ->name('linkwise.autolink.export');
     Route::post('linkwise/autolink/rules/import', [AutoLinkController::class, 'importCsv'])
         ->name('linkwise.autolink.import');
-    Route::post('linkwise/autolink/apply/{id}', [AutoLinkController::class, 'apply'])
+    Route::post('linkwise/autolink/apply/{id}', [AutoLinkApplySyncController::class, 'apply'])
         ->name('linkwise.autolink.apply');
     Route::post('linkwise/autolink/apply-async/{id}', [AutoLinkController::class, 'applyAsync'])
         ->name('linkwise.autolink.apply-async');
