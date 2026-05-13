@@ -103,35 +103,32 @@ class InboundController extends CpController
         $startedBy = $user?->name() ?? $user?->email() ?? null;
         $startedById = $user?->id() ?? null;
 
-        // Wipe stale terminal-status from a previous run so the poller
-        // doesn't confuse it with the new dispatch.
-        \Illuminate\Support\Facades\Cache::forget('linkwise:inboundinsert:status');
-        \Illuminate\Support\Facades\Cache::forget('linkwise:inboundinsert:cancel');
-
-        \Illuminate\Support\Facades\Cache::put('linkwise:inboundinsert:payload', [
-            'source_mode' => 'inbound',
-            'insertions' => $validated['insertions'],
-            'entry_hashes' => $validated['entry_hashes'] ?? [],
-            'entry_title' => $validated['entry_title'] ?? '',
-            'started_by' => $startedBy,
-            'started_by_id' => $startedById,
-            'reverts' => $validated['reverts'] ?? null,
-        ], 600);
-        \Illuminate\Support\Facades\Cache::put('linkwise:inboundinsert:status', [
-            'phase' => 'starting',
-            'total' => count($validated['insertions']),
-            'current' => 0,
-            'source_mode' => 'inbound',
-            'entry_title' => $validated['entry_title'] ?? '',
-            'started_by' => $startedBy,
-            'started_by_id' => $startedById,
-        ], 600);
-
-        $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
-        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('link-insert.log', 'Link Insert'));
-
-        exec("$php $artisan linkwise:link-insert >> $log 2>&1 &");
+        // REV-XC-01 (2026-05-13): single helper for the dispatch boilerplate;
+        // see OutboundController::insert for rationale.
+        \Arturrossbach\Linkwise\Support\BulkJobDispatcher::dispatch(
+            kind: 'inboundinsert',
+            command: 'linkwise:link-insert',
+            payload: [
+                'source_mode' => 'inbound',
+                'insertions' => $validated['insertions'],
+                'entry_hashes' => $validated['entry_hashes'] ?? [],
+                'entry_title' => $validated['entry_title'] ?? '',
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+                'reverts' => $validated['reverts'] ?? null,
+            ],
+            initialStatus: [
+                'phase' => 'starting',
+                'total' => count($validated['insertions']),
+                'current' => 0,
+                'source_mode' => 'inbound',
+                'entry_title' => $validated['entry_title'] ?? '',
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+            ],
+            logFile: 'link-insert.log',
+            logLabel: 'Link Insert',
+        );
 
         return response()->json(['success' => true, 'message' => 'Inbound insert started']);
     }
