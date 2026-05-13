@@ -16,15 +16,6 @@ class AutoLinkController extends CpController
         protected EntryIndexer $indexer,
     ) {}
 
-    public function index(): JsonResponse
-    {
-        $rules = $this->manager->loadRules();
-
-        return response()->json([
-            'rules' => array_values(array_map(fn ($r) => $r->toArray(), $rules)),
-        ]);
-    }
-
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
