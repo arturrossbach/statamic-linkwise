@@ -56,6 +56,8 @@ export const Button = passthrough('Button');
 export const Badge = passthrough('Badge');
 export const Popover = passthrough('Popover');
 export const ConfirmationModal = passthrough('ConfirmationModal');
+export const Alert = passthrough('Alert');
+export const Icon = passthrough('Icon');
 
 // `v-tooltip` directive — no-op in tests
 export const vTooltip = {
