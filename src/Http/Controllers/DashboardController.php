@@ -16,6 +16,7 @@ use Arturrossbach\Linkwise\Support\ContextExtractor;
 use Arturrossbach\Linkwise\Support\EntryFieldWalker;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\Support\StaleCheckPresenter;
 use Arturrossbach\Linkwise\Support\TextExtractor;
 use Inertia\Inertia;
 use Statamic\Http\Controllers\CP\CpController;
@@ -30,42 +31,18 @@ class DashboardController extends CpController
     ) {}
 
     /**
-     * Cross-tab "broken-link check is stale" banner data. Compares index
-     * last-built timestamp against last broken-link check. If the index is
-     * newer (entries were edited since the last check) by more than the
-     * threshold, the banner triggers — telling the user new edits may have
-     * introduced broken URLs that the most recent check could not have seen.
+     * Cross-tab "broken-link check is stale" banner data, spread into every
+     * Linkwise page's Inertia props so LinkwiseLayout can render the banner
+     * regardless of which tab is active.
      *
-     * Spread into every Linkwise page's Inertia props so LinkwiseLayout can
-     * render the banner on whichever tab the user is currently on.
+     * Logic lives in {@see StaleCheckPresenter::buildProps()} since REV-DR-01
+     * Phase B PR 2 — extraction prep for PR 5 (8 renderers move to sub-namespace
+     * controllers; a stateless static helper avoids 8× DI plumbing for varying
+     * constructor dep-sets). This thin delegation stays until PR 5 drops it.
      */
     protected function staleCheckProps(): array
     {
-        $indexAt = $this->indexer->getIndexLastBuiltAt();
-        $brokenReport = new BrokenLinkReport;
-        $brokenLastChecked = $brokenReport->load()['metadata']['last_checked'] ?? null;
-
-        // 5-minute grace window so a check that ran moments after a save
-        // doesn't flicker the banner. Editors rarely care about stale-check
-        // signals at sub-minute granularity.
-        $isStale = false;
-        if ($indexAt) {
-            if (! $brokenLastChecked) {
-                $isStale = true; // initial check never run
-            } else {
-                $isStale = strtotime($indexAt) > strtotime($brokenLastChecked) + 300;
-            }
-        }
-
-        return [
-            'staleCheck' => [
-                'is_stale' => $isStale,
-                'index_built_at' => $indexAt,
-                'broken_last_checked' => $brokenLastChecked,
-                'check_url' => cp_route('linkwise.check-links'),
-                'check_status_url' => cp_route('linkwise.check-links.status'),
-            ],
-        ];
+        return StaleCheckPresenter::buildProps($this->indexer);
     }
 
     // ─── Page: Overview ────────────────────────────────────────────────

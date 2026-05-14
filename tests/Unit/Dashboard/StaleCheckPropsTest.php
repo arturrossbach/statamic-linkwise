@@ -2,11 +2,10 @@
 
 namespace Arturrossbach\Linkwise\Tests\Unit\Dashboard;
 
-use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Support\StaleCheckPresenter;
 use Arturrossbach\Linkwise\Tests\TestCase;
 use Mockery;
-use ReflectionMethod;
 
 /**
  * Pin the three-state semantics of
@@ -190,17 +189,15 @@ class StaleCheckPropsTest extends TestCase
     // ── helpers ────────────────────────────────────────────────────────
 
     /**
-     * Invoke the protected helper via Reflection. Drops once Phase B
-     * extracts the helper into a service with a public API.
+     * Direct static-call into the extracted service. Pre-extraction this
+     * was a Reflection-wrapper around DashboardController::staleCheckProps();
+     * after REV-DR-01 Phase B PR 2 the helper lives in {@see StaleCheckPresenter}
+     * as a stateless static, so the test pulls the container-bound indexer
+     * (overridden by bindIndexerWithLastBuiltAt) and passes it directly.
      */
     private function invoke(): array
     {
-        $controller = $this->app->make(DashboardController::class);
-
-        $method = new ReflectionMethod($controller, 'staleCheckProps');
-        $method->setAccessible(true);
-
-        return $method->invoke($controller);
+        return StaleCheckPresenter::buildProps($this->app->make(EntryIndexer::class));
     }
 
     /**
