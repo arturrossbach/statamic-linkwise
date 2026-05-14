@@ -7,10 +7,31 @@ use Orchestra\Testbench\TestCase as OrchestraTestCase;
 
 abstract class TestCase extends OrchestraTestCase
 {
+    /**
+     * Register the `Statamic` facade alias the same way
+     * {@see \Statamic\Testing\AddonTestCase::getPackageAliases()} does.
+     * Statamic's CP layout view (`statamic::layout`) uses the bare
+     * `Statamic` alias — without this, any Inertia render that falls
+     * through to the HTML shell crashes with "Class Statamic not found".
+     * Required for Feature tests that exercise Inertia renderers.
+     */
+    protected function getPackageAliases($app): array
+    {
+        return [
+            'Statamic' => \Statamic\Statamic::class,
+        ];
+    }
+
     protected function getPackageProviders($app): array
     {
         return [
             \Statamic\Providers\StatamicServiceProvider::class,
+            // Inertia's ServiceProvider registers TestResponse::assertInertia
+            // (TestResponseMacros mixin) — without it Feature tests on
+            // Inertia-rendering endpoints can't introspect props. The
+            // package is already in composer.json (statamic/cms pulls it),
+            // we just need it booted in the Orchestra-Testbench env.
+            \Inertia\ServiceProvider::class,
             \Arturrossbach\Linkwise\ServiceProvider::class,
         ];
     }
