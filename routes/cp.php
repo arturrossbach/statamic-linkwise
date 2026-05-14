@@ -5,6 +5,8 @@ use Arturrossbach\Linkwise\Http\Controllers\AutoLinkController;
 use Arturrossbach\Linkwise\Http\Controllers\AutoLink\AutoLinkApplySyncController;
 use Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\ActivityController;
+use Arturrossbach\Linkwise\Http\Controllers\Dashboard\BulkJobsController;
+use Arturrossbach\Linkwise\Http\Controllers\Dashboard\JobsAggregatorController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\StatsApiController;
 use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
 use Arturrossbach\Linkwise\Http\Controllers\IgnoredLinkController;
@@ -66,40 +68,40 @@ Route::middleware('can:manage linkwise')->group(function () {
     Route::get('linkwise/suggestion-counts', [StatsApiController::class, 'suggestionCounts'])
         ->name('linkwise.suggestion-counts');
 
-    Route::post('linkwise/rebuild-index', [DashboardController::class, 'rebuildIndex'])
+    Route::post('linkwise/rebuild-index', [BulkJobsController::class, 'rebuildIndex'])
         ->name('linkwise.rebuild-index');
-    Route::get('linkwise/rebuild-index/status', [DashboardController::class, 'rebuildIndexStatus'])
+    Route::get('linkwise/rebuild-index/status', [BulkJobsController::class, 'rebuildIndexStatus'])
         ->name('linkwise.rebuild-index.status');
-    Route::post('linkwise/rebuild-index/cancel', [DashboardController::class, 'rebuildIndexCancel'])
+    Route::post('linkwise/rebuild-index/cancel', [BulkJobsController::class, 'rebuildIndexCancel'])
         ->name('linkwise.rebuild-index.cancel');
 
-    Route::post('linkwise/check-links', [DashboardController::class, 'checkLinks'])
+    Route::post('linkwise/check-links', [BulkJobsController::class, 'checkLinks'])
         ->name('linkwise.check-links');
-    Route::get('linkwise/check-links/status', [DashboardController::class, 'checkLinksStatus'])
+    Route::get('linkwise/check-links/status', [BulkJobsController::class, 'checkLinksStatus'])
         ->name('linkwise.check-links.status');
-    Route::post('linkwise/check-links/cancel', [DashboardController::class, 'checkLinksCancel'])
+    Route::post('linkwise/check-links/cancel', [BulkJobsController::class, 'checkLinksCancel'])
         ->name('linkwise.check-links.cancel');
 
-    Route::post('linkwise/bulk-unlink', [DashboardController::class, 'bulkUnlink'])
+    Route::post('linkwise/bulk-unlink', [BulkJobsController::class, 'bulkUnlink'])
         ->name('linkwise.bulk-unlink');
-    Route::get('linkwise/bulk-unlink/status', [DashboardController::class, 'bulkUnlinkStatus'])
+    Route::get('linkwise/bulk-unlink/status', [BulkJobsController::class, 'bulkUnlinkStatus'])
         ->name('linkwise.bulk-unlink.status');
-    Route::post('linkwise/bulk-unlink/cancel', [DashboardController::class, 'bulkUnlinkCancel'])
+    Route::post('linkwise/bulk-unlink/cancel', [BulkJobsController::class, 'bulkUnlinkCancel'])
         ->name('linkwise.bulk-unlink.cancel');
-    Route::get('linkwise/bulk-status', [DashboardController::class, 'bulkStatus'])
+    Route::get('linkwise/bulk-status', [JobsAggregatorController::class, 'bulkStatus'])
         ->name('linkwise.bulk-status');
     // Force-clear a stuck heavy-job (used by the "Operation seems stuck" UI
     // recovery button — for cases the crash-guard somehow missed, e.g. server
     // restart before shutdown_function had a chance to fire).
-    Route::post('linkwise/bulk-clear/{kind}', [DashboardController::class, 'bulkClear'])
+    Route::post('linkwise/bulk-clear/{kind}', [JobsAggregatorController::class, 'bulkClear'])
         ->name('linkwise.bulk-clear');
 
     // DetailModal Bulk-Unlink — heavy job (single POST, server iterates).
-    Route::post('linkwise/detail-unlink-async', [DashboardController::class, 'detailUnlinkAsync'])
+    Route::post('linkwise/detail-unlink-async', [BulkJobsController::class, 'detailUnlinkAsync'])
         ->name('linkwise.detail-unlink.async');
-    Route::get('linkwise/detail-unlink-async/status', [DashboardController::class, 'detailUnlinkStatus'])
+    Route::get('linkwise/detail-unlink-async/status', [BulkJobsController::class, 'detailUnlinkStatus'])
         ->name('linkwise.detail-unlink.status');
-    Route::post('linkwise/detail-unlink-async/cancel', [DashboardController::class, 'detailUnlinkCancel'])
+    Route::post('linkwise/detail-unlink-async/cancel', [BulkJobsController::class, 'detailUnlinkCancel'])
         ->name('linkwise.detail-unlink.cancel');
     Route::get('linkwise/broken-links/export', [DashboardController::class, 'brokenLinksCsv'])
         ->name('linkwise.broken-links.export');
@@ -123,9 +125,9 @@ Route::middleware('can:manage linkwise')->group(function () {
     Route::post('linkwise/relink', [RelinkController::class, 'relink'])
         ->name('linkwise.relink');
 
-    Route::post('linkwise/inbound/insert/cancel', [DashboardController::class, 'inboundInsertCancel'])
+    Route::post('linkwise/inbound/insert/cancel', [BulkJobsController::class, 'inboundInsertCancel'])
         ->name('linkwise.inbound.insert.cancel');
-    Route::post('linkwise/outbound/insert/cancel', [DashboardController::class, 'outboundInsertCancel'])
+    Route::post('linkwise/outbound/insert/cancel', [BulkJobsController::class, 'outboundInsertCancel'])
         ->name('linkwise.outbound.insert.cancel');
 
     // Auto-Linking

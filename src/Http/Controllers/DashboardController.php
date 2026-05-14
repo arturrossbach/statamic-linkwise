@@ -2,19 +2,16 @@
 
 namespace Arturrossbach\Linkwise\Http\Controllers;
 
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
-use Arturrossbach\Linkwise\Links\BrokenLinkChecker;
 use Arturrossbach\Linkwise\Links\BrokenLinkReport;
 use Arturrossbach\Linkwise\Reports\DomainReport;
 use Arturrossbach\Linkwise\Reports\LinkReport;
 use Arturrossbach\Linkwise\Support\ContextExtractor;
 use Arturrossbach\Linkwise\Support\EntryFieldWalker;
-use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Arturrossbach\Linkwise\Support\StaleCheckPresenter;
 use Arturrossbach\Linkwise\Support\TextExtractor;
@@ -506,157 +503,13 @@ class DashboardController extends CpController
     // {@see \Arturrossbach\Linkwise\Http\Controllers\Dashboard\StatsApiController}
     // during REV-DR-01 Phase B PR 1.
 
-    public function checkLinks(Request $request): JsonResponse
-    {
-        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('check')) {
-            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
-        }
-
-        // Spawn the check as a detached background process — web worker returns immediately.
-        // This frees all session/file locks and doesn't block navigation or other CP requests.
-        $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
-        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('check-links.log', 'Check Links'));
-
-        \Illuminate\Support\Facades\Cache::put('linkwise:check:status', ['phase' => 'starting'], 300);
-        \Illuminate\Support\Facades\Cache::forget('linkwise:check:cancel');
-
-        // `>> log 2>&1 &` appends + detaches — preserves prior runs so a
-        // successful re-run doesn't wipe a failed run's evidence.
-        exec("$php $artisan linkwise:check-links --progress >> $log 2>&1 &");
-
-        return response()->json(['success' => true, 'message' => 'Check started']);
-    }
-
-    public function checkLinksStatus(Request $request): JsonResponse
-    {
-        return response()->json(
-            \Illuminate\Support\Facades\Cache::get('linkwise:check:status') ?? ['phase' => 'idle'],
-        );
-    }
-
-    public function checkLinksCancel(Request $request): JsonResponse
-    {
-        \Illuminate\Support\Facades\Cache::put('linkwise:check:cancel', true, 60);
-
-        return response()->json(['success' => true]);
-    }
-
-    public function rebuildIndex(Request $request): JsonResponse
-    {
-        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('scan')) {
-            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
-        }
-
-        // Spawn the scan as a detached background process — web worker returns immediately.
-        // This frees all session/file locks and doesn't block navigation or other CP requests.
-        $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
-        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('scan-content.log', 'Scan Content'));
-
-        \Illuminate\Support\Facades\Cache::put('linkwise:scan:status', ['phase' => 'starting'], 300);
-        \Illuminate\Support\Facades\Cache::forget('linkwise:scan:cancel');
-
-        exec("$php $artisan linkwise:index --progress >> $log 2>&1 &");
-
-        return response()->json(['success' => true, 'message' => 'Scan started']);
-    }
-
-    public function rebuildIndexStatus(Request $request): JsonResponse
-    {
-        return response()->json(
-            \Illuminate\Support\Facades\Cache::get('linkwise:scan:status') ?? ['phase' => 'idle'],
-        );
-    }
-
-    public function rebuildIndexCancel(Request $request): JsonResponse
-    {
-        \Illuminate\Support\Facades\Cache::put('linkwise:scan:cancel', true, 60);
-
-        return response()->json(['success' => true]);
-    }
-
-    public function bulkUnlink(Request $request): JsonResponse
-    {
-        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('bulkunlink')) {
-            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
-        }
-
-        $validated = $request->validate([
-            'replacements' => 'required|array|min:1|max:5000',
-            'replacements.*.entry_id' => 'required|string|max:64',
-            'replacements.*.matched_url' => 'required|string|max:2048',
-            'replacements.*.new_url' => 'required|string|max:2048',
-            'replacements.*.field' => 'nullable|string|max:80',
-            'replacements.*.field_type' => 'nullable|string|max:40',
-            'replacements.*.occurrence_index' => 'nullable|integer',
-            'replacements.*.search' => 'nullable|string|max:2048',
-            // Anchor-fingerprint guard. Without this validation rule
-            // Laravel strips anchor_text from $validated, the cache-payload
-            // never carries it, and BulkUnlinkCommand's applySelected call
-            // can't enforce the anchor check — the system would silently
-            // unlink the wrong link if its position-index happened to match
-            // a different link with the same URL (real bug, 2026-05-09).
-            'replacements.*.anchor_text' => 'nullable|string|max:512',
-            // Pre-flight hash check — same defensive pattern the other 6
-            // bulk write paths (DetailUnlink, LinkInsert, UrlChangerApply,
-            // ApplyRule, etc.) enforce. Optional because the legacy
-            // broken-links-cleanup workflow doesn't always carry hashes;
-            // when present, we fail-fast 409 on conflicts before dispatch
-            // instead of silently overwriting an entry the user just
-            // edited. Memory: feedback_bulk_writepath_standard.md.
-            'entry_hashes' => 'sometimes|array|max:50000',
-        ]);
-
-        // Pre-flight conflict detection. Skipped when no hashes shipped
-        // (legacy frontend / scripted callers) so we don't break those.
-        $allHashes = $validated['entry_hashes'] ?? [];
-        if (! empty($allHashes)) {
-            $entryIds = array_flip(array_unique(array_column($validated['replacements'], 'entry_id')));
-            $relevant = array_intersect_key($allHashes, $entryIds);
-            $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($relevant);
-            if (! empty($conflicts)) {
-                $title = reset($conflicts);
-                return response()->json([
-                    'error' => 'conflict',
-                    'message' => 'Entry "'.$title.'" was modified by another editor since the broken-links scan ran. Re-run the scan and try again.',
-                    'entry_id' => array_key_first($conflicts),
-                ], 409);
-            }
-        }
-
-        $user = auth()->user();
-        $validated['started_by'] = $user?->name() ?? $user?->email() ?? null;
-        $validated['started_by_id'] = $user?->id() ?? null;
-        \Illuminate\Support\Facades\Cache::put('linkwise:bulkunlink:payload', $validated, 600);
-        \Illuminate\Support\Facades\Cache::put('linkwise:bulkunlink:status', [
-            'phase' => 'starting',
-            'total' => count($validated['replacements']),
-        ], 600);
-        \Illuminate\Support\Facades\Cache::forget('linkwise:bulkunlink:cancel');
-
-        $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
-        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('bulk-unlink.log', 'Bulk Unlink'));
-
-        exec("$php $artisan linkwise:bulk-unlink >> $log 2>&1 &");
-
-        return response()->json(['success' => true, 'message' => 'Bulk unlink started']);
-    }
-
-    public function bulkUnlinkStatus(Request $request): JsonResponse
-    {
-        return response()->json(
-            \Illuminate\Support\Facades\Cache::get('linkwise:bulkunlink:status') ?? ['phase' => 'idle'],
-        );
-    }
-
-    public function bulkUnlinkCancel(Request $request): JsonResponse
-    {
-        \Illuminate\Support\Facades\Cache::put('linkwise:bulkunlink:cancel', true, 60);
-
-        return response()->json(['success' => true]);
-    }
+    // Bulk-job dispatch + status + cancel endpoints (check-links, rebuild-index,
+    // bulk-unlink, detail-unlink-async, inbound/outbound insert-cancel) extracted
+    // to {@see \Arturrossbach\Linkwise\Http\Controllers\Dashboard\BulkJobsController}
+    // during REV-DR-01 Phase B PR 4.
+    //
+    // Cross-controller heavy-job aggregation (bulkStatus + bulkClear) moved to
+    // {@see \Arturrossbach\Linkwise\Http\Controllers\Dashboard\JobsAggregatorController}.
 
     /**
      * CSV export of all broken links from the latest report.
@@ -755,184 +608,9 @@ class DashboardController extends CpController
         ]);
     }
 
-    /**
-     * Unified status endpoint for ALL heavy bulk jobs (scan, check, bulk-unlink,
-     * apply-rule). Used by LinkwiseLayout's tab-spanning banner so the user sees
-     * one consistent "something is running" indicator regardless of which job
-     * it is or which tab they're on.
-     */
-    /**
-     * Trigger a DetailModal Bulk-Unlink as a single heavy job.
-     *
-     * Used by the per-entry detail modal's "Unlink selected" button. Same
-     * heavy-pattern as URL Changer Apply: one POST, server iterates internally,
-     * single banner with progress, single cancel, single completion banner.
-     *
-     * Concurrency: refuses while ANY heavy job is running (one-bulk-at-a-time
-     * is enforced globally by JobLock).
-     */
-    public function detailUnlinkAsync(Request $request): JsonResponse
-    {
-        if ($active = \Arturrossbach\Linkwise\Support\JobLock::activeJob('detailunlink')) {
-            return response()->json(\Arturrossbach\Linkwise\Support\JobLock::busyResponseData($active), 409);
-        }
-
-        $validated = $request->validate([
-            'replacements' => 'required|array|min:1|max:5000',
-            'replacements.*.entry_id' => 'required|string|max:64',
-            'replacements.*.field' => 'nullable|string|max:80',
-            'replacements.*.field_type' => 'nullable|string|max:40',
-            'replacements.*.matched_url' => 'required|string|max:2048',
-            'replacements.*.occurrence_index' => 'required|numeric|min:0',
-            'replacements.*.search' => 'nullable|string|max:2048',
-            // Anchor + sentence carried from DetailModal so the activity-
-            // log drawer's Context column shows the editor's view at
-            // unlink-time. Without these the column was rendering "—"
-            // for every detail-unlink snapshot.
-            'replacements.*.anchor_text' => 'nullable|string|max:512',
-            'replacements.*.sentence_context' => 'nullable|string|max:1024',
-            'entry_hashes' => 'sometimes|array|max:50000',
-            'source_mode' => 'sometimes|in:inbound,outbound',
-            'entry_title' => 'sometimes|nullable|string|max:300',
-            // Activity-log Revert flow sends this to mark the new snapshot
-            // as a reverse-of-X. Ignored otherwise.
-            'reverts' => 'sometimes|nullable|string|max:64',
-        ]);
-
-        // Hash conflicts: DON'T fail-fast 409 (that aborted the whole bulk
-        // when a single entry was modified — Bug 9 2026-05-11). Instead
-        // dispatch the job and let DetailUnlinkCommand's per-record
-        // verifyHashes (line 157) skip the modified entries while the
-        // others land. The user sees a clear "X removed, 1 skipped
-        // (modified by editor)" toast at the end instead of an opaque
-        // "everything cancelled because one entry changed" wall.
-        // Same per-record skip pattern that the revert flow already used
-        // — now applied to the normal bulk too.
-        $allHashes = $validated['entry_hashes'] ?? [];
-
-        $user = auth()->user();
-        $startedBy = $user?->name() ?? $user?->email() ?? null;
-        $startedById = $user?->id() ?? null;
-
-        // Wipe stale terminal-status from a previous run.
-        \Illuminate\Support\Facades\Cache::forget('linkwise:detailunlink:status');
-        \Illuminate\Support\Facades\Cache::forget('linkwise:detailunlink:cancel');
-
-        \Illuminate\Support\Facades\Cache::put('linkwise:detailunlink:payload', [
-            'replacements' => $validated['replacements'],
-            'entry_hashes' => $allHashes,
-            'source_mode' => $validated['source_mode'] ?? 'inbound',
-            'entry_title' => $validated['entry_title'] ?? '',
-            'started_by' => $startedBy,
-            'started_by_id' => $startedById,
-            'reverts' => $validated['reverts'] ?? null,
-        ], 600);
-        \Illuminate\Support\Facades\Cache::put('linkwise:detailunlink:status', [
-            'phase' => 'starting',
-            'total' => count($validated['replacements']),
-            'current' => 0,
-            'source_mode' => $validated['source_mode'] ?? 'inbound',
-            'entry_title' => $validated['entry_title'] ?? '',
-            'started_by' => $startedBy,
-            'started_by_id' => $startedById,
-        ], 600);
-
-        $artisan = escapeshellarg(base_path('artisan'));
-        $php = escapeshellarg(\Arturrossbach\Linkwise\Support\PhpBinary::cli());
-        $log = escapeshellarg(\Arturrossbach\Linkwise\Support\LogRotator::prepare('detail-unlink.log', 'Detail Unlink'));
-
-        exec("$php $artisan linkwise:detail-unlink >> $log 2>&1 &");
-
-        return response()->json(['success' => true, 'message' => 'Detail unlink started']);
-    }
-
-    public function detailUnlinkStatus(Request $request): JsonResponse
-    {
-        return response()->json(
-            \Illuminate\Support\Facades\Cache::get('linkwise:detailunlink:status') ?? ['phase' => 'idle'],
-        );
-    }
-
-    public function detailUnlinkCancel(Request $request): JsonResponse
-    {
-        \Illuminate\Support\Facades\Cache::put('linkwise:detailunlink:cancel', true, 60);
-
-        return response()->json(['success' => true]);
-    }
-
-    /**
-     * Cancel an in-flight inbound bulk-add. The LinkInsertCommand checks this
-     * flag at the per-item boundary and exits cleanly with a 'cancelled'
-     * status snapshot. Same lightweight-flag pattern as DetailUnlink + UrlChanger.
-     */
-    public function inboundInsertCancel(Request $request): JsonResponse
-    {
-        \Illuminate\Support\Facades\Cache::put('linkwise:inboundinsert:cancel', true, 60);
-
-        return response()->json(['success' => true]);
-    }
-
-    /**
-     * Cancel an in-flight outbound bulk-add — same flag pattern as inbound.
-     */
-    public function outboundInsertCancel(Request $request): JsonResponse
-    {
-        \Illuminate\Support\Facades\Cache::put('linkwise:outboundinsert:cancel', true, 60);
-
-        return response()->json(['success' => true]);
-    }
-
-    /**
-     * Force-clear a stuck heavy-job. Used by the "Operation seems stuck" UI
-     * banner when a process crashed in a way the crash-guard missed (e.g.
-     * server restart before shutdown_function fired) — without this, the
-     * JobLock would hang on 'running' until cache TTL expires (typically 5-10
-     * minutes), blocking all other bulks for the user.
-     */
-    public function bulkClear(Request $request, string $kind): JsonResponse
-    {
-        \Arturrossbach\Linkwise\Support\JobLock::forceClear($kind);
-
-        return response()->json(['success' => true, 'cleared' => $kind]);
-    }
-
-    public function bulkStatus(Request $request): JsonResponse
-    {
-        $snapshot = \Arturrossbach\Linkwise\Support\JobLock::snapshot();
-        if (! $snapshot) {
-            return response()->json(['phase' => 'idle']);
-        }
-
-        // Map kind → existing cancel route. The frontend cancel button uses
-        // this URL directly so each kind keeps its own server-side cancel.
-        $cancelUrls = [
-            'scan' => cp_route('linkwise.rebuild-index.cancel'),
-            'check' => cp_route('linkwise.check-links.cancel'),
-            'bulkunlink' => cp_route('linkwise.bulk-unlink.cancel'),
-            'applyrule' => cp_route('linkwise.autolink.apply-async.cancel'),
-            'urlchanger' => cp_route('linkwise.url-changer.apply-cancel'),
-            'detailunlink' => cp_route('linkwise.detail-unlink.cancel'),
-            'inboundinsert' => cp_route('linkwise.inbound.insert.cancel'),
-            'outboundinsert' => cp_route('linkwise.outbound.insert.cancel'),
-        ];
-
-        $status = $snapshot['status'];
-
-        return response()->json([
-            'kind' => $snapshot['name'],
-            'label' => $snapshot['label'],
-            'phase' => $status['phase'] ?? 'running',
-            'current' => $status['current'] ?? 0,
-            'total' => $status['total'] ?? 0,
-            'message' => $status['message'] ?? null,
-            'cancel_url' => $cancelUrls[$snapshot['name']] ?? null,
-            'terminal' => $snapshot['terminal'],
-            // Pass through the full status so the layout can read kind-specific
-            // fields (e.g. apply-rule's links_added, rule_keyword) when building
-            // the completion toast.
-            'extra' => $status,
-        ]);
-    }
+    // Detail-unlink trio, inbound/outbound insert-cancel, bulkClear, bulkStatus
+    // extracted to Dashboard\BulkJobsController + Dashboard\JobsAggregatorController
+    // during REV-DR-01 Phase B PR 4.
 
     // ─── Helpers ───────────────────────────────────────────────────────
 

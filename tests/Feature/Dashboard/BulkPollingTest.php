@@ -46,14 +46,17 @@ class BulkPollingTest extends TestCase
 
     /**
      * Extend the base side-load with `statamic.cp.linkwise.*` aliases
-     * for the 8 cancel-routes that {@see DashboardController::bulkStatus()}
+     * for the 8 cancel-routes that {@see \Arturrossbach\Linkwise\Http\Controllers\Dashboard\JobsAggregatorController::bulkStatus()}
      * builds via {@see cp_route()}. Without these, the non-idle branch
      * of bulkStatus throws RouteNotFoundException (production routes
      * are prefixed `statamic.cp.linkwise.*`; our defineRoutes side-load
      * registers them unprefixed only).
      *
-     * Phase B will drop most of these once the helper extraction moves
-     * cp_route calls out of bulkStatus into a dedicated service method.
+     * Permanent side-load — kein Helper-Extract. REV-DR-01 Phase B PR 4
+     * Pickaxe-Analyse: 0 Bugs in 6 Monaten wo eine neue Kind in
+     * {@see \Arturrossbach\Linkwise\Support\JobLock::JOBS} registriert
+     * und der cancel-URL-Eintrag in bulkStatus vergessen wurde →
+     * Inline-Lookup bleibt, kein Wert-Beweis für Helper-Auslagerung.
      */
     protected function defineRoutes($router): void
     {
@@ -470,10 +473,10 @@ class BulkPollingTest extends TestCase
         // Asymmetric-cleanup pin (advisor pre-merge gate flag, Phase A.2).
         // detailUnlinkAsync explicitly Cache::forget('linkwise:detailunlink:
         // status') + 'linkwise:detailunlink:cancel' BEFORE writing the new
-        // status (DashboardController:1190-1191). bulkUnlink does NOT do this
-        // — only forgets the cancel key (line 1008), leaving any stale
-        // terminal status visible until the new starting-status write
-        // completes.
+        // status (now BulkJobsController::detailUnlinkAsync post-PR4).
+        // bulkUnlink does NOT do this — only forgets the cancel key, leaving
+        // any stale terminal status visible until the new starting-status
+        // write completes.
         //
         // The asymmetry is intentional: detail-unlink is dispatched from a
         // modal that immediately starts polling, so a millisecond of stale
