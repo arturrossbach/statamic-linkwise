@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Arturrossbach\Linkwise\Http\Controllers\AutoLinkController;
 use Arturrossbach\Linkwise\Http\Controllers\AutoLink\AutoLinkApplySyncController;
 use Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController;
+use Arturrossbach\Linkwise\Http\Controllers\Dashboard\StatsApiController;
 use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
 use Arturrossbach\Linkwise\Http\Controllers\IgnoredLinkController;
 use Arturrossbach\Linkwise\Http\Controllers\InboundController;
@@ -58,10 +59,10 @@ Route::middleware('can:manage linkwise')->group(function () {
 
     // ─── API Endpoints ─────────────────────────────────────────────────
 
-    Route::get('linkwise/stats/{entryId}', [DashboardController::class, 'entryStats'])
+    Route::get('linkwise/stats/{entryId}', [StatsApiController::class, 'entryStats'])
         ->name('linkwise.entry-stats');
 
-    Route::get('linkwise/suggestion-counts', [DashboardController::class, 'suggestionCounts'])
+    Route::get('linkwise/suggestion-counts', [StatsApiController::class, 'suggestionCounts'])
         ->name('linkwise.suggestion-counts');
 
     Route::post('linkwise/rebuild-index', [DashboardController::class, 'rebuildIndex'])
@@ -109,7 +110,7 @@ Route::middleware('can:manage linkwise')->group(function () {
         ->middleware('throttle:100,1')
         ->name('linkwise.frontend-error');
 
-    Route::post('linkwise/domain-attribute', [DashboardController::class, 'saveDomainAttribute'])
+    Route::post('linkwise/domain-attribute', [StatsApiController::class, 'saveDomainAttribute'])
         ->name('linkwise.save-domain-attribute');
 
     Route::post('linkwise/inbound/insert', [InboundController::class, 'insert'])
