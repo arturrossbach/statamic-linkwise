@@ -2,25 +2,29 @@
 
 namespace Arturrossbach\Linkwise\Tests\Unit\Dashboard;
 
-use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
+use Arturrossbach\Linkwise\Http\Controllers\Dashboard\ActivityController;
 use Arturrossbach\Linkwise\Tests\TestCase;
 use ReflectionMethod;
 
 /**
- * Pin the kind-switch in {@see DashboardController::deepLinkSearchFor()}.
+ * Pin the kind-switch in {@see ActivityController::deepLinkSearchFor()}.
  * Tested in isolation via Reflection — the helper is `protected` and the
  * Feature-test stack can't drive its non-null branches without tripping
  * the unprefixed-vs-statamic.cp routing quirk (cp_route would resolve
  * `statamic.cp.linkwise.urlchanger` which the test-routes file doesn't
  * register).
  *
- * Once REV-DR-01 Phase B extracts the helper into a service the
- * Reflection wrapper drops and assertions become direct calls — the test
- * intent stays identical.
+ * Why `protected` stays after REV-DR-01 Phase B PR 3 (advisor note):
+ * `deepLinkSearchFor` is controller-internal logic with a single caller
+ * (activityDetail at line 224 of ActivityController). Unlike
+ * StaleCheckPresenter (PR 2, cross-cutting across 8 renderers), this
+ * helper has no PR-5-style sharing pressure. Keeping it protected
+ * preserves the Reflection-pin test intent without API-widening, and
+ * future inlining stays safe.
  *
  * Bug-anchor: commit 6839eb8 (Activity Log: per-item operation data +
- * URL Changer deep-link) — Phase B may move this logic, drift risk on
- * the kind-switch is the reason this exists.
+ * URL Changer deep-link) — drift risk on the kind-switch is the reason
+ * this exists.
  *
  * @see docs/ARCHITECTURE_REVIEW.md REV-DR-01
  */
@@ -139,12 +143,14 @@ class ActivityDeepLinkSearchTest extends TestCase
     // ── helpers ────────────────────────────────────────────────────────
 
     /**
-     * Invoke the protected helper via Reflection. Cleared once Phase B
-     * extracts deepLinkSearchFor into a service with a public API.
+     * Invoke the protected helper via Reflection. The helper stays
+     * controller-internal (sole caller: ActivityController::activityDetail)
+     * even after PR 3 — see class-level docblock for the protected-vs-static
+     * decision.
      */
     private function invoke(array $snapshot): ?string
     {
-        $controller = $this->app->make(DashboardController::class);
+        $controller = $this->app->make(ActivityController::class);
 
         $method = new ReflectionMethod($controller, 'deepLinkSearchFor');
         $method->setAccessible(true);

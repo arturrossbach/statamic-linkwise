@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Arturrossbach\Linkwise\Http\Controllers\AutoLinkController;
 use Arturrossbach\Linkwise\Http\Controllers\AutoLink\AutoLinkApplySyncController;
 use Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController;
+use Arturrossbach\Linkwise\Http\Controllers\Dashboard\ActivityController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\StatsApiController;
 use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
 use Arturrossbach\Linkwise\Http\Controllers\IgnoredLinkController;
@@ -39,9 +40,9 @@ Route::middleware('can:manage linkwise')->group(function () {
 
     Route::get('linkwise/activity', [DashboardController::class, 'activity'])
         ->name('linkwise.activity');
-    Route::get('linkwise/activity/{id}', [DashboardController::class, 'activityDetail'])
+    Route::get('linkwise/activity/{id}', [ActivityController::class, 'activityDetail'])
         ->name('linkwise.activity.detail');
-    Route::post('linkwise/activity/{id}/mark-reverted', [DashboardController::class, 'markActivityReverted'])
+    Route::post('linkwise/activity/{id}/mark-reverted', [ActivityController::class, 'markActivityReverted'])
         ->name('linkwise.activity.mark-reverted');
 
     // ─── Suggestion Insert ───────────────────────────────────────────
