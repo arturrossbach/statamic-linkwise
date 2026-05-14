@@ -131,17 +131,20 @@ class AnchorOffsetInContextSweepTest extends TestCase
     }
 
     /**
-     * DashboardController STILL emits anchor_offset_in_context in the
-     * frontend-facing response (highlight-rendering coordinate). This
+     * The Inertia-Page-Renderer cluster STILL emits anchor_offset_in_context
+     * in the frontend-facing response (highlight-rendering coordinate). This
      * test pins that down so the sweep doesn't accidentally remove it.
+     *
+     * Source moved DC → Dashboard\InertiaPagesController in REV-DR-01
+     * Phase B PR 5 (links() renderer). Field name + purpose unchanged.
      */
-    public function test_dashboard_controller_still_emits_anchor_offset_for_frontend_highlights(): void
+    public function test_inertia_pages_controller_still_emits_anchor_offset_for_frontend_highlights(): void
     {
-        $source = file_get_contents(__DIR__.'/../../src/Http/Controllers/DashboardController.php');
+        $source = file_get_contents(__DIR__.'/../../src/Http/Controllers/Dashboard/InertiaPagesController.php');
         $this->assertStringContainsString(
             "'anchor_offset_in_context'",
             $source,
-            'DashboardController must continue to emit anchor_offset_in_context for frontend highlight-rendering — '.
+            'InertiaPagesController must continue to emit anchor_offset_in_context for frontend highlight-rendering — '.
             'this is a different purpose than the backend dead-plumbing'
         );
     }

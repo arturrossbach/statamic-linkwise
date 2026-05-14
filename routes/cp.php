@@ -6,6 +6,7 @@ use Arturrossbach\Linkwise\Http\Controllers\AutoLink\AutoLinkApplySyncController
 use Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\ActivityController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\BulkJobsController;
+use Arturrossbach\Linkwise\Http\Controllers\Dashboard\InertiaPagesController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\JobsAggregatorController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\StatsApiController;
 use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
@@ -19,28 +20,28 @@ Route::middleware('can:manage linkwise')->group(function () {
 
     // ─── Inertia Pages (one per tab) ───────────────────────────────────
 
-    Route::get('linkwise', [DashboardController::class, 'index'])
+    Route::get('linkwise', [InertiaPagesController::class, 'index'])
         ->name('linkwise.dashboard');
 
-    Route::get('linkwise/links', [DashboardController::class, 'links'])
+    Route::get('linkwise/links', [InertiaPagesController::class, 'links'])
         ->name('linkwise.links');
 
-    Route::get('linkwise/broken', [DashboardController::class, 'broken'])
+    Route::get('linkwise/broken', [InertiaPagesController::class, 'broken'])
         ->name('linkwise.broken');
 
-    Route::get('linkwise/domains', [DashboardController::class, 'domains'])
+    Route::get('linkwise/domains', [InertiaPagesController::class, 'domains'])
         ->name('linkwise.domains');
 
-    Route::get('linkwise/autolink', [DashboardController::class, 'autolink'])
+    Route::get('linkwise/autolink', [InertiaPagesController::class, 'autolink'])
         ->name('linkwise.autolink');
 
-    Route::get('linkwise/keywords', [DashboardController::class, 'keywords'])
+    Route::get('linkwise/keywords', [InertiaPagesController::class, 'keywords'])
         ->name('linkwise.keywords');
 
-    Route::get('linkwise/url-changer', [DashboardController::class, 'urlChanger'])
+    Route::get('linkwise/url-changer', [InertiaPagesController::class, 'urlChanger'])
         ->name('linkwise.urlchanger');
 
-    Route::get('linkwise/activity', [DashboardController::class, 'activity'])
+    Route::get('linkwise/activity', [InertiaPagesController::class, 'activity'])
         ->name('linkwise.activity');
     Route::get('linkwise/activity/{id}', [ActivityController::class, 'activityDetail'])
         ->name('linkwise.activity.detail');
