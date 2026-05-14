@@ -11,7 +11,9 @@ Bevor du dem User irgendwas zum Testen gibst, MUSS jeder Punkt erfüllt sein:
 
 Test-Verantwortung liegt bei Claude, nicht beim User. Findet der User einen funktionalen Bug den ein Test/Audit gefangen hätte → mein Fehler.
 
-## BLOCKING: Implementation Axiom
+## BLOCKING (Frontend-only): Implementation Axiom
+
+Greift nur bei `.vue`/`.js`-Touches. Bei reinen PHP/Backend-PRs überspringen.
 
 Vor jeder UI- oder Logik-Implementation:
 1. Statamic-Komponente prüfen (`vendor/statamic/cms/resources/js/components/ui/index.js`) — verfügbare: `Tabs`/`TabList`/`TabTrigger`/`TabContent`, `Dropdown`/`DropdownItem`/`DropdownMenu`/`DropdownSeparator`, `Modal`/`ModalClose`/`ModalTitle`, `Stack`/`StackHeader`/`StackContent`/`StackFooter`, `Header`, `Card`, `Panel`, `Button`, `Badge`, `Popover`, `ConfirmationModal`, directive `v-tooltip`.
@@ -32,7 +34,7 @@ Wenn User fragt "andere Stellen?" → ich war zu schmal.
 ## BLOCKING: Build verify nach jedem Frontend-Edit
 
 Nach jedem `.vue`/`.js` edit Pflichtreihenfolge:
-1. `PATH=/Users/rossbach/.nvm/versions/node/v22.22.2/bin:$PATH npm run build 2>&1 | tail -15` (NICHT -3 — Build-Errors stehen oben)
+1. `source ~/.nvm/nvm.sh && nvm use 22 && npm run build 2>&1 | tail -15` (NICHT -3 — Build-Errors stehen oben)
 2. Auf "✓ built in Xms" prüfen. Bei "Build failed" → STOP, fix syntax, retry.
 3. `cd ~/Herd/prose-peak-test && php artisan vendor:publish --provider="Arturrossbach\Linkwise\ServiceProvider" --force`
 4. Manifest-Hash neu + `grep -oE "<unique-changed-string>" public/vendor/linkwise/build/assets/addon-<NEW>.js` → Änderung muss im Bundle sein
@@ -40,26 +42,13 @@ Nach jedem `.vue`/`.js` edit Pflichtreihenfolge:
 
 ## BLOCKING: Single Source of Truth
 
-Bei Daten-Flow-Änderungen erst tracen wo der Wert herkommt + wo er angezeigt wird. Wenn an mehreren Stellen berechnet → eine ist authoritative, andere müssen sie nutzen. Heutige Sources of Truth:
+Bei Daten-Flow-Änderungen erst tracen wo der Wert herkommt + wo er angezeigt wird. Wenn an mehreren Stellen berechnet → eine ist authoritative, andere müssen sie nutzen.
 
-- **Suggestion counts**: `InboundEngine::suggest()` ist autoritativ. `DashboardController` ruft sie pro Entry und überschreibt `LinkReport::suggestionCounts()`. Keine duplizierte Suggestion-Logik in LinkReport.
-- **Outbound counts**: `LinkReport` (internal). `DashboardController` addiert external für `outbound_total`.
-- **Broken links**: `BrokenLinkChecker` schreibt JSON. `BrokenLinkReport` + Overview lesen daraus.
-- **Domain attributes**: `DomainReport` scannt. `domain-attributes.json` ist Storage. `LinkwiseLinkMark` liest fürs Rendering.
-- **Auto-link preview**: `AutoLinkApplier::applyRule(preview: true)`.
-- **Bulk completion**: alle 5 commands schreiben `phase=done` mit `heartbeat` at root. `JobLock::snapshot()` pickt latest by heartbeat. Frontend `LinkwiseLayout` rendert toast + persistent banner.
+Heutige SoTs (code-volatil, gepflegt): siehe Memory `sot_index.md`.
 
 ## Bulk-Write-Path Standard
 
-Jeder neue/geänderte bulk command MUSS:
-1. **`JobLock::registerCrashGuard`** früh
-2. **`SafeEntrySaver::verifyHashes`** per-record (in der loop) — NICHT fail-fast 409 im Controller
-3. **`BulkSnapshotStore::record` → `appendWrittenItem` per success → `recordPostHashesForEntries` → `markCompleted`**
-4. **`recordBulkSkipped`** im skip-pfad (anchor not found, hash conflict, throwable) für drawer-Sichtbarkeit
-5. **`'heartbeat' => time()` at ROOT** des `phase=done` cache (für frontend dedup + JobLock-snapshot-priority)
-6. **per-item try/catch** im loop → keine ganze-bulk-aborts
-
-Modelle: `LinkInsertCommand`, `DetailUnlinkCommand`, `UrlChangerApplyCommand`. Ausnahme: `BulkUnlinkCommand` fehlt noch verifyHashes (offene Tech-Debt).
+Jeder neue/geänderte bulk command MUSS 6 Punkte erfüllen (CrashGuard / per-record verifyHashes / Snapshot-Store-Quartett / recordBulkSkipped / heartbeat-at-root / per-item try-catch). Vollständige Liste + Modelle: Memory `bulk_write_path_standard.md`.
 
 ## Code Quality
 
