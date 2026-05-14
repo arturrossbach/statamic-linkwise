@@ -331,7 +331,7 @@ echo "\033[1m10. Suggestion counts match modal content\033[0m" . PHP_EOL;
 $countMismatch = 0;
 
 foreach ($records as $entryId => $record) {
-    // Simulate what DashboardController::suggestionCounts does
+    // Simulate what StatsApiController::suggestionCounts does
 
     // Inbound count (dry-run filtered)
     $inboundRaw = $inboundEngine->suggest($entryId, 50);
