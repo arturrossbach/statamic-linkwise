@@ -18,6 +18,13 @@
  * rather than mutating the shared `mockRule` constant.
  */
 
+// Computed at module load — always 5 seconds before "now" so
+// formatRelativeTime() (defined in RuleListTable.vue) consistently returns
+// "just now" (its < 10s branch). Without this the original hard-coded
+// '2026-05-15T12:00:00Z' aged into "2 hours ago" by the time the test
+// suite ran later in the same day — a real flake observed 2026-05-15.
+const RECENT_ISO = new Date(Date.now() - 5000).toISOString();
+
 export const mockRule = Object.freeze({
     id: 'r1',
     keyword: 'laravel',
@@ -27,7 +34,7 @@ export const mockRule = Object.freeze({
     linked_count: 2,
     linked_elsewhere_count: 1,
     not_insertable_count: 1,
-    last_applied_at: '2026-05-15T12:00:00Z',
+    last_applied_at: RECENT_ISO,
     last_applied_links_added: 4,
     case_sensitive: false,
     skip_if_exists: false,
