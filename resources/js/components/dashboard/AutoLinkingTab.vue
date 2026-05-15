@@ -393,6 +393,13 @@ import { sortableMixin } from '../shared/sortable.js';
 import { highlightKeyword } from '../../utils/highlight.js';
 import { isValidReplacementUrl } from '../../utils/urlValidation.js';
 import { isFormDirty } from '../../utils/formDirty.js';
+import {
+    truncateUrl,
+    formatAutoApply,
+    normalizeAutoApply,
+    formatExactDate,
+    wouldLinkForRule,
+} from '../../utils/ruleFormatting.js';
 import { bulkState, setHeavyState } from '../../services/bulkOperationService.js';
 
 const PREVIEW_STATUS_OPTIONS = [
@@ -526,7 +533,7 @@ export default {
             // not just a raw rule count. This is the "Apply Selected" preview-summary.
             const selectedActive = this.rules.filter(r => this.selectedRules.includes(r.id) && r.active);
             const inactiveCount = this.selectedRules.length - selectedActive.length;
-            const totalNewLinks = selectedActive.reduce((s, r) => s + this.wouldLinkForRule(r), 0);
+            const totalNewLinks = selectedActive.reduce((s, r) => s + wouldLinkForRule(r), 0);
             const ruleWord = selectedActive.length === 1 ? 'rule' : 'rules';
             const linkWord = totalNewLinks === 1 ? 'link' : 'links';
             const inactiveSuffix = inactiveCount > 0
@@ -693,7 +700,7 @@ export default {
             const field = this.sortField;
             return [...this.filteredRules].sort((a, b) => {
                 if (field === 'will_link_count') {
-                    return (this.wouldLinkForRule(a) - this.wouldLinkForRule(b)) * dir;
+                    return (wouldLinkForRule(a) - wouldLinkForRule(b)) * dir;
                 }
                 const aVal = a[field];
                 const bVal = b[field];
@@ -889,18 +896,10 @@ export default {
             return this.editingRule && this.editingRule.id === rule.id && this.formDirty;
         },
 
-        /**
-         * Entries where this rule would insert a NEW link right now.
-         * = match_count minus linked-to-target minus linked-elsewhere minus not-insertable.
-         * May be stale if the index is old (same staleness caveat as the rest of the table).
-         */
-        wouldLinkForRule(rule) {
-            const total = rule.match_count || 0;
-            const toTarget = rule.linked_count || 0;
-            const elsewhere = rule.linked_elsewhere_count || 0;
-            const notInsertable = rule.not_insertable_count || 0;
-            return Math.max(0, total - toTarget - elsewhere - notInsertable);
-        },
+        // wouldLinkForRule + truncateUrl + formatAutoApply + normalizeAutoApply
+        // + formatExactDate registered below as shorthand imports from
+        // utils/ruleFormatting.js (Sprint 5 PR 2d-prep, analog to PR #24's
+        // formDirty.js extract).
 
         findEntryTitle(entryId) {
             return this.entries.find(e => e.id === entryId)?.title || null;
@@ -915,7 +914,7 @@ export default {
                 once_per_post: rule.once_per_post,
                 skip_if_exists: rule.skip_if_exists,
                 case_sensitive: rule.case_sensitive,
-                auto_apply_on_save: this.normalizeAutoApply(rule.auto_apply_on_save),
+                auto_apply_on_save: normalizeAutoApply(rule.auto_apply_on_save),
             };
             // Snapshot the form's starting state so we can detect unsaved edits.
             this.editingRuleSnapshot = JSON.parse(JSON.stringify(this.newRule));
@@ -1499,28 +1498,14 @@ export default {
 
         highlightKeyword,
 
-        truncateUrl(url) {
-            return url.length > 50 ? url.substring(0, 47) + '...' : url;
-        },
-
-        // Map the tristate to a readable label for the Settings column.
-        formatAutoApply(value) {
-            return {
-                always: 'Always',
-                never: 'Never',
-                follow_global: 'Follow global',
-            }[value] || 'Follow global';
-        },
-
-        // Coerce backend values to the tri-state. Backwards-compat for old
-        // rules that stored a bool: true → 'follow_global', false → 'never'.
-        // Anything else → 'follow_global' (the safe default).
-        normalizeAutoApply(value) {
-            if (value === true) return 'follow_global';
-            if (value === false) return 'never';
-            if (['follow_global', 'always', 'never'].includes(value)) return value;
-            return 'follow_global';
-        },
+        // Pure formatting helpers — implementations live in utils/ruleFormatting.js.
+        // Registered as shorthand methods so the template can call them by name
+        // (Vue Options-API resolves template identifiers via component context,
+        // not module scope). Script-side callers use the bare import directly.
+        truncateUrl,
+        formatAutoApply,
+        normalizeAutoApply,
+        wouldLinkForRule,
 
         exportRules() {
             // Direct browser navigation — backend streams the CSV with
@@ -1596,14 +1581,7 @@ export default {
             return `${y} year${y === 1 ? '' : 's'} ago`;
         },
 
-        formatExactDate(iso) {
-            if (!iso) return '';
-            try {
-                return new Date(iso).toLocaleString();
-            } catch {
-                return iso;
-            }
-        },
+        formatExactDate,
 
         async fetch(url, method, body = null) {
             const options = {
