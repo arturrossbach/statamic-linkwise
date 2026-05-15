@@ -548,6 +548,117 @@ describe('AutoLinkingTab (Phase A characterisation)', () => {
         });
     });
 
+    // ── RulePreviewModal wiring pins (Sprint 5 PR 2e, post-extract) ─────
+    //
+    // Sub-Component extracted. These pins lock the wiring contract:
+    // parent ↔ child v-model bridges + the three action emits
+    // (`@close`, `@apply`, `@unlink`). The pre-extract behaviour for
+    // `previewModal` open/close is already covered by the
+    // "@preview-rule emit opens the previewModal with the rule" pin
+    // above — that flow is parent-owned and survives the extract.
+
+    describe('RulePreviewModal wiring', () => {
+        // Set up a mount that has a live previewModal so the child renders
+        // and its event handlers are reachable.
+        const mountWithOpenPreview = async (modalOverrides = {}) => {
+            const w = mount(AutoLinkingTab, {
+                props: {
+                    data: { rules: [mockRule], collections: [], auto_apply_on_save_enabled: false, urls: { store: '/x/rules' } },
+                    entries: [],
+                },
+                global: {
+                    mocks: { $page: { props: { linkwise: {} } } },
+                },
+            });
+            // Seed the modal directly — bypasses fetch/network. Async paths
+            // read these state fields, so this matches the post-previewRule
+            // shape exactly.
+            w.vm.previewModal = {
+                title: 'Preview: "laravel"',
+                keyword: 'laravel',
+                ruleId: 'r1',
+                loading: false,
+                items: [
+                    { id: 'e1', title: 'Entry 1', link_status: 'would_link', edit_url: '/e1', sentence_context: 'foo laravel bar' },
+                    { id: 'e2', title: 'Entry 2', link_status: 'linked_to_target', edit_url: '/e2', sentence_context: 'baz laravel qux' },
+                ],
+                ...modalOverrides,
+            };
+            await w.vm.$nextTick();
+            return w;
+        };
+
+        it('@close emit on RulePreviewModal nulls previewModal via closePreviewModal', async () => {
+            const w = await mountWithOpenPreview();
+            const modal = w.findComponent({ name: 'RulePreviewModal' });
+            expect(modal.exists()).toBe(true);
+            expect(w.vm.previewModal).not.toBeNull();
+            modal.vm.$emit('close');
+            await w.vm.$nextTick();
+            // closePreviewModal sets previewModal=null AND clears the two
+            // selection pools (resetPreviewModalState).
+            expect(w.vm.previewModal).toBeNull();
+            expect(w.vm.excludedEntryIds).toEqual([]);
+            expect(w.vm.selectedUnlinkIds).toEqual([]);
+        });
+
+        it('@apply emit on RulePreviewModal delegates to dispatchApplyAsync with excluded ids', async () => {
+            const w = await mountWithOpenPreview();
+            const spy = vi.spyOn(w.vm, 'dispatchApplyAsync').mockResolvedValue(undefined);
+            // Pre-set an exclusion so we can verify it's forwarded.
+            w.vm.excludedEntryIds = ['e1-excluded'];
+            const modal = w.findComponent({ name: 'RulePreviewModal' });
+            modal.vm.$emit('apply');
+            // applyFromPreview is async — flush microtasks.
+            await w.vm.$nextTick();
+            await new Promise(r => setTimeout(r, 0));
+            expect(spy).toHaveBeenCalledOnce();
+            const [rule, opts] = spy.mock.calls[0];
+            expect(rule.id).toBe('r1');
+            expect(opts.excluded_entry_ids).toEqual(['e1-excluded']);
+            spy.mockRestore();
+        });
+
+        it('@unlink emit on RulePreviewModal POSTs to detail-unlink-async', async () => {
+            const w = await mountWithOpenPreview();
+            // Need at least one selected id for the bail-early guard to pass.
+            w.vm.selectedUnlinkIds = ['e2'];
+            // Statamic globals used by unlinkSelectedFromPreview.
+            global.Statamic = {
+                $config: { get: vi.fn(() => 'csrf-token') },
+                $toast: { error: vi.fn(), success: vi.fn() },
+            };
+            global.fetch = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) });
+            const modal = w.findComponent({ name: 'RulePreviewModal' });
+            modal.vm.$emit('unlink');
+            await w.vm.$nextTick();
+            await new Promise(r => setTimeout(r, 0));
+            expect(global.fetch).toHaveBeenCalled();
+            const [url] = global.fetch.mock.calls[0];
+            expect(url).toBe('/cp/linkwise/detail-unlink-async');
+            delete global.fetch;
+            delete global.Statamic;
+        });
+
+        it('v-model:excluded-entry-ids: child update event mutates parent state', async () => {
+            const w = await mountWithOpenPreview();
+            const modal = w.findComponent({ name: 'RulePreviewModal' });
+            expect(w.vm.excludedEntryIds).toEqual([]);
+            modal.vm.$emit('update:excludedEntryIds', ['e1']);
+            await w.vm.$nextTick();
+            expect(w.vm.excludedEntryIds).toEqual(['e1']);
+        });
+
+        it('v-model:selected-unlink-ids: child update event mutates parent state', async () => {
+            const w = await mountWithOpenPreview();
+            const modal = w.findComponent({ name: 'RulePreviewModal' });
+            expect(w.vm.selectedUnlinkIds).toEqual([]);
+            modal.vm.$emit('update:selectedUnlinkIds', ['e2']);
+            await w.vm.$nextTick();
+            expect(w.vm.selectedUnlinkIds).toEqual(['e2']);
+        });
+    });
+
     // ── entryHashes — derives hash map from prop ───────────────────────
 
     describe('entryHashes computed', () => {
