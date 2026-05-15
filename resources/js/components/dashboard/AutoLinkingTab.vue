@@ -122,120 +122,23 @@
             @confirm-delete="confirmDelete"
         />
 
-        <!-- Preview Modal -->
-        <Stack :open="previewModal !== null" @update:open="closePreviewModal" :title="previewModal?.title || ''">
-            <div v-if="previewModal">
-                <div v-if="previewModal.loading" class="py-4 text-center text-gray-400">Checking entries...</div>
-                <div v-else-if="previewModal.items.length === 0" class="py-4 text-center text-gray-400">No matching entries found.</div>
-                <div v-else>
-                    <!-- Status Filter + Summary + Apply button -->
-                    <div class="flex items-center justify-between mb-4 gap-4 flex-wrap">
-                        <div class="flex items-center gap-3">
-                            <select
-                                v-if="availablePreviewStatusOptions.length > 1"
-                                v-model="previewStatusFilter"
-                                aria-label="Filter by status"
-                                class="text-sm border border-gray-300 dark:border-gray-700 dark:bg-gray-800 rounded-md px-2 py-1.5"
-                            >
-                                <option value="">All statuses</option>
-                                <option v-for="opt in availablePreviewStatusOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                            </select>
-                            <p class="text-sm text-gray-500 dark:text-gray-400">
-                                <strong :class="applyablePreviewCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'">{{ applyablePreviewCount }}</strong> will be linked<template v-if="applyablePreviewCount !== wouldLinkCount"> ({{ wouldLinkCount }} matching, {{ wouldLinkCount - applyablePreviewCount }} excluded)</template>,
-                                {{ linkedToTargetCount }} linked to target,
-                                {{ linkedElsewhereCount }} linked elsewhere<template v-if="notInsertableCount > 0">,
-                                {{ notInsertableCount }} cannot insert</template>
-                            </p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <Button
-                                v-if="linkedToTargetCount > 0 && previewModal.ruleId"
-                                :text="`Unlink (${selectedUnlinkIds.length})`"
-                                :disabled="selectedUnlinkIds.length === 0 || unlinkingFromPreview"
-                                :loading="unlinkingFromPreview"
-                                v-tooltip="'Remove the rule\'s link from selected entries (uses the same atomic, conflict-safe save path as DetailModal Bulk Unlink)'"
-                                @click="unlinkSelectedFromPreview"
-                            />
-                            <Button
-                                v-if="wouldLinkCount > 0 && previewModal.ruleId"
-                                :text="`Apply (${applyablePreviewCount})`"
-                                variant="primary"
-                                :disabled="applyablePreviewCount === 0 || applyingPreview"
-                                :loading="applyingPreview"
-                                @click="applyFromPreview"
-                            />
-                        </div>
-                    </div>
-
-                    <Panel>
-                        <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
-                            <thead>
-                                <tr>
-                                    <SortableHeader :sortable="false">
-                                        <input
-                                            type="checkbox"
-                                            class="rounded"
-                                            :checked="allPreviewRowsSelected"
-                                            :indeterminate.prop="somePreviewRowsSelected && !allPreviewRowsSelected"
-                                            :disabled="togglablePreviewRowCount === 0"
-                                            @change="togglePreviewSelectAll"
-                                            v-tooltip="'Toggle every selectable row in this preview (would-link rows for Apply, linked-to-target rows for Unlink)'"
-                                            aria-label="Select all selectable rows"
-                                        />
-                                    </SortableHeader>
-                                    <SortableHeader label="Target Entry" :active="previewSortField === 'title'" :direction="previewSortDirection" @sort="togglePreviewSort('title')" />
-                                    <SortableHeader label="Context" :sortable="false" />
-                                    <SortableHeader label="Status" align="center" :active="previewSortField === 'link_status'" :direction="previewSortDirection" @sort="togglePreviewSort('link_status')" />
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr
-                                    v-for="(item, idx) in sortedPreviewItems"
-                                    :key="`${item.id}-${idx}`"
-                                    :class="{ 'opacity-50': item.link_status === 'would_link' && excludedEntryIds.includes(item.id) }"
-                                >
-                                    <td>
-                                        <input
-                                            v-if="item.link_status === 'would_link'"
-                                            type="checkbox"
-                                            :checked="!excludedEntryIds.includes(item.id)"
-                                            @change="toggleExclude(item.id)"
-                                            class="rounded"
-                                            :aria-label="`Include '${item.title}' when applying`"
-                                            v-tooltip="'Uncheck to skip this entry when applying'"
-                                        />
-                                        <input
-                                            v-else-if="item.link_status === 'linked_to_target'"
-                                            type="checkbox"
-                                            :checked="selectedUnlinkIds.includes(item.id)"
-                                            @change="toggleUnlinkSelection(item.id)"
-                                            class="rounded"
-                                            :aria-label="`Select '${item.title}' for unlink`"
-                                            v-tooltip="'Check to include this entry when removing the rule\'s links'"
-                                        />
-                                    </td>
-                                    <td>
-                                        <Link v-if="item.edit_url" :href="item.edit_url" class="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">{{ item.title }}</Link>
-                                        <span v-else class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ item.title }}</span>
-                                        <BardBadge v-if="item.id" :entry-id="item.id" class="ml-1.5" />
-                                    </td>
-                                    <td class="text-gray-400 dark:text-gray-500 text-xs">
-                                        <span v-if="item.sentence_context" v-html="highlightKeyword(item.sentence_context, previewModal.keyword)"></span>
-                                        <span v-else class="text-gray-300 dark:text-gray-600">—</span>
-                                    </td>
-                                    <td class="text-center whitespace-nowrap">
-                                        <span v-if="item.link_status === 'linked_to_target'" class="text-xs px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">Linked to target</span>
-                                        <span v-else-if="item.link_status === 'linked_elsewhere'" class="text-xs px-1.5 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400" v-tooltip="'Already linked to a different URL. Use the URL Changer to update it.'">Linked elsewhere</span>
-                                        <span v-else-if="item.link_status === 'not_insertable'" class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Keyword was found in plain text, but Bard cannot insert a link there — the text may span multiple nodes or sit inside a code block.'">Cannot insert</span>
-                                        <span v-else class="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">Would link</span>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table></div>
-                    </Panel>
-                </div>
-            </div>
-        </Stack>
+        <!-- Preview Modal — extracted to RulePreviewModal.vue in Sprint 5 PR 2e.
+             Variante A (refined): previewModal + selection pools (excludedEntryIds,
+             selectedUnlinkIds) stay here because async paths (previewRule,
+             applyFromPreview, unlinkSelectedFromPreview) read them outside the
+             modal's mount window. Pure view-state (sort/filter/derived counts)
+             lives inside the child.  Actions are no-arg emits — the parent
+             already knows previewModal.ruleId + the selection pools. -->
+        <RulePreviewModal
+            :preview-modal="previewModal"
+            v-model:excluded-entry-ids="excludedEntryIds"
+            v-model:selected-unlink-ids="selectedUnlinkIds"
+            :unlinking-from-preview="unlinkingFromPreview"
+            :applying-preview="applyingPreview"
+            @close="closePreviewModal"
+            @apply="applyFromPreview"
+            @unlink="unlinkSelectedFromPreview"
+        />
 
         <!-- Delete Confirmation -->
         <ConfirmationModal
@@ -276,16 +179,14 @@
 </template>
 
 <script>
-import { Link, router as inertiaRouter } from '@statamic/cms/inertia';
-import { Card, Panel, Button, Stack, ConfirmationModal, Modal, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Alert, Icon, Badge } from '@statamic/cms/ui';
+import { router as inertiaRouter } from '@statamic/cms/inertia';
+import { Card, Button, ConfirmationModal, Modal, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Alert, Icon, Badge } from '@statamic/cms/ui';
 import HelpIcon from '../shared/HelpIcon.vue';
-import SortableHeader from '../shared/SortableHeader.vue';
 import MultiSelect from '../shared/MultiSelect.vue';
-import BardBadge from '../shared/BardBadge.vue';
 import RuleForm from './RuleForm.vue';
 import RuleListTable from './RuleListTable.vue';
+import RulePreviewModal from './RulePreviewModal.vue';
 import { sortableMixin } from '../shared/sortable.js';
-import { highlightKeyword } from '../../utils/highlight.js';
 import { isValidReplacementUrl } from '../../utils/urlValidation.js';
 import { isFormDirty } from '../../utils/formDirty.js';
 import {
@@ -297,15 +198,8 @@ import {
 } from '../../utils/ruleFormatting.js';
 import { bulkState, setHeavyState } from '../../services/bulkOperationService.js';
 
-const PREVIEW_STATUS_OPTIONS = [
-    { value: 'would_link', label: 'Would link' },
-    { value: 'linked_to_target', label: 'Linked to target' },
-    { value: 'linked_elsewhere', label: 'Linked elsewhere' },
-    { value: 'not_insertable', label: 'Cannot insert' },
-];
-
 export default {
-    components: { Link, Card, Panel, Button, Stack, ConfirmationModal, Modal, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Alert, Icon, Badge, HelpIcon, SortableHeader, MultiSelect, BardBadge, RuleForm, RuleListTable },
+    components: { Card, Button, ConfirmationModal, Modal, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Alert, Icon, Badge, HelpIcon, MultiSelect, RuleForm, RuleListTable, RulePreviewModal },
 
     mixins: [sortableMixin],
 
@@ -325,10 +219,8 @@ export default {
             // User can switch to alphabetical via the Keyword column header.
             sortField: 'created_at',
             sortDirection: 'desc',
-            previewSortField: 'title',
-            previewSortDirection: 'asc',
-            // Single status filter for the Preview table. '' = no filter (show all).
-            previewStatusFilter: '',
+            // Preview-modal view-state (sort field/direction + status filter)
+            // lives inside RulePreviewModal.vue — see Sprint 5 PR 2e.
             applyingAll: false,
             previewModal: null,
             // IDs of entries the user unchecked in the Preview modal — Apply skips these.
@@ -438,145 +330,11 @@ export default {
             return `Apply ${selectedActive.length} active ${ruleWord} — about ${totalNewLinks} new ${linkWord} will be inserted${inactiveSuffix}. Inserted links stay in the entries even if you later delete the rule.`;
         },
 
-        // Only show filter options that actually appear in this preview's items.
-        availablePreviewStatusOptions() {
-            const presentStatuses = new Set();
-            for (const i of this.previewModal?.items || []) {
-                if (i.link_status) presentStatuses.add(i.link_status);
-            }
-            return PREVIEW_STATUS_OPTIONS.filter(o => presentStatuses.has(o.value));
-        },
-
-        /**
-         * Flat list for the Preview table. Applies user-chosen status filter, then
-         * sort (previewSortField / previewSortDirection). Tie-breaker keeps
-         * multi-occurrence rows of the same entry together.
-         */
-        sortedPreviewItems() {
-            let items = [...(this.previewModal?.items || [])];
-            if (this.previewStatusFilter) {
-                items = items.filter(i => i.link_status === this.previewStatusFilter);
-            }
-            const statusRank = { would_link: 0, linked_elsewhere: 1, not_insertable: 2, linked_to_target: 3 };
-            const dir = this.previewSortDirection === 'asc' ? 1 : -1;
-            const field = this.previewSortField;
-            return items.sort((a, b) => {
-                let primary;
-                if (field === 'link_status') {
-                    primary = ((statusRank[a.link_status] ?? 4) - (statusRank[b.link_status] ?? 4)) * dir;
-                } else {
-                    primary = String(a[field] ?? '').localeCompare(String(b[field] ?? '')) * dir;
-                }
-                if (primary !== 0) return primary;
-                const tByTitle = String(a.title || '').localeCompare(String(b.title || ''));
-                if (tByTitle !== 0) return tByTitle;
-                return (statusRank[a.link_status] ?? 4) - (statusRank[b.link_status] ?? 4);
-            });
-        },
-
-        groupedPreview() {
-            if (!this.previewModal?.items) return [];
-            const groups = {};
-            for (const item of this.previewModal.items) {
-                if (!groups[item.id]) {
-                    groups[item.id] = {
-                        id: item.id,
-                        title: item.title,
-                        edit_url: item.edit_url,
-                        occurrences: [],
-                        hasWouldLink: false,
-                    };
-                }
-                groups[item.id].occurrences.push(item);
-                if (item.link_status === 'would_link') groups[item.id].hasWouldLink = true;
-            }
-            return Object.values(groups);
-        },
-
-        wouldLinkCount() {
-            return this.groupedPreview.filter(g => g.hasWouldLink).length;
-        },
-
-        /**
-         * Header-checkbox state for the preview table. Selection lives in
-         * two pools (excludedEntryIds for would_link, selectedUnlinkIds for
-         * linked_to_target) — these computeds collapse both into the
-         * canonical select-all semantics: are all toggleable rows ON?
-         *
-         * Toggleable = a row whose status has a checkbox (would_link or
-         * linked_to_target). Sentence_status rows (linked_elsewhere,
-         * not_insertable) are skipped — no checkbox, nothing to toggle.
-         *
-         * Filter-aware: when previewStatusFilter is set the count covers
-         * only visible rows, matching the BrokenLinks "select all visible"
-         * convention.
-         */
-        togglablePreviewRows() {
-            return this.sortedPreviewItems.filter(
-                i => i.link_status === 'would_link' || i.link_status === 'linked_to_target',
-            );
-        },
-
-        togglablePreviewRowCount() {
-            return this.togglablePreviewRows.length;
-        },
-
-        somePreviewRowsSelected() {
-            for (const item of this.togglablePreviewRows) {
-                if (item.link_status === 'would_link' && ! this.excludedEntryIds.includes(item.id)) {
-                    return true;
-                }
-                if (item.link_status === 'linked_to_target' && this.selectedUnlinkIds.includes(item.id)) {
-                    return true;
-                }
-            }
-            return false;
-        },
-
-        allPreviewRowsSelected() {
-            if (this.togglablePreviewRows.length === 0) return false;
-            for (const item of this.togglablePreviewRows) {
-                if (item.link_status === 'would_link' && this.excludedEntryIds.includes(item.id)) {
-                    return false;
-                }
-                if (item.link_status === 'linked_to_target' && ! this.selectedUnlinkIds.includes(item.id)) {
-                    return false;
-                }
-            }
-            return true;
-        },
-
-        linkedToTargetCount() {
-            if (!this.previewModal?.items) return 0;
-            const ids = new Set();
-            for (const i of this.previewModal.items) {
-                if (i.link_status === 'linked_to_target') ids.add(i.id);
-            }
-            return ids.size;
-        },
-
-        linkedElsewhereCount() {
-            if (!this.previewModal?.items) return 0;
-            const ids = new Set();
-            for (const i of this.previewModal.items) {
-                if (i.link_status === 'linked_elsewhere') ids.add(i.id);
-            }
-            return ids.size;
-        },
-
-        notInsertableCount() {
-            if (!this.previewModal?.items) return 0;
-            const ids = new Set();
-            for (const i of this.previewModal.items) {
-                if (i.link_status === 'not_insertable') ids.add(i.id);
-            }
-            return ids.size;
-        },
-
-        // Entries that WILL be linked: all would_link groups that the user has not excluded.
-        applyablePreviewCount() {
-            return this.groupedPreview.filter(g => g.hasWouldLink && !this.excludedEntryIds.includes(g.id)).length;
-        },
+        // Preview-modal computeds (availablePreviewStatusOptions, sortedPreviewItems,
+        // groupedPreview, wouldLinkCount, togglablePreview*, somePreview*,
+        // allPreview*, linkedToTarget/Elsewhere/NotInsertableCount,
+        // applyablePreviewCount) all moved to RulePreviewModal.vue in Sprint 5
+        // PR 2e — none are read by the parent's async paths.
 
         allSelected() {
             return this.filteredRules.length > 0 && this.filteredRules.every(r => this.selectedRules.includes(r.id));
@@ -1197,78 +955,15 @@ export default {
         resetPreviewModalState() {
             this.excludedEntryIds = [];
             this.selectedUnlinkIds = [];
-            this.previewStatusFilter = '';
+            // previewStatusFilter (+ sort field/dir) is owned by
+            // RulePreviewModal.vue and resets via its watch on
+            // previewModal.ruleId — see Sprint 5 PR 2e.
         },
 
-        togglePreviewSort(field) {
-            if (this.previewSortField === field) {
-                this.previewSortDirection = this.previewSortDirection === 'asc' ? 'desc' : 'asc';
-            } else {
-                this.previewSortField = field;
-                this.previewSortDirection = 'asc';
-            }
-        },
-
-        toggleExclude(entryId) {
-            const idx = this.excludedEntryIds.indexOf(entryId);
-            if (idx > -1) this.excludedEntryIds.splice(idx, 1);
-            else this.excludedEntryIds.push(entryId);
-        },
-
-        toggleUnlinkSelection(entryId) {
-            const idx = this.selectedUnlinkIds.indexOf(entryId);
-            if (idx > -1) this.selectedUnlinkIds.splice(idx, 1);
-            else this.selectedUnlinkIds.push(entryId);
-        },
-
-        /**
-         * Header-checkbox handler. Toggles every togglable row's selection
-         * state in one shot, across both action pools:
-         *   - would_link rows  → in/out of excludedEntryIds (apply scope)
-         *   - linked_to_target → in/out of selectedUnlinkIds (unlink scope)
-         *
-         * The single click updates BOTH the "Apply (X)" and "Unlink (Y)"
-         * counters consistently. User then clicks whichever action button
-         * matches their intent.
-         */
-        togglePreviewSelectAll() {
-            const togglable = this.togglablePreviewRows;
-            if (togglable.length === 0) return;
-
-            if (this.allPreviewRowsSelected) {
-                // De-select all: exclude every would_link, clear unlink set.
-                const wouldLinkIds = togglable
-                    .filter(i => i.link_status === 'would_link')
-                    .map(i => i.id);
-                // Merge with any pre-existing exclusions outside the visible
-                // togglable set (filter-aware behaviour) so we don't
-                // accidentally re-include rows the user excluded earlier.
-                this.excludedEntryIds = Array.from(
-                    new Set([...this.excludedEntryIds, ...wouldLinkIds]),
-                );
-                const linkedTargetIds = new Set(
-                    togglable.filter(i => i.link_status === 'linked_to_target').map(i => i.id),
-                );
-                this.selectedUnlinkIds = this.selectedUnlinkIds.filter(
-                    id => ! linkedTargetIds.has(id),
-                );
-            } else {
-                // Select all: clear exclusions of visible would_link rows,
-                // add visible linked_to_target rows to the unlink set.
-                const wouldLinkIds = new Set(
-                    togglable.filter(i => i.link_status === 'would_link').map(i => i.id),
-                );
-                this.excludedEntryIds = this.excludedEntryIds.filter(
-                    id => ! wouldLinkIds.has(id),
-                );
-                const newUnlinkIds = togglable
-                    .filter(i => i.link_status === 'linked_to_target')
-                    .map(i => i.id);
-                this.selectedUnlinkIds = Array.from(
-                    new Set([...this.selectedUnlinkIds, ...newUnlinkIds]),
-                );
-            }
-        },
+        // togglePreviewSort / toggleExclude / toggleUnlinkSelection /
+        // togglePreviewSelectAll all moved to RulePreviewModal.vue in
+        // Sprint 5 PR 2e — they mutate selection pools via v-model emits
+        // (update:excludedEntryIds / update:selectedUnlinkIds).
 
         /**
          * Bulk-remove the rule's link from selected `linked_to_target` entries.
@@ -1379,7 +1074,17 @@ export default {
 
         async applyFromPreview() {
             if (!this.previewModal?.ruleId || this.applyingPreview) return;
-            if (this.applyablePreviewCount === 0) return;
+
+            // Defensive recompute: child computes applyablePreviewCount over
+            // groupedPreview, but the child only fires `apply` when its button
+            // is enabled (count > 0). We still guard here against direct calls.
+            const applyableIds = new Set();
+            for (const item of (this.previewModal?.items || [])) {
+                if (item.link_status === 'would_link' && !this.excludedEntryIds.includes(item.id)) {
+                    applyableIds.add(item.id);
+                }
+            }
+            if (applyableIds.size === 0) return;
 
             const rule = this.rules.find(r => r.id === this.previewModal.ruleId);
             if (!rule) return;
@@ -1395,8 +1100,8 @@ export default {
             this.applyingPreview = false;
         },
 
-
-        highlightKeyword,
+        // highlightKeyword moved into RulePreviewModal.vue (only consumer) in
+        // Sprint 5 PR 2e.
 
         // Pure formatting helpers — implementations live in utils/ruleFormatting.js.
         // Registered as shorthand methods so the template can call them by name
