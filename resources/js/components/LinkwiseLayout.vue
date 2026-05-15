@@ -239,6 +239,7 @@ import { Head, Link, router as inertiaRouter } from '@statamic/cms/inertia';
 import { Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal } from '@statamic/cms/ui';
 import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterruptedBulk, recordCompletion, getLastCompletion, clearLastCompletion } from '../services/bulkOperationService.js';
 import { activeLabel, shortLabel, completionLabel, completionVariant } from '../services/bulkLabels.js';
+import { buildCompletionSignature, isCompletionStale } from '../services/bulkSignature.js';
 import { readString, writeString } from '../utils/safeStorage.js';
 
 // Hardcoded for V1 — wire from composer.json via route props once we tag a
@@ -829,69 +830,17 @@ export default {
                 // Terminal phase. Clear heavy state, dedup completion toast.
                 setHeavyState(null);
 
-                // Build a CONTENT-based signature so different runs of the
-                // same kind produce different signatures. Without the kind-
-                // specific extras, multi-rule runs ALL get signature
-                // `applyrule:done:0:0:` (because current/total live in
-                // status.extra for multi-mode) → dedup would block every
-                // run after the first.
+                // Signature construction + stale detection are extracted to
+                // `services/bulkSignature.js` (Sprint 5 PR 3a). The 5+
+                // documented bugs in the kind-specific signature truth-table
+                // are pinned by `tests/Vue/services/bulkSignature.test.js`.
                 const tExtra = status.extra || {};
-                let kindSig = '';
-                if (status.kind === 'applyrule') {
-                    kindSig = `:r${tExtra.total_rules || 0}:la${tExtra.total_links_added || tExtra.links_added || 0}`;
-                } else if (status.kind === 'urlchanger') {
-                    kindSig = `:a${tExtra.action || ''}:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}`;
-                } else if (status.kind === 'detailunlink') {
-                    // heartbeat makes repeated identical-outcome runs unique
-                    // — without it two consecutive "5 removed / 0 skipped"
-                    // bulks produced the same signature and the second
-                    // recordCompletion was dedup-suppressed → user saw NO
-                    // persistent success banner after the second remove.
-                    // Real bug 2026-05-11.
-                    kindSig = `:m${tExtra.source_mode || ''}:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}:hb${tExtra.heartbeat || tExtra.started_by_id || ''}`;
-                } else if (status.kind === 'bulkunlink') {
-                    // Same uniqueness fix as detailunlink — heartbeat in the
-                    // signature so back-to-back identical-outcome bulks each
-                    // fire their own toast + banner.
-                    kindSig = `:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}:hb${tExtra.heartbeat || tExtra.started_by_id || ''}`;
-                } else if (status.kind === 'outboundinsert' || status.kind === 'inboundinsert') {
-                    // Without this branch, repeated outbound/inbound inserts
-                    // with identical succeeded/skipped numbers (very common
-                    // case: skipped:1 from anchor-not-found over and over)
-                    // produced the SAME signature and the second + every
-                    // subsequent toast got dedup-suppressed. User saw the
-                    // banner blink and nothing else. Real bug 2026-05-10.
-                    // started_by_id makes the signature unique per session/
-                    // user; combined with heartbeat (a per-run timestamp)
-                    // every actual run gets a fresh signature.
-                    kindSig = `:s${tExtra.succeeded || 0}:sk${tExtra.skipped || 0}:hb${tExtra.heartbeat || tExtra.started_by_id || ''}`;
-                }
-                const signature = `${status.kind}:${phase}:${status.current}:${status.total}:${status.message || ''}${kindSig}`;
+                const signature = buildCompletionSignature(status);
                 const SEEN_KEY = 'linkwise:bulkToastShown';
                 if (readString(SEEN_KEY) === signature) return;
                 writeString(SEEN_KEY, signature);
 
-                // Stale-completion guard (2026-05-11): if the bulk's done-status
-                // is older than 60s by the time polling first observes it
-                // (= user tabbed away mid-bulk and just came back), suppress
-                // the transient toast and the auto-open of the notifications
-                // disclosure. The persistent banner still hydrates from
-                // sessionStorage so the user has a recap, but they don't get
-                // surprised by a "success!" toast for a 10-minute-old action.
-                // Compares server-side heartbeat against client now; small
-                // clock drift between server/client is absorbed by the 60s
-                // threshold.
-                //
-                // Missing heartbeat (legacy status from before heartbeat was
-                // added everywhere) → treat as STALE. Otherwise an old
-                // pre-heartbeat 'done' cache entry sitting around could fire
-                // a fresh-looking toast on first poll. Real bug observed
-                // 2026-05-11 with a legacy `scan` terminal cache.
-                const heartbeat = tExtra.heartbeat || 0;
-                const ageSec = heartbeat ? Math.max(0, (Date.now() / 1000) - heartbeat) : Infinity;
-                const stale = ageSec > 60;
-
-                if (! stale) {
+                if (! isCompletionStale(tExtra.heartbeat || 0, Date.now() / 1000)) {
                     this.fireTerminalToast(status);
                 }
 
