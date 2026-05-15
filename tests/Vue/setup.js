@@ -20,6 +20,19 @@ config.global.directives = {
     },
 };
 
+/**
+ * Statamic-CP global mocks — these helpers are added by the Statamic
+ * Inertia adapter at runtime in production. Tests don't boot the
+ * adapter, so we provide passthrough/stub implementations.
+ *
+ *   - `cp_url(path)` → builds a CP-relative URL. Tests don't care about
+ *     the actual prefix, so we return the path verbatim.
+ */
+config.global.mocks = {
+    ...(config.global.mocks || {}),
+    cp_url: (path) => `/cp/${path}`,
+};
+
 beforeEach(() => {
     __resetRouterCalls();
 });
