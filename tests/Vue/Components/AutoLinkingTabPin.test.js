@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { shallowMount } from '@vue/test-utils';
+import { shallowMount, mount } from '@vue/test-utils';
 import AutoLinkingTab from '@/components/dashboard/AutoLinkingTab.vue';
 
 /**
@@ -231,6 +231,47 @@ describe('AutoLinkingTab (Phase A characterisation)', () => {
             wrapper.vm.selectedRules = ['r1', 'r2'];
             expect(wrapper.vm.selectedActiveCount + wrapper.vm.selectedInactiveCount)
                 .toBe(wrapper.vm.selectedRules.length);
+        });
+    });
+
+    // ── Render bridges — DOM markers stable across Sub-Component-Split ──
+    //
+    // These pin output that MUST persist when Z. 20-167 / Z. 215-353 / Z. 355-468
+    // get extracted to RuleForm / RuleListTable / RulePreviewModal sub-components
+    // in PR 2c–2e. Tests use text-content matching so they're agnostic to
+    // whether the markup comes from inline template or a child component.
+
+    describe('Render bridges', () => {
+        // Full mount() (not shallowMount) so Statamic-UI-stubs render their
+        // slot content. Render-pins must see the actual heading text inside
+        // the wrapper Cards / Modals.
+        const fullMount = () => mount(AutoLinkingTab, {
+            props: {
+                data: { rules: [], collections: [], auto_apply_on_save_enabled: false, urls: {} },
+                entries: [],
+            },
+            global: {
+                mocks: { $page: { props: { linkwise: {} } } },
+            },
+        });
+
+        it('renders "Create Rule" heading when not in edit mode', () => {
+            const w = fullMount();
+            expect(w.text()).toContain('Create Rule');
+        });
+
+        it('renders "Edit Rule" heading when editingRule is set', async () => {
+            const w = fullMount();
+            w.vm.editingRule = { id: 'r1', keyword: 'kw', url: 'https://x.com' };
+            w.vm.editingRuleSnapshot = { keyword: 'kw', url: 'https://x.com' };
+            w.vm.newRule = { keyword: 'kw', url: 'https://x.com' };
+            await w.vm.$nextTick();
+            expect(w.text()).toContain('Edit Rule');
+        });
+
+        it('renders "Auto-Linking Rules" intro card heading', () => {
+            const w = fullMount();
+            expect(w.text()).toContain('Auto-Linking Rules');
         });
     });
 
