@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { shallowMount, mount } from '@vue/test-utils';
 import AutoLinkingTab from '@/components/dashboard/AutoLinkingTab.vue';
 
@@ -272,6 +272,79 @@ describe('AutoLinkingTab (Phase A characterisation)', () => {
         it('renders "Auto-Linking Rules" intro card heading', () => {
             const w = fullMount();
             expect(w.text()).toContain('Auto-Linking Rules');
+        });
+    });
+
+    // ── Sub-Component event-bridge pins (Sprint 5 PR 2c) ────────────────
+    //
+    // RuleForm.vue now owns the form template; the parent listens for
+    // `submit` / `cancel` / `entry-picked` events. These pins verify the
+    // wiring — Render-Bridge text-content alone wouldn't catch a renamed
+    // event or a typo'd handler binding.
+
+    describe('RuleForm event bridges', () => {
+        const fullMount = () => mount(AutoLinkingTab, {
+            props: {
+                data: { rules: [], collections: [], auto_apply_on_save_enabled: false, urls: {} },
+                entries: [],
+            },
+            global: {
+                mocks: { $page: { props: { linkwise: {} } } },
+            },
+        });
+
+        it('@submit emit on RuleForm calls saveRule which posts via fetch', async () => {
+            const w = fullMount();
+            // Spy on `fetch` (the wrapper's internal HTTP helper, not window.fetch).
+            // saveRule short-circuits when !canCreate, so we set up the
+            // minimal canCreate=true preconditions before the emit.
+            w.vm.newRule.keyword = 'laravel';
+            w.vm.linkMode = 'url';
+            w.vm.newRule.url = 'https://laravel.com';
+            await w.vm.$nextTick();
+            expect(w.vm.canCreate).toBe(true);
+
+            const fetchSpy = vi.spyOn(w.vm, 'fetch').mockResolvedValue({ ok: true, rule: { id: 'r1' } });
+            w.findComponent({ name: 'RuleForm' }).vm.$emit('submit');
+            await w.vm.$nextTick();
+            // saveRule kicks off the keyword-loop iteration; first iteration
+            // synchronously calls fetch(...). If the template binding were
+            // broken (renamed event, typo'd handler) fetchSpy would not be hit.
+            expect(fetchSpy).toHaveBeenCalled();
+            fetchSpy.mockRestore();
+        });
+
+        it('@cancel emit on RuleForm resets editingRule via cancelEdit', async () => {
+            const w = fullMount();
+            w.vm.editingRule = { id: 'r1', keyword: 'kw' };
+            w.vm.editingRuleSnapshot = { keyword: 'kw' };
+            await w.vm.$nextTick();
+            w.findComponent({ name: 'RuleForm' }).vm.$emit('cancel');
+            await w.vm.$nextTick();
+            expect(w.vm.editingRule).toBeNull();
+            expect(w.vm.editingRuleSnapshot).toBeNull();
+        });
+
+        it('@entry-picked emit on RuleForm forwards to parent onEntryPicked', async () => {
+            const w = fullMount();
+            const payload = [{ id: 'e42', title: 'Foo Bar', collection: { handle: 'pages' } }];
+            w.findComponent({ name: 'RuleForm' }).vm.$emit('entry-picked', payload);
+            await w.vm.$nextTick();
+            expect(w.vm.selectedEntry).toEqual({
+                id: 'e42',
+                title: 'Foo Bar',
+                collection: 'pages',
+            });
+            expect(w.vm.newRule.url).toBe('statamic://entry::e42');
+        });
+
+        it('parent openEntrySelector bridges to RuleForm ref', () => {
+            const w = fullMount();
+            const ruleForm = w.findComponent({ name: 'RuleForm' });
+            const spy = vi.spyOn(ruleForm.vm, 'openEntrySelector').mockImplementation(() => {});
+            w.vm.openEntrySelector();
+            expect(spy).toHaveBeenCalledOnce();
+            spy.mockRestore();
         });
     });
 
