@@ -514,6 +514,8 @@ import MultiSelect from '../shared/MultiSelect.vue';
 import BardBadge from '../shared/BardBadge.vue';
 import { sortableMixin } from '../shared/sortable.js';
 import { highlightKeyword } from '../../utils/highlight.js';
+import { isValidReplacementUrl } from '../../utils/urlValidation.js';
+import { isFormDirty } from '../../utils/formDirty.js';
 import { bulkState, setHeavyState } from '../../services/bulkOperationService.js';
 
 const PREVIEW_STATUS_OPTIONS = [
@@ -595,14 +597,17 @@ export default {
         },
         // True when the form is in edit mode AND the user has made unsaved changes.
         // Compares the live form state to the snapshot taken when edit started.
+        // Logic extracted to {@see resources/js/utils/formDirty.js} during
+        // REV-FE-01 Phase B — same dirty-tracking semantics will be reused
+        // by URL Changer + Target Keyword edit-modals as they grow.
         formDirty() {
-            if (!this.editingRule || !this.editingRuleSnapshot) return false;
-            const snap = this.editingRuleSnapshot;
-            for (const key of Object.keys(snap)) {
-                if (snap[key] !== this.newRule[key]) return true;
-            }
-            if (this.linkMode !== this.editingLinkModeSnapshot) return true;
-            return false;
+            if (!this.editingRule) return false;
+            return isFormDirty(
+                this.editingRuleSnapshot,
+                this.newRule,
+                this.editingLinkModeSnapshot,
+                this.linkMode,
+            );
         },
 
         canCreate() {
@@ -628,25 +633,14 @@ export default {
         },
 
         /**
-         * Validates the Custom URL input. Same rules as the Broken Links tab:
-         * no whitespace, parses via URL constructor, allowed protocol, and for
-         * http(s) the hostname must look like a DNS name (≥1 dot, only safe chars).
+         * Validates the Custom URL input. Same rules as the Broken Links tab —
+         * actually the SAME implementation since REV-FE-01 Phase B: both flows
+         * delegate to {@see resources/js/utils/urlValidation.js#isValidReplacementUrl}.
+         * Removes the duplicate body that lived inline since the AutoLink tab
+         * shipped, eliminating drift risk between the two surfaces.
          */
         customUrlValid() {
-            const v = (this.newRule.url || '').trim();
-            if (!v || /\s/.test(v)) return false;
-            let url;
-            try {
-                url = new URL(v);
-            } catch {
-                return false;
-            }
-            if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)) return false;
-            if (['http:', 'https:'].includes(url.protocol)) {
-                if (!/^[a-z0-9.-]+$/i.test(url.hostname)) return false;
-                if (!url.hostname.includes('.')) return false;
-            }
-            return true;
+            return isValidReplacementUrl(this.newRule.url);
         },
 
         applyConfirmBodyText() {
