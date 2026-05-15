@@ -50,17 +50,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash /Users/rossbach/statamic-linkwise/.claude/hooks/session-end-memory.sh",
-            "timeout": 5
-          }
-        ]
-      }
     ]
   }
 }
