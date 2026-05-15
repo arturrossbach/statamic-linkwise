@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { shallowMount, mount } from '@vue/test-utils';
 import AutoLinkingTab from '@/components/dashboard/AutoLinkingTab.vue';
 import SortableHeader from '@/components/shared/SortableHeader.vue';
+import { mockRule } from '../__fixtures__/rules.js';
 
 /**
  * Characterisation pins for AutoLinkingTab.vue (1759 LOC god-component).
@@ -362,25 +363,9 @@ describe('AutoLinkingTab (Phase A characterisation)', () => {
 
     describe('Rule table characterisation', () => {
         // Single rule with all stat fields populated so the row renders
-        // every column. wouldLinkForRule computes 10 − 2 − 1 − 1 = 6.
-        const mockRule = {
-            id: 'r1',
-            keyword: 'laravel',
-            url: 'https://laravel.com',
-            target_entry_id: null,
-            match_count: 10,
-            linked_count: 2,
-            linked_elsewhere_count: 1,
-            not_insertable_count: 1,
-            last_applied_at: '2026-05-15T12:00:00Z',
-            last_applied_links_added: 4,
-            case_sensitive: false,
-            skip_if_exists: false,
-            once_per_post: true,
-            auto_apply_on_save: 'follow_global',
-            collections: [],
-            active: true,
-        };
+        // every column. wouldLinkForRule(mockRule) === 6 (10−2−1−1).
+        // Fixture lives in tests/Vue/__fixtures__/rules.js — extracted
+        // in PR 2e-prep for reuse across PR 2e + PR 4/5/6 splits.
 
         const mountWithRule = () => mount(AutoLinkingTab, {
             props: {
