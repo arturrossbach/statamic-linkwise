@@ -93,140 +93,34 @@
             No auto-link rules yet. Create one above.
         </div>
 
-        <!-- Rules Table -->
-        <Panel v-else>
-            <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
-                <thead>
-                    <tr>
-                        <th scope="col" class="w-8">
-                            <input type="checkbox" class="rounded" :checked="allSelected" @change="toggleSelectAll" />
-                        </th>
-                        <SortableHeader label="Keyword" :active="sortField === 'keyword'" :direction="sortDirection" @sort="toggleSort('keyword')" />
-                        <SortableHeader label="Link Target" :active="sortField === 'url'" :direction="sortDirection" @sort="toggleSort('url')" />
-                        <SortableHeader label="Matches" align="center" :active="sortField === 'match_count'" :direction="sortDirection" @sort="toggleSort('match_count')">
-                            <HelpIcon tooltip="Entries where this keyword appears (regardless of link status). Click to see them in the preview." />
-                        </SortableHeader>
-                        <SortableHeader label="Already linked" align="center" :active="sortField === 'linked_count'" :direction="sortDirection" @sort="toggleSort('linked_count')">
-                            <HelpIcon tooltip="Entries where the keyword is already linked to this rule's target." />
-                        </SortableHeader>
-                        <SortableHeader label="Will link" align="center" :active="sortField === 'will_link_count'" :direction="sortDirection" @sort="toggleSort('will_link_count')">
-                            <HelpIcon tooltip="Entries that an Apply right now would actually insert a link into. Equals Matches minus already-linked, linked-elsewhere, and not-insertable." />
-                        </SortableHeader>
-                        <SortableHeader label="Last applied" :active="sortField === 'last_applied_at'" :direction="sortDirection" @sort="toggleSort('last_applied_at')">
-                            <HelpIcon tooltip="When this rule was most recently applied. 'Never' means it was created but Apply was never clicked." />
-                        </SortableHeader>
-                        <SortableHeader label="Settings" :sortable="false">
-                            <HelpIcon tooltip="Per-rule options: case-sensitivity, auto-apply behavior, collection restriction. Only non-default options are shown." />
-                        </SortableHeader>
-                        <SortableHeader label="Actions" :sortable="false" align="right" />
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr
-                        v-for="rule in sortedRules"
-                        :key="rule.id"
-                        :ref="el => { if (el) ruleRowRefs[rule.id] = el }"
-                        :class="{ 'opacity-50': !rule.active }"
-                    >
-                        <td>
-                            <input type="checkbox" class="rounded" :value="rule.id" v-model="selectedRules" />
-                        </td>
-                        <td class="font-medium text-gray-900 dark:text-gray-100">
-                            {{ rule.keyword }}
-                            <span v-if="!rule.active" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400" v-tooltip="'Ignored — skipped during Apply All and Apply Selected'">Ignored</span>
-                        </td>
-                        <td class="text-gray-500 dark:text-gray-400 text-xs break-all">
-                            <span v-if="rule.target_entry_id" v-tooltip="rule.url">
-                                {{ findEntryTitle(rule.target_entry_id) || rule.url }}
-                            </span>
-                            <span v-else>{{ truncateUrl(rule.url) }}</span>
-                        </td>
-                        <td class="text-center">
-                            <button v-if="rule.match_count > 0" @click="previewRule(rule)" class="hover:underline cursor-pointer text-blue-600 dark:text-blue-400">
-                                {{ rule.match_count }}
-                            </button>
-                            <span v-else class="text-gray-300 dark:text-gray-600">0</span>
-                        </td>
-                        <td class="text-center">
-                            <button v-if="rule.linked_count > 0" @click="previewRule(rule)" class="hover:underline cursor-pointer text-green-600 dark:text-green-400">
-                                {{ rule.linked_count }}
-                            </button>
-                            <span v-else class="text-gray-300 dark:text-gray-600">0</span>
-                        </td>
-                        <td class="text-center">
-                            <button v-if="wouldLinkForRule(rule) > 0" @click="previewRule(rule)" class="hover:underline cursor-pointer text-blue-600 dark:text-blue-400 font-medium">
-                                {{ wouldLinkForRule(rule) }}
-                            </button>
-                            <span v-else class="text-gray-300 dark:text-gray-600">0</span>
-                        </td>
-                        <td class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                            <span v-if="rule.last_applied_at" v-tooltip="formatExactDate(rule.last_applied_at) + ' — ' + (rule.last_applied_links_added ?? 0) + ' link(s) added'">
-                                {{ formatRelativeTime(rule.last_applied_at) }}
-                            </span>
-                            <span v-else class="italic text-gray-400 dark:text-gray-600">Never</span>
-                        </td>
-                        <td class="text-xs max-w-[180px]">
-                            <!-- Full settings list per rule — short labels +
-                                 tooltips so the column stays narrow but every
-                                 option is visible without opening Edit. -->
-                            <dl class="flex flex-col gap-0.5">
-                                <div v-tooltip="'Case-sensitive: only matches the exact casing'">
-                                    <span class="text-gray-400 dark:text-gray-500">Case:</span>
-                                    <span class="ml-1 text-gray-700 dark:text-gray-300">{{ rule.case_sensitive ? 'yes' : 'no' }}</span>
-                                </div>
-                                <div v-tooltip="'Skip if already linked: do not insert when this keyword already has any link'">
-                                    <span class="text-gray-400 dark:text-gray-500">Skip:</span>
-                                    <span class="ml-1 text-gray-700 dark:text-gray-300">{{ rule.skip_if_exists ? 'yes' : 'no' }}</span>
-                                </div>
-                                <div v-tooltip="'Once per post: only insert one link per entry (V1 default — always yes)'">
-                                    <span class="text-gray-400 dark:text-gray-500">Once:</span>
-                                    <span class="ml-1 text-gray-700 dark:text-gray-300">{{ rule.once_per_post ? 'yes' : 'no' }}</span>
-                                </div>
-                                <div v-tooltip="'Auto-apply on entry save'">
-                                    <span class="text-gray-400 dark:text-gray-500">Auto:</span>
-                                    <span class="ml-1 text-gray-700 dark:text-gray-300">{{ formatAutoApply(rule.auto_apply_on_save) }}</span>
-                                </div>
-                                <div v-tooltip="'Collections this rule is restricted to'">
-                                    <span class="text-gray-400 dark:text-gray-500">Collections:</span>
-                                    <span class="ml-1 text-gray-700 dark:text-gray-300 break-words">{{ (rule.collections || []).length > 0 ? rule.collections.join(', ') : 'all' }}</span>
-                                </div>
-                            </dl>
-                        </td>
-                        <td class="text-right whitespace-nowrap">
-                            <Button
-                                text="Preview"
-                                variant="default"
-                                size="sm"
-                                icon="eye"
-                                :disabled="applyingAll || isRuleEditingAndDirty(rule)"
-                                class="mr-1"
-                                v-tooltip="isRuleEditingAndDirty(rule) ? 'Save changes first — unsaved edits will not appear in the preview' : 'See which entries would be affected'"
-                                @click="previewRule(rule)"
-                            />
-                            <Button
-                                :text="rule.active ? `Apply (${wouldLinkForRule(rule)})` : 'Apply'"
-                                variant="primary"
-                                size="sm"
-                                icon="sync"
-                                :disabled="!rule.active || wouldLinkForRule(rule) === 0 || applyingAll || (applyAsyncRuleId !== null && applyAsyncRuleId !== rule.id) || isRuleEditingAndDirty(rule)"
-                                :loading="applyingAll || applyAsyncRuleId === rule.id"
-                                class="mr-2 min-w-[118px] justify-center"
-                                v-tooltip="isRuleEditingAndDirty(rule) ? 'Save changes first — Apply uses the saved rule, not your edits' : (applyAsyncRuleId !== null && applyAsyncRuleId !== rule.id ? 'Another apply is in progress' : (!rule.active ? 'Rule is ignored — activate to apply' : (wouldLinkForRule(rule) === 0 ? 'Nothing new to link' : `Insert ${wouldLinkForRule(rule)} link(s) now`)))"
-                                @click="applyRule(rule)"
-                            />
-                            <Dropdown align="end">
-                                <DropdownMenu>
-                                    <DropdownItem text="Edit" icon="pencil" @click="editRule(rule)" />
-                                    <DropdownItem :text="rule.active ? 'Ignore (skip during Apply)' : 'Activate'" :icon="rule.active ? 'eye-closed' : 'eye'" @click="toggleActive(rule)" />
-                                    <DropdownSeparator />
-                                    <DropdownItem text="Delete" icon="trash" variant="destructive" @click="confirmDelete(rule)" />
-                                </DropdownMenu>
-                            </Dropdown>
-                        </td>
-                    </tr>
-                </tbody>
-            </table></div>
-        </Panel>
+        <!-- Rules Table — extracted to RuleListTable.vue (Sprint 5 PR 2d).
+             Variante A: state stays here (sortedRules/selectedRules/sortField
+             pre-computed in this orchestrator); the sub-component is a pure
+             template wrapper with props down + events up. The per-row DOM-ref
+             bag moved with the table; parent's scrollToRule() reaches it via
+             $refs.ruleListTable.getRowRef(id) (Option B — single reader). -->
+        <RuleListTable
+            v-else
+            ref="ruleListTable"
+            :sorted-rules="sortedRules"
+            v-model:selected-rules="selectedRules"
+            :sort-field="sortField"
+            :sort-direction="sortDirection"
+            :all-selected="allSelected"
+            :applying-all="applyingAll"
+            :apply-async-rule-id="applyAsyncRuleId"
+            :editing-rule="editingRule"
+            :form-dirty="formDirty"
+            :entries="entries"
+            :now-tick="nowTick"
+            @toggle-select-all="toggleSelectAll"
+            @toggle-sort="toggleSort"
+            @preview-rule="previewRule"
+            @apply-rule="applyRule"
+            @edit-rule="editRule"
+            @toggle-active="toggleActive"
+            @confirm-delete="confirmDelete"
+        />
 
         <!-- Preview Modal -->
         <Stack :open="previewModal !== null" @update:open="closePreviewModal" :title="previewModal?.title || ''">
@@ -389,6 +283,7 @@ import SortableHeader from '../shared/SortableHeader.vue';
 import MultiSelect from '../shared/MultiSelect.vue';
 import BardBadge from '../shared/BardBadge.vue';
 import RuleForm from './RuleForm.vue';
+import RuleListTable from './RuleListTable.vue';
 import { sortableMixin } from '../shared/sortable.js';
 import { highlightKeyword } from '../../utils/highlight.js';
 import { isValidReplacementUrl } from '../../utils/urlValidation.js';
@@ -410,7 +305,7 @@ const PREVIEW_STATUS_OPTIONS = [
 ];
 
 export default {
-    components: { Link, Card, Panel, Button, Stack, ConfirmationModal, Modal, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Alert, Icon, Badge, HelpIcon, SortableHeader, MultiSelect, BardBadge, RuleForm },
+    components: { Link, Card, Panel, Button, Stack, ConfirmationModal, Modal, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, Alert, Icon, Badge, HelpIcon, SortableHeader, MultiSelect, BardBadge, RuleForm, RuleListTable },
 
     mixins: [sortableMixin],
 
@@ -451,8 +346,9 @@ export default {
             applyAsyncRuleId: null,
             applyAsyncPollTimer: null,
             applyAsyncResult: null, // shown briefly after completion
-            // Plain ref bag (not reactive — Vue 3 template-refs callback pattern).
-            ruleRowRefs: {},
+            // ruleRowRefs moved to RuleListTable.vue (Sprint 5 PR 2d, Option B):
+            // child owns the per-row DOM-ref bag, scrollToRule() reaches it via
+            // $refs.ruleListTable.getRowRef(id).
             deleteConfirm: null,
             bulkDeleteConfirm: false,
             // Reactive minute-clock for "Last applied: X ago" labels.
@@ -952,7 +848,11 @@ export default {
         scrollToRule(ruleId) {
             if (!ruleId) return;
             this.$nextTick(() => {
-                const el = this.ruleRowRefs[ruleId];
+                // Row refs moved to RuleListTable.vue (Sprint 5 PR 2d, Option B).
+                // Bridge: child exposes getRowRef(id); returns undefined if the
+                // rule isn't currently in sortedRules (e.g. searchQuery filter)
+                // — we no-op gracefully in that case.
+                const el = this.$refs.ruleListTable?.getRowRef(ruleId);
                 if (el && typeof el.scrollIntoView === 'function') {
                     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }

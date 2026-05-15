@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { shallowMount, mount } from '@vue/test-utils';
 import AutoLinkingTab from '@/components/dashboard/AutoLinkingTab.vue';
+import SortableHeader from '@/components/shared/SortableHeader.vue';
 
 /**
  * Characterisation pins for AutoLinkingTab.vue (1759 LOC god-component).
@@ -345,6 +346,220 @@ describe('AutoLinkingTab (Phase A characterisation)', () => {
             w.vm.openEntrySelector();
             expect(spy).toHaveBeenCalledOnce();
             spy.mockRestore();
+        });
+    });
+
+    // ── RuleListTable characterisation pins (Sprint 5 PR 2d-prep, pre-extract) ───
+    //
+    // Lock the rule-table surface BEFORE Z. 96-229 (<Panel><table>) gets
+    // extracted into RuleListTable.vue. These pins must stay byte-stable
+    // through the extract — they assert column headers + per-row data
+    // marker + toggle-sort wiring + row-action dropdown wiring.
+    //
+    // The advisor's "Charakterisierungs-Pins VOR Code-Touch" pflicht: pin
+    // what is, then refactor, then verify pins still green. Same pattern
+    // as PR 2c's Render-Bridge prep (PR #25).
+
+    describe('Rule table characterisation', () => {
+        // Single rule with all stat fields populated so the row renders
+        // every column. wouldLinkForRule computes 10 − 2 − 1 − 1 = 6.
+        const mockRule = {
+            id: 'r1',
+            keyword: 'laravel',
+            url: 'https://laravel.com',
+            target_entry_id: null,
+            match_count: 10,
+            linked_count: 2,
+            linked_elsewhere_count: 1,
+            not_insertable_count: 1,
+            last_applied_at: '2026-05-15T12:00:00Z',
+            last_applied_links_added: 4,
+            case_sensitive: false,
+            skip_if_exists: false,
+            once_per_post: true,
+            auto_apply_on_save: 'follow_global',
+            collections: [],
+            active: true,
+        };
+
+        const mountWithRule = () => mount(AutoLinkingTab, {
+            props: {
+                data: { rules: [mockRule], collections: [], auto_apply_on_save_enabled: false, urls: {} },
+                entries: [],
+            },
+            global: {
+                mocks: { $page: { props: { linkwise: {} } } },
+            },
+        });
+
+        it('renders all 8 sortable column headers via SortableHeader props', () => {
+            const w = mountWithRule();
+            // Note: SortableHeader passes `label` to a Button (sortable=true) or
+            // a <span> (sortable=false). Under the passthrough Button-stub the
+            // sortable case's label is a prop-attribute, not text content. So
+            // we assert via the SortableHeader component's `label` prop —
+            // refactor-orthogonal across the upcoming RuleListTable extract.
+            const headers = w.findAllComponents(SortableHeader);
+            const labels = headers.map(h => h.props('label'));
+            expect(labels).toEqual(expect.arrayContaining([
+                'Keyword', 'Link Target', 'Matches', 'Already linked',
+                'Will link', 'Last applied', 'Settings', 'Actions',
+            ]));
+            // Exactly 8 SortableHeader instances — guards against accidental
+            // column addition/removal during the extract.
+            expect(headers.length).toBe(8);
+        });
+
+        it('renders per-row data: keyword + link + will-link count + relative time', () => {
+            const w = mountWithRule();
+            const text = w.text();
+            expect(text).toContain('laravel');
+            expect(text).toContain('https://laravel.com');
+            // wouldLinkForRule(mockRule) === 6 → appears in the row text.
+            // (Match-count 10 and will-link 6 both render as plain numbers.)
+            expect(text).toContain('10');
+            expect(text).toContain('6');
+            // formatRelativeTime turns 'just now' for very recent ISO timestamps.
+            expect(text).toContain('just now');
+            // Settings dl labels prove the column rendered all fields.
+            expect(text).toContain('Case:');
+            expect(text).toContain('Collections:');
+        });
+
+        it('toggle-sort: clicking SortableHeader cycles sortField + sortDirection', async () => {
+            const w = mountWithRule();
+            // Initial state from data(): sortField='created_at', direction='desc'.
+            expect(w.vm.sortField).toBe('created_at');
+            expect(w.vm.sortDirection).toBe('desc');
+
+            // Find the first SortableHeader (Keyword column) and emit 'sort'.
+            const headers = w.findAllComponents(SortableHeader);
+            expect(headers.length).toBeGreaterThan(0);
+            // The Keyword header is the first sortable one (after the
+            // checkbox-only <th>). Emit sort directly — Vue resolves to
+            // the @sort listener bound in the template.
+            headers[0].vm.$emit('sort');
+            await w.vm.$nextTick();
+            // After extract: this still flows through to parent's toggleSort
+            // (from sortableMixin). Pin the state transition.
+            expect(w.vm.sortField).toBe('keyword');
+        });
+
+        it('row-action dropdown: Edit + Delete DropdownItems are present per row', () => {
+            const w = mountWithRule();
+            // DropdownItem-stub is a passthrough that renders attrs onto the
+            // wrapper div — `text` is an HTML attribute, not a declared Vue
+            // prop. Read via the rendered DOM-attribute on the stub div.
+            const items = w.findAll('[data-stub="DropdownItem"]');
+            const texts = items.map(i => i.attributes('text'));
+            expect(texts).toContain('Edit');
+            expect(texts).toContain('Delete');
+            // Active rule (mockRule.active=true) → "Ignore (skip during Apply)"
+            // is the toggle-active label. Pinning the literal label.
+            expect(texts).toContain('Ignore (skip during Apply)');
+        });
+
+        // ── RuleListTable wiring pins (Sprint 5 PR 2d, post-extract) ────────
+        //
+        // Sub-Component extracted. These pins lock the wiring contract:
+        // parent ↔ child event-bridges + scrollToRule ref-bridge (Option B).
+
+        it('scrollToRule bridges to RuleListTable.getRowRef via $refs', async () => {
+            const w = mountWithRule();
+            const table = w.findComponent({ name: 'RuleListTable' });
+            expect(table.exists()).toBe(true);
+            const spy = vi.spyOn(table.vm, 'getRowRef').mockReturnValue(undefined);
+            w.vm.scrollToRule('r1');
+            await w.vm.$nextTick();
+            // getRowRef called by the parent's scrollToRule via the ref bridge.
+            expect(spy).toHaveBeenCalledWith('r1');
+            spy.mockRestore();
+        });
+
+        it('@edit-rule emit on RuleListTable triggers parent editRule', async () => {
+            const w = mountWithRule();
+            const table = w.findComponent({ name: 'RuleListTable' });
+            table.vm.$emit('edit-rule', mockRule);
+            await w.vm.$nextTick();
+            // editRule sets editingRule + snapshots — pin via state.
+            // Vue 3 wraps assigned objects in reactive proxies — Object.is
+            // identity fails but structural equality holds via toEqual.
+            expect(w.vm.editingRule).toEqual(mockRule);
+            expect(w.vm.editingRuleSnapshot).not.toBeNull();
+        });
+
+        it('@toggle-select-all emit clears or fills selection', async () => {
+            const w = mountWithRule();
+            const table = w.findComponent({ name: 'RuleListTable' });
+            expect(w.vm.selectedRules.length).toBe(0);
+            // toggleSelectAll fills with filteredRules ids when nothing
+            // is selected; clears when allSelected.
+            table.vm.$emit('toggle-select-all');
+            await w.vm.$nextTick();
+            expect(w.vm.selectedRules).toEqual(['r1']);
+            // Second call clears since allSelected is now true.
+            table.vm.$emit('toggle-select-all');
+            await w.vm.$nextTick();
+            expect(w.vm.selectedRules).toEqual([]);
+        });
+
+        // Remaining 4 action-event bridges — pin via downstream state-effect
+        // (spy-after-mount can't intercept template listeners, so we observe
+        // the side-effect the handler synchronously mutates).
+
+        it('@confirm-delete emit sets deleteConfirm to the rule', async () => {
+            const w = mountWithRule();
+            const table = w.findComponent({ name: 'RuleListTable' });
+            expect(w.vm.deleteConfirm).toBeNull();
+            table.vm.$emit('confirm-delete', mockRule);
+            await w.vm.$nextTick();
+            expect(w.vm.deleteConfirm).toEqual(mockRule);
+        });
+
+        it('@preview-rule emit opens the previewModal with the rule', async () => {
+            const w = mountWithRule();
+            // previewRule async chain: needs data.urls.store (used in
+            // `url.replace()`) + a fetch stub. Without urls.store the chain
+            // throws synchronously and the catch resets previewModal to null.
+            w.vm.data.urls = { store: '/x/rules' };
+            vi.spyOn(w.vm, 'fetch').mockResolvedValue({ ok: true, affected_entries: [] });
+            const table = w.findComponent({ name: 'RuleListTable' });
+            expect(w.vm.previewModal).toBeNull();
+            table.vm.$emit('preview-rule', mockRule);
+            await w.vm.$nextTick();
+            expect(w.vm.previewModal).not.toBeNull();
+            expect(w.vm.previewModal.keyword).toBe('laravel');
+            expect(w.vm.previewModal.ruleId).toBe('r1');
+        });
+
+        it('@apply-rule emit delegates to dispatchApplyAsync', async () => {
+            const w = mountWithRule();
+            const spy = vi.spyOn(w.vm, 'dispatchApplyAsync').mockResolvedValue(undefined);
+            const table = w.findComponent({ name: 'RuleListTable' });
+            table.vm.$emit('apply-rule', mockRule);
+            await w.vm.$nextTick();
+            // dispatchApplyAsync is invoked synchronously from applyRule —
+            // spy-after-mount works for method-internal calls (vs template).
+            expect(spy).toHaveBeenCalledOnce();
+            expect(spy.mock.calls[0][0]).toEqual(mockRule);
+            spy.mockRestore();
+        });
+
+        it('@toggle-active emit on RuleListTable triggers PUT via fetch', async () => {
+            const w = mountWithRule();
+            // toggleActive uses this.data.urls.store; mockRule fixture has no
+            // urls — set it minimally so the URL replace() doesn't throw.
+            w.vm.data.urls = { store: '/x/rules' };
+            const fetchSpy = vi.spyOn(w.vm, 'fetch').mockResolvedValue({ success: true, rule: { active: false } });
+            const table = w.findComponent({ name: 'RuleListTable' });
+            table.vm.$emit('toggle-active', mockRule);
+            await w.vm.$nextTick();
+            // toggleActive calls fetch synchronously with the rule's PUT URL.
+            expect(fetchSpy).toHaveBeenCalled();
+            const [url, method] = fetchSpy.mock.calls[0];
+            expect(url).toContain('r1');
+            expect(method).toBe('PUT');
+            fetchSpy.mockRestore();
         });
     });
 
