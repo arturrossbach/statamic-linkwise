@@ -199,6 +199,51 @@ class InboundSuggestionCacheTest extends TestCase
         $this->assertIsArray($cache->getCached('t1'));
     }
 
+    // ── forgetMany() — bulk-write-path invalidation contract ───────────
+
+    public function test_forget_many_drops_listed_targets(): void
+    {
+        // User-reported 2026-05-16: after a bulk-insert the Inbound-Modal
+        // showed the just-inserted suggestions because finalizeIndex did
+        // NOT invalidate the cache. Pin the contract that the 5 bulk
+        // commands rely on.
+        $cache = $this->newCache();
+        $cache->store('t1', [$this->makeSuggestion('s1', 't1', 'a')]);
+        $cache->store('t2', [$this->makeSuggestion('s2', 't2', 'b')]);
+        $cache->store('t3', [$this->makeSuggestion('s3', 't3', 'c')]);
+
+        $cache->forgetMany(['t1', 't3']);
+
+        $this->assertNull($cache->getCached('t1'));
+        $this->assertIsArray($cache->getCached('t2'));
+        $this->assertNull($cache->getCached('t3'));
+    }
+
+    public function test_forget_many_empty_list_no_op(): void
+    {
+        // Defensive: an empty affectedEntryIds set must not wipe
+        // unrelated cache rows.
+        $cache = $this->newCache();
+        $cache->store('t1', [$this->makeSuggestion()]);
+
+        $cache->forgetMany([]);
+
+        $this->assertIsArray($cache->getCached('t1'));
+    }
+
+    public function test_forget_many_silently_skips_non_strings(): void
+    {
+        // Defensive: arrays of mixed types (e.g. malformed payload from
+        // an older bulk command) must not crash or misinterpret entries.
+        $cache = $this->newCache();
+        $cache->store('t1', [$this->makeSuggestion()]);
+
+        // @phpstan-ignore-next-line — intentional bad input
+        $cache->forgetMany(['t1', 42, null, '']);
+
+        $this->assertNull($cache->getCached('t1'));
+    }
+
     // ── Defensive: corrupt sub-rows ────────────────────────────────────
 
     public function test_corrupt_subrow_silently_dropped(): void

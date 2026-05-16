@@ -100,6 +100,34 @@ class InboundSuggestionCache
         Cache::forget($this->keyFor($targetEntryId));
     }
 
+    /**
+     * Bulk-forget — for use by bulk-write commands inside their
+     * `finalizeIndex()` step (Sprint 6 REV-IB-01 follow-up, user-reported
+     * 2026-05-16: "Nach Bulk-Insert muss ich erst rescannen, sonst zeigt
+     * das Inbound-Modal die schon-eingefügten Suggestions weiter und
+     * der Count in der Haupttabelle steht still").
+     *
+     * Every bulk-write that mutates entry content invalidates the
+     * suggestion-shape for the AFFECTED entries (both source and target
+     * sides of any inserted/removed link). Without this, the next
+     * `suggestFiltered()` call hits a cache row computed against the
+     * pre-write entry state and silently returns stale suggestions.
+     *
+     * @param  list<string>  $entryIds  every entry the bulk touched —
+     *                                  both source AND target sides for
+     *                                  link-insertions, both source AND
+     *                                  any internal-link targets for
+     *                                  link-removals.
+     */
+    public function forgetMany(array $entryIds): void
+    {
+        foreach ($entryIds as $entryId) {
+            if (is_string($entryId) && $entryId !== '') {
+                Cache::forget($this->keyFor($entryId));
+            }
+        }
+    }
+
     /** Cache key shape — kept stable for debug + `php artisan cache:forget` use. */
     protected function keyFor(string $targetEntryId): string
     {

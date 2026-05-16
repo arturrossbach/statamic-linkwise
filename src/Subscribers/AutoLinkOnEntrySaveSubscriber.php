@@ -88,18 +88,37 @@ class AutoLinkOnEntrySaveSubscriber
 
             Cache::put($loopFlag, true, 60);
 
+            $insertedAny = false;
             foreach ($eligibleRules as $rule) {
                 try {
-                    BardLinkInserter::insertLinkIntoEntryWithHref(
+                    $inserted = BardLinkInserter::insertLinkIntoEntryWithHref(
                         $entryId,
                         $rule->keyword,
                         $rule->url,
                         $rule->caseSensitive,
                     );
+                    if ($inserted) {
+                        $insertedAny = true;
+                    }
                 } catch (\Throwable $e) {
                     Log::warning(
                         "[Linkwise] Auto-apply rule '{$rule->keyword}' failed on entry {$entryId}: ".$e->getMessage(),
                     );
+                }
+            }
+
+            // Inbound-suggestion-cache invalidation (Sprint 6 REV-IB-01
+            // follow-up). The entry now carries new outbound links so any
+            // OTHER target that had this entry as a candidate source has
+            // a stale suggestion-row. We only forget THIS entry's row —
+            // cross-entry invalidation is bounded by the 5-min TTL.
+            // Skipped when nothing actually inserted to avoid cache churn.
+            if ($insertedAny) {
+                try {
+                    app(\Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache::class)
+                        ->forget($entryId);
+                } catch (\Throwable $e) {
+                    Log::warning('[Linkwise] AutoLinkOnEntrySaveSubscriber cache-forget failed: '.$e->getMessage());
                 }
             }
         } catch (\Throwable $e) {
