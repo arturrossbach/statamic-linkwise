@@ -148,8 +148,15 @@ class InboundEngine
             $href = 'statamic://entry::'.$s->targetEntryId;
 
             try {
+                // Pass sentence_context so this dry-run matches the
+                // real-write call site (LinkInsertCommand:198-211 +
+                // BardLinkInserter:324 signature). Without it the
+                // dry-run accepts suggestions whose sentence context
+                // lives in a non-writable field, the modal shows them,
+                // the user clicks Apply, and the real-write rejects
+                // with context_mismatch.
                 return \Arturrossbach\Linkwise\Support\BardLinkInserter::insertLinkIntoEntryWithHref(
-                    $s->sourceEntryId, $s->anchorText, $href, false, false
+                    $s->sourceEntryId, $s->anchorText, $href, false, false, $s->sentenceContext
                 );
             } catch (\Throwable $e) {
                 // EntryConflictException is expected when the entry was edited

@@ -6,6 +6,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Indexer-Writer field symmetry**: plain `text` / `textarea` fields (top-level) and plain-string values nested inside Replicator sets are no longer indexed as anchor sources. They were never reachable by the link-insertion path; indexing them produced phantom inbound/outbound suggestions that failed at apply-time with "anchor text not found". The Indexer now reads only what `BardLinkInserter` can write: Bard, Replicator-nested Bard, and top-level Markdown. **Side-effect:** Peak sites with Card/Accordion/Quote sets whose only content lived in plain-string slots will lose those slots from Linkwise's anchor pool. Bard fragments inside the same sets remain fully covered.
+- **Inbound dry-run filter parity**: `InboundEngine::suggestFiltered` now passes `sentence_context` to the dry-run inserter, matching the real-write path in `LinkInsertCommand`. Suggestions whose sentence context originated from a field the writer cannot reach are now rejected pre-display instead of failing silently at apply-click.
+- **Reindex cache coherence**: `linkwise:index` now flushes the `InboundSuggestionCache` for all indexed entries after the fresh index is saved, eliminating stale phantom suggestions between reindex and TTL expiry.
+
+### Action required after upgrade
+Run `php artisan linkwise:index` once. Hard-refresh the Control Panel.
+
 ## [1.0.0] — 2026-05-04
 
 Initial public release.
