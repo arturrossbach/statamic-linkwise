@@ -580,5 +580,15 @@ class ApplyRuleCommand extends Command
                 .'. Counts will refresh at the next Scan Content.',
             );
         }
+
+        // Inbound-suggestion-cache invalidation (Sprint 6 REV-IB-01 follow-up).
+        if (! empty($affectedEntryIds)) {
+            try {
+                app(\Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache::class)
+                    ->forgetMany(array_map('strval', $affectedEntryIds));
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] ApplyRuleCommand cache-forget failed: '.$e->getMessage());
+            }
+        }
     }
 }

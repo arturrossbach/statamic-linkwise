@@ -409,5 +409,18 @@ class DetailUnlinkCommand extends Command
                 .'. Counts will refresh at the next Scan Content.',
             );
         }
+
+        // Inbound-suggestion-cache invalidation (Sprint 6 REV-IB-01 follow-up).
+        // After an unlink, the source entry no longer has the link → some
+        // previously-filtered suggestions might re-appear in the modal,
+        // and counts shift in the opposite direction from an insert.
+        if (! empty($affectedEntryIds)) {
+            try {
+                app(\Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache::class)
+                    ->forgetMany(array_map('strval', $affectedEntryIds));
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] DetailUnlinkCommand cache-forget failed: '.$e->getMessage());
+            }
+        }
     }
 }
