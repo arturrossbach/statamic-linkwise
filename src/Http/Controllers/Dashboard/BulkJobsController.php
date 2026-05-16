@@ -122,10 +122,6 @@ class BulkJobsController extends CpController
 
     public function bulkUnlink(Request $request): JsonResponse
     {
-        if ($active = JobLock::activeJob('bulkunlink')) {
-            return response()->json(JobLock::busyResponseData($active), 409);
-        }
-
         $validated = $request->validate([
             'replacements' => 'required|array|min:1|max:5000',
             'replacements.*.entry_id' => 'required|string|max:64',
@@ -169,6 +165,17 @@ class BulkJobsController extends CpController
             }
         }
 
+        // Scope-aware 409: only blocks if another job touches an OVERLAPPING
+        // entry-set. Sprint 6 REV-BJ-03 — Editor A on post-1 doesn't block
+        // Editor B on post-7.
+        $bulkEntryIds = array_values(array_unique(array_filter(
+            array_column($validated['replacements'], 'entry_id'),
+            'is_string',
+        )));
+        if ($active = JobLock::activeJobConflicting('bulkunlink', $bulkEntryIds)) {
+            return response()->json(JobLock::busyResponseData($active), 409);
+        }
+
         $user = auth()->user();
         $validated['started_by'] = $user?->name() ?? $user?->email() ?? null;
         $validated['started_by_id'] = $user?->id() ?? null;
@@ -178,6 +185,10 @@ class BulkJobsController extends CpController
             'total' => count($validated['replacements']),
         ], 600);
         Cache::forget('linkwise:bulkunlink:cancel');
+        // Side-channel so other bulks' activeJobConflicting() check can see
+        // which entries we're touching even when the command rewrites the
+        // status payload during execution.
+        JobLock::recordEntryIds('bulkunlink', $bulkEntryIds);
 
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PhpBinary::cli());
@@ -222,10 +233,6 @@ class BulkJobsController extends CpController
      */
     public function detailUnlinkAsync(Request $request): JsonResponse
     {
-        if ($active = JobLock::activeJob('detailunlink')) {
-            return response()->json(JobLock::busyResponseData($active), 409);
-        }
-
         $validated = $request->validate([
             'replacements' => 'required|array|min:1|max:5000',
             'replacements.*.entry_id' => 'required|string|max:64',
@@ -247,6 +254,16 @@ class BulkJobsController extends CpController
             // as a reverse-of-X. Ignored otherwise.
             'reverts' => 'sometimes|nullable|string|max:64',
         ]);
+
+        // Scope-aware 409: only blocks when an overlapping entry-set is busy.
+        // Sprint 6 REV-BJ-03.
+        $detailEntryIds = array_values(array_unique(array_filter(
+            array_column($validated['replacements'], 'entry_id'),
+            'is_string',
+        )));
+        if ($active = JobLock::activeJobConflicting('detailunlink', $detailEntryIds)) {
+            return response()->json(JobLock::busyResponseData($active), 409);
+        }
 
         // Hash conflicts: DON'T fail-fast 409 (that aborted the whole bulk
         // when a single entry was modified — Bug 9 2026-05-11). Instead
@@ -285,6 +302,8 @@ class BulkJobsController extends CpController
             'started_by' => $startedBy,
             'started_by_id' => $startedById,
         ], 600);
+        // Side-channel for cross-bulk conflict detection. Sprint 6 REV-BJ-03.
+        JobLock::recordEntryIds('detailunlink', $detailEntryIds);
 
         $artisan = escapeshellarg(base_path('artisan'));
         $php = escapeshellarg(PhpBinary::cli());

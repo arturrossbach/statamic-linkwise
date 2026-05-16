@@ -154,7 +154,13 @@ class JobLock
             }
 
             $activeScope = $meta['scope'] ?? self::SCOPE_GLOBAL;
-            if (! self::conflicts($activeScope, self::entryIdsOf($status), $requestingScope, $requestingEntryIds)) {
+            // Prefer the side-cache (`linkwise:{kind}:entry_ids`) — it's
+            // written once at dispatch and survives every subsequent
+            // status-rewrite the running command does. Fall back to
+            // status.extra.entry_ids for commands that haven't been
+            // migrated to the side-cache yet (BC during wire-in).
+            $activeEntryIds = self::entryIdsForJob($name) ?? self::entryIdsOf($status);
+            if (! self::conflicts($activeScope, $activeEntryIds, $requestingScope, $requestingEntryIds)) {
                 continue;
             }
 
@@ -203,6 +209,75 @@ class JobLock
         );
 
         return $intersection !== [];
+    }
+
+    /**
+     * Cache key for a job's entry-id side-channel. Written once at dispatch
+     * and survives every status-rewrite the running command does (the
+     * command's repeated Cache::put on `:status` would otherwise erase it
+     * if we stored entry-ids in the status payload).
+     */
+    public static function entryIdsKeyFor(string $jobName): string
+    {
+        return 'linkwise:'.$jobName.':entry_ids';
+    }
+
+    /**
+     * Record the entry-set a per-entry job is about to touch. Called by
+     * controllers at dispatch time (after validation + before
+     * Cache::put(:status)). TTL matches the typical payload TTL so a
+     * crashed command's entry-id set ages out the same way.
+     *
+     * Pass-through for GLOBAL-scope jobs is a no-op (they take exclusive
+     * lock; entry-id intersection is irrelevant).
+     *
+     * @param  list<string>  $entryIds
+     */
+    public static function recordEntryIds(string $jobName, array $entryIds, int $ttlSec = 600): void
+    {
+        if (! isset(self::JOBS[$jobName])) {
+            return;
+        }
+        if ((self::JOBS[$jobName]['scope'] ?? self::SCOPE_GLOBAL) !== self::SCOPE_PER_ENTRY) {
+            return;
+        }
+        Cache::put(self::entryIdsKeyFor($jobName), array_values(array_map('strval', $entryIds)), $ttlSec);
+    }
+
+    /**
+     * Read the entry-set a currently-running job is mutating from the
+     * side-cache. Returns null when no set has been recorded — caller
+     * treats null as "unknown → assume conflict" via `conflicts()`.
+     *
+     * @return list<string>|null
+     */
+    public static function entryIdsForJob(string $jobName): ?array
+    {
+        $raw = Cache::get(self::entryIdsKeyFor($jobName));
+        if (! is_array($raw)) {
+            return null;
+        }
+        $clean = [];
+        foreach ($raw as $id) {
+            if (is_string($id) || is_int($id)) {
+                $clean[] = (string) $id;
+            }
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Drop the entry-id side-cache for a job. Called by the crash-guard
+     * and by terminal-phase writes so a finished job stops contributing
+     * to conflict checks for the next bulk.
+     */
+    public static function forgetEntryIds(string $jobName): void
+    {
+        if (! isset(self::JOBS[$jobName])) {
+            return;
+        }
+        Cache::forget(self::entryIdsKeyFor($jobName));
     }
 
     /**
@@ -384,6 +459,10 @@ class JobLock
         Cache::forget($statusKey);
         Cache::forget($payloadKey);
         Cache::forget($cancelKey);
+        // Sprint 6 REV-BJ-03 — also drop the entry-id side-channel so a
+        // force-clear doesn't leave the conflict-checker thinking the
+        // (now-gone) job is still mutating those entries.
+        self::forgetEntryIds($jobName);
     }
 
     /**
