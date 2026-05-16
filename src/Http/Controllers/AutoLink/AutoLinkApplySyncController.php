@@ -145,9 +145,40 @@ class AutoLinkApplySyncController extends CpController
         }
 
         if (! $preview && ($result['links_added'] ?? 0) > 0) {
+            // Collect entries the apply actually touched so we can refresh
+            // their per-entry counts + invalidate their inbound-suggestion
+            // caches (Sprint 6 follow-up, user-reported 2026-05-16: stale
+            // counts + stale modal after sync writes).
+            $affectedEntryIds = [];
+            foreach (($result['affected_entries'] ?? []) as $a) {
+                $eid = $a['id'] ?? null;
+                if (is_string($eid) && $eid !== '') {
+                    $affectedEntryIds[$eid] = true;
+                }
+            }
+            $affectedEntryIds = array_keys($affectedEntryIds);
+
+            // Order: forget BEFORE recompute — see LinkInsertCommand for rationale.
+            if (! empty($affectedEntryIds)) {
+                try {
+                    app(\Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache::class)
+                        ->forgetMany($affectedEntryIds);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[Linkwise] AutoLinkApplySyncController cache-forget failed: '.$e->getMessage());
+                }
+            }
+
             $this->indexer->clearCache();
             $records = $this->indexer->buildIndex();
             $this->indexer->save($records);
+
+            if (! empty($affectedEntryIds)) {
+                try {
+                    $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[Linkwise] AutoLinkApplySyncController suggestion-count refresh failed: '.$e->getMessage());
+                }
+            }
 
             // Return fresh hashes so frontend can update for sequential rule applies
             $result['updated_hashes'] = $this->computeCurrentHashes($request->input('entry_hashes', []));

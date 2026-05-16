@@ -153,7 +153,8 @@ import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
 import SuggestedPhrase from '../shared/SuggestedPhrase.vue';
 import BardBadge from '../shared/BardBadge.vue';
-import { bulkState, setHeavyState, runBulkOperation } from '../../services/bulkOperationService.js';
+import { bulkState, setHeavyState, runBulkOperation, recordCompletion } from '../../services/bulkOperationService.js';
+import { router as inertiaRouter } from '@statamic/cms/inertia';
 import { errorToast } from '../../utils/toast.js';
 
 export default {
@@ -575,6 +576,41 @@ export default {
             // local UI state — selected list cleared, button re-enabled.
             this.relinking = false;
             if (modalAlive()) this.selected = [];
+
+            // Sprint 6 follow-up (user-reported 2026-05-16): after re-link
+            // the main-table count + the DetailModal's own data are stale
+            // until a manual page reload. Backend now refreshes the index
+            // + invalidates the inbound-suggestion-cache in RelinkController.
+            // Frontend triggers two complementary refreshes:
+            //
+            //   1. `recordCompletion({kind:'detailrelink',phase:'done'})` —
+            //      flips `bulkState.lastCompletion` which fires
+            //      LinksReportTab's watcher (added in PR #45) that re-fetches
+            //      suggestionCounts for the dashboard count cells.
+            //
+            //   2. `inertiaRouter.reload({only:['entries'],preserveScroll})` —
+            //      re-fetches the `entries` page-prop with the fresh
+            //      internal_links_detail anchor-text values, which the
+            //      parent's `entries` watcher then mirrors into
+            //      `localEntries`. Without this, re-opening the modal
+            //      reads the still-cloned-at-mount anchor and shows the
+            //      OLD anchor-text from before the re-link.
+            try {
+                recordCompletion({
+                    kind: 'detailrelink',
+                    phase: 'done',
+                    extra: { heartbeat: Math.floor(Date.now() / 1000) },
+                });
+            } catch (e) {
+                console.error('[Linkwise] recordCompletion(detailrelink) failed:', e);
+            }
+            try {
+                inertiaRouter.reload({ only: ['entries'], preserveScroll: true, preserveState: true });
+            } catch (e) {
+                // Not on an Inertia page (unit tests, embedded contexts) —
+                // skip silently. The recordCompletion above still fires
+                // its watcher contract.
+            }
         },
 
         getEntryHash(entryId) {

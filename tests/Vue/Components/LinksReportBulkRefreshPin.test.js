@@ -51,6 +51,10 @@ describe('LinksReportTab — bulkState.lastCompletion watcher', () => {
         'detailunlink',
         'urlchanger',
         'applyrule',
+        // DetailModal sync re-link emits a synthetic completion event via
+        // recordCompletion() so the same watcher fires (added 2026-05-16
+        // after user-reported stale anchor-text on modal re-open).
+        'detailrelink',
     ];
 
     for (const kind of completionKinds) {

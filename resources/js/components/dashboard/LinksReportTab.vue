@@ -370,6 +370,10 @@ export default {
                     'inboundinsert', 'outboundinsert',
                     'bulkunlink', 'detailunlink',
                     'urlchanger', 'applyrule',
+                    // Sync re-link from DetailModal — emits its own
+                    // completion via recordCompletion(); RelinkController
+                    // handles backend cache + index refresh.
+                    'detailrelink',
                 ];
                 if (! kindsThatChangeSuggestionCounts.includes(completion.kind)) return;
                 if (this.suggestionCountsUrl) {
