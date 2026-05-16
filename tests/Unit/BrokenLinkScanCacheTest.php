@@ -300,6 +300,52 @@ class BrokenLinkScanCacheTest extends TestCase
         $this->assertSame('https://valid.com', $loaded[0]->url);
     }
 
+    // ── Orphan eviction ────────────────────────────────────────────────
+
+    public function test_drop_orphans_keeps_only_listed_entries(): void
+    {
+        // Real-world: entry e2 was deleted from Statamic between scans.
+        // After checkAll runs, dropOrphans is called with the surviving
+        // entry-ids; the row for e2 must disappear.
+        $cache = $this->newCache();
+        $cache->store('e1', 'h1', [], 1700000000);
+        $cache->store('e2', 'h2', [], 1700000000);
+        $cache->store('e3', 'h3', [], 1700000000);
+
+        $cache->dropOrphans(['e1', 'e3']);
+
+        $this->assertIsArray($cache->getCached('e1', 'h1', 1700000000));
+        $this->assertNull($cache->getCached('e2', 'h2', 1700000000));
+        $this->assertIsArray($cache->getCached('e3', 'h3', 1700000000));
+    }
+
+    public function test_drop_orphans_with_empty_keep_list_wipes_cache(): void
+    {
+        // Edge: if checkAll iterated zero entries (all excluded by
+        // collection / id), dropOrphans([]) wipes everything. Reasonable
+        // — there's no current scope so any cached row is orphan.
+        $cache = $this->newCache();
+        $cache->store('e1', 'h1', [], 1700000000);
+        $cache->store('e2', 'h2', [], 1700000000);
+
+        $cache->dropOrphans([]);
+
+        $this->assertSame([], $cache->summary());
+    }
+
+    public function test_drop_orphans_no_op_when_all_present(): void
+    {
+        // Optimisation pin: when nothing needs to drop, dropOrphans must
+        // not rewrite the file (avoids a write-amplification spike on
+        // 1000+ entry sites). Verified indirectly via the post-state.
+        $cache = $this->newCache();
+        $cache->store('e1', 'h1', [], 1700000000);
+
+        $cache->dropOrphans(['e1']);
+
+        $this->assertIsArray($cache->getCached('e1', 'h1', 1700000000));
+    }
+
     public function test_clock_drift_negative_age_handled(): void
     {
         // Server clock moved backwards between store + read. Negative age

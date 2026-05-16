@@ -159,6 +159,26 @@ class BrokenLinkScanCache
     }
 
     /**
+     * Drop cache rows for entry-ids NOT in $keepIds. Called by
+     * `BrokenLinkChecker::checkAll` at the end of a full scan so the
+     * cache file only carries data for entries that still exist in the
+     * index. Without this the file grows unboundedly on sites with high
+     * churn (entries being deleted and re-created over time).
+     *
+     * @param  list<string>  $keepIds  Entry-ids that should survive.
+     */
+    public function dropOrphans(array $keepIds): void
+    {
+        $all = $this->readAll();
+        $keepSet = array_flip($keepIds);
+        $filtered = array_intersect_key($all, $keepSet);
+        if (count($filtered) === count($all)) {
+            return; // No-op — nothing to drop, skip the file rewrite.
+        }
+        $this->writeAll($filtered);
+    }
+
+    /**
      * Diagnostic: list cached entry ids alongside their last-scanned-at
      * timestamps. Useful for debug-export bundles and the audit suite.
      *
