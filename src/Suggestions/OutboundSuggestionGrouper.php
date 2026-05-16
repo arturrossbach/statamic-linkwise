@@ -20,13 +20,20 @@ class OutboundSuggestionGrouper
      */
     public static function groupAndFilter(array $suggestions, string $entryId): array
     {
-        // Dry-run filter: only keep suggestions that can actually be inserted
+        // Dry-run filter: only keep suggestions that can actually be inserted.
+        // The 6th argument ($s->sentenceContext) mirrors the real-write
+        // path in LinkInsertCommand:198-211. Without it the dry-run accepts
+        // suggestions whose sentence-context lies in a non-writable region,
+        // the outbound modal shows them, the user clicks Apply, the
+        // real-write rejects with `context_mismatch`. Same parity fix
+        // as InboundEngine::suggestFiltered (4e6573d) and the EntryIndexer
+        // Phase-2 verify-loop. Klasse-B B-1 audit-finding 2026-05-16.
         $filtered = array_filter($suggestions, function (Suggestion $s) use ($entryId) {
             $href = 'statamic://entry::'.$s->targetEntryId;
 
             try {
                 return BardLinkInserter::insertLinkIntoEntryWithHref(
-                    $entryId, $s->anchorText, $href, false, false
+                    $entryId, $s->anchorText, $href, false, false, $s->sentenceContext
                 );
             } catch (\Throwable) {
                 return false;
