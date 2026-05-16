@@ -347,6 +347,37 @@ export default {
             this.loadSuggestionCounts();
         }
 
+        // Refresh per-entry suggestion counts after a content-mutating bulk
+        // completes. Sprint 6 follow-up (user-reported 2026-05-16):
+        // `closeSuggestModal` runs `refreshSuggestionCountForEntry` BEFORE
+        // the async bulk-insert finishes, so the count stays stale until
+        // the next modal open. Watching `bulkState.lastCompletion` — which
+        // only flips when a bulk reaches a terminal phase — gives us a
+        // deterministic post-bulk refresh point.
+        //
+        // Options-API `watch: { 'bulkState.lastCompletion': ... }` does
+        // NOT work because the string-path syntax only resolves against
+        // properties of the component instance, not against external
+        // reactive imports. We need the imperative `$watch(getter, ...)`
+        // form to bind to the shared store. The unwatch fn is captured
+        // so beforeUnmount can release it cleanly.
+        this._unwatchBulkCompletion = this.$watch(
+            () => bulkState.lastCompletion,
+            (completion) => {
+                if (! completion) return;
+                if (completion.phase !== 'done') return;
+                const kindsThatChangeSuggestionCounts = [
+                    'inboundinsert', 'outboundinsert',
+                    'bulkunlink', 'detailunlink',
+                    'urlchanger', 'applyrule',
+                ];
+                if (! kindsThatChangeSuggestionCounts.includes(completion.kind)) return;
+                if (this.suggestionCountsUrl) {
+                    this.loadSuggestionCounts();
+                }
+            },
+        );
+
         // Auto-open the suggestion modal when arriving via the entry-edit
         // sidebar links (`?open=<entryId>&mode=inbound|outbound`). Without
         // this, clicking the count badges in the entry sidebar dumped the
@@ -365,6 +396,15 @@ export default {
             }
         } catch {
             // URLSearchParams or unexpected URL shape — non-critical
+        }
+    },
+
+    beforeUnmount() {
+        // Release the shared-bulkState watcher so it doesn't tick on a
+        // destroyed component (would still hold a reference + log noise).
+        if (typeof this._unwatchBulkCompletion === 'function') {
+            this._unwatchBulkCompletion();
+            this._unwatchBulkCompletion = null;
         }
     },
 
