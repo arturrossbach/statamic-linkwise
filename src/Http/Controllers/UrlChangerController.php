@@ -226,6 +226,19 @@ class UrlChangerController extends CpController
         }
         $result['updated_hashes'] = $updatedHashes;
 
+        // Inbound-suggestion-cache invalidation MUST run BEFORE the count
+        // recompute below — `computeSuggestionCountsForEntries()` reads
+        // through the cache. Sprint 6 follow-up
+        // (user-reported 2026-05-16: stale counts after sync writes).
+        if (! empty($affectedEntryIds)) {
+            try {
+                app(\Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache::class)
+                    ->forgetMany(array_map('strval', $affectedEntryIds));
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[Linkwise] UrlChangerController sync-apply cache-forget failed: '.$e->getMessage());
+            }
+        }
+
         // Compute live suggestion counts for affected entries
         $result['suggestion_counts'] = $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
 

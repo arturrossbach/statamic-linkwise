@@ -2,9 +2,12 @@
 
 namespace Arturrossbach\Linkwise\Http\Controllers;
 
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Relink\RelinkService;
+use Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Statamic\Http\Controllers\CP\CpController;
 
 /**
@@ -26,6 +29,7 @@ class RelinkController extends CpController
 {
     public function __construct(
         protected RelinkService $relinkService,
+        protected EntryIndexer $indexer,
     ) {}
 
     public function relink(Request $request): JsonResponse
@@ -93,6 +97,76 @@ class RelinkController extends CpController
             reverts: $validated['reverts'] ?? null,
         );
 
+        // Index + cache refresh on success — same finalize-after-write
+        // pattern as the 5 bulk commands. Sprint 6 follow-up
+        // (user-reported 2026-05-16): without this, main-table counts
+        // stay stale until the next full Scan Content, and re-opening
+        // the DetailModal showed the OLD anchor-text (because the
+        // entry's index record wasn't refreshed even though disk was).
+        //
+        // Affected entries = source + new target (when internal). The
+        // OLD target is also affected (it lost an inbound) but we don't
+        // always know its id at this point — for external→internal or
+        // internal→internal re-links, the link mark stored the original
+        // target. Pulling that out is a step we can defer; for V1 the
+        // 5-min TTL on InboundSuggestionCache + the next scan handle it.
+        if (($result['ok'] ?? false) === true) {
+            $affectedIds = [$validated['entry_id']];
+            if (! empty($validated['target_entry_id'])) {
+                $affectedIds[] = $validated['target_entry_id'];
+            }
+            $this->refreshAfterRelink($affectedIds);
+        }
+
         return response()->json($result);
+    }
+
+    /**
+     * Mirrors the per-bulk-command `finalizeIndex` shape: forget cache
+     * BEFORE the recompute (order matters — `computeSuggestionCountsForEntries`
+     * internally calls `InboundEngine::suggestFiltered` which goes
+     * through the cache), rebuild the index, then refresh counts.
+     *
+     * @param  list<string>  $affectedEntryIds
+     */
+    protected function refreshAfterRelink(array $affectedEntryIds): void
+    {
+        // Order: forget BEFORE recompute — see LinkInsertCommand for rationale.
+        if (! empty($affectedEntryIds)) {
+            try {
+                app(InboundSuggestionCache::class)
+                    ->forgetMany(array_map('strval', $affectedEntryIds));
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] RelinkController cache-forget failed: '.$e->getMessage());
+            }
+        }
+
+        try {
+            $previousCount = count($this->indexer->load());
+            $this->indexer->clearCache();
+            $records = $this->indexer->buildIndex();
+
+            // Empty-index guard mirrors the 5 bulk commands.
+            if (count($records) === 0 && $previousCount > 0) {
+                Log::warning(
+                    '[Linkwise] RelinkController: refusing to save empty index (previous had '.$previousCount.' records)',
+                );
+
+                return;
+            }
+            $this->indexer->save($records);
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] RelinkController index-rebuild failed: '.$e->getMessage());
+
+            return;
+        }
+
+        if (! empty($affectedEntryIds)) {
+            try {
+                $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] RelinkController suggestion-count refresh failed: '.$e->getMessage());
+            }
+        }
     }
 }
