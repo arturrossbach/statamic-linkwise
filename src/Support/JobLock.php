@@ -23,17 +23,36 @@ use Illuminate\Support\Facades\Cache;
 class JobLock
 {
     /**
-     * Status cache keys + human labels for each background job.
+     * Scope constants for conflict detection (Sprint 6 REV-BJ-03).
+     *
+     *   - GLOBAL: rebuilds or mutates the entire index. Conflicts with
+     *     ANY other active job, in either direction. Used for scan +
+     *     broken-link-check.
+     *   - PER_ENTRY: mutates a known set of entries. Conflicts with other
+     *     PER_ENTRY jobs only when entry-sets intersect. Conflicts with
+     *     GLOBAL jobs always (index-rebuild semaphore).
+     */
+    public const SCOPE_GLOBAL = 'global';
+
+    public const SCOPE_PER_ENTRY = 'per_entry';
+
+    /**
+     * Status cache keys + human labels + lock-scope for each background job.
+     *
+     * `scope` was added in Sprint 6 REV-BJ-03 — domain-decided 2026-05-13:
+     * Per-entry write-lock + global index-rebuild semaphore. Editors on
+     * disjoint entries no longer block each other; the index-touching
+     * operations (scan/check) still take a global exclusive lock.
      */
     public const JOBS = [
-        'scan' => ['key' => 'linkwise:scan:status', 'label' => 'content scan'],
-        'check' => ['key' => 'linkwise:check:status', 'label' => 'broken-link check'],
-        'bulkunlink' => ['key' => 'linkwise:bulkunlink:status', 'label' => 'bulk unlink'],
-        'applyrule' => ['key' => 'linkwise:applyrule:status', 'label' => 'auto-link apply'],
-        'urlchanger' => ['key' => 'linkwise:urlchanger:status', 'label' => 'URL changer'],
-        'detailunlink' => ['key' => 'linkwise:detailunlink:status', 'label' => 'remove links'],
-        'inboundinsert' => ['key' => 'linkwise:inboundinsert:status', 'label' => 'add inbound links'],
-        'outboundinsert' => ['key' => 'linkwise:outboundinsert:status', 'label' => 'add outbound links'],
+        'scan' => ['key' => 'linkwise:scan:status', 'label' => 'content scan', 'scope' => self::SCOPE_GLOBAL],
+        'check' => ['key' => 'linkwise:check:status', 'label' => 'broken-link check', 'scope' => self::SCOPE_GLOBAL],
+        'bulkunlink' => ['key' => 'linkwise:bulkunlink:status', 'label' => 'bulk unlink', 'scope' => self::SCOPE_PER_ENTRY],
+        'applyrule' => ['key' => 'linkwise:applyrule:status', 'label' => 'auto-link apply', 'scope' => self::SCOPE_PER_ENTRY],
+        'urlchanger' => ['key' => 'linkwise:urlchanger:status', 'label' => 'URL changer', 'scope' => self::SCOPE_PER_ENTRY],
+        'detailunlink' => ['key' => 'linkwise:detailunlink:status', 'label' => 'remove links', 'scope' => self::SCOPE_PER_ENTRY],
+        'inboundinsert' => ['key' => 'linkwise:inboundinsert:status', 'label' => 'add inbound links', 'scope' => self::SCOPE_PER_ENTRY],
+        'outboundinsert' => ['key' => 'linkwise:outboundinsert:status', 'label' => 'add outbound links', 'scope' => self::SCOPE_PER_ENTRY],
     ];
 
     /**
@@ -56,6 +75,12 @@ class JobLock
 
     /**
      * Return the currently-active job (if any).
+     *
+     * Pre-Sprint-6 default-behaviour preserved: scans the JOBS array,
+     * returns the first job whose status is in an ACTIVE_PHASES state.
+     * Callers that want scope-aware conflict detection (per-entry locks
+     * on disjoint entry-sets don't block each other) should use
+     * `activeJobConflicting()` instead.
      *
      * @return array{name: string, label: string, status: array}|null
      */
@@ -82,6 +107,134 @@ class JobLock
         }
 
         return null;
+    }
+
+    /**
+     * Scope-aware variant of activeJob() — returns the first active job
+     * that would CONFLICT with a new operation of `$requestingName` on
+     * `$requestingEntryIds`. Conflict rules (Sprint 6 REV-BJ-03):
+     *
+     *   - If either side is GLOBAL scope (scan/check) → always conflicts.
+     *   - If both are PER_ENTRY scope:
+     *       - Conflict when the running job's entry-set INTERSECTS the
+     *         requesting set. Editors on disjoint entries don't block.
+     *       - When the running job stored no entry-set (legacy command
+     *         or starting-phase before the IDs were written) → treat as
+     *         conflict to be safe.
+     *       - When the requesting side passes null entry-ids → treat as
+     *         "scope is per_entry but ids not yet known" → conflict for
+     *         safety (callers should pass the real set when possible).
+     *
+     * Returns null when no conflict exists — caller can proceed.
+     *
+     * @param  string  $requestingName  job kind being requested (must be in JOBS)
+     * @param  list<string>|null  $requestingEntryIds  entries the new job will touch
+     * @return array{name: string, label: string, status: array}|null
+     */
+    public static function activeJobConflicting(string $requestingName, ?array $requestingEntryIds = null): ?array
+    {
+        $requestingScope = self::JOBS[$requestingName]['scope'] ?? self::SCOPE_GLOBAL;
+
+        foreach (self::JOBS as $name => $meta) {
+            if ($name === $requestingName) {
+                // A job kind never blocks a NEW dispatch of the same kind
+                // — that path is governed by HTTP-409 in the per-kind
+                // controller's own pre-flight check, not here.
+                continue;
+            }
+
+            $status = Cache::get($meta['key']);
+            if (! is_array($status)) {
+                continue;
+            }
+
+            $phase = $status['phase'] ?? '';
+            if (! in_array($phase, self::ACTIVE_PHASES, true)) {
+                continue;
+            }
+
+            $activeScope = $meta['scope'] ?? self::SCOPE_GLOBAL;
+            if (! self::conflicts($activeScope, self::entryIdsOf($status), $requestingScope, $requestingEntryIds)) {
+                continue;
+            }
+
+            return [
+                'name' => $name,
+                'label' => $meta['label'],
+                'status' => $status,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * Pure conflict-detection. Lifted out so the truth-table is testable
+     * without bootstrapping the cache facade. Sprint 6 REV-BJ-03.
+     *
+     * @param  string  $activeScope  SCOPE_GLOBAL | SCOPE_PER_ENTRY
+     * @param  list<string>|null  $activeEntryIds  entry-set the running job mutates (null = unknown)
+     * @param  string  $requestingScope  SCOPE_GLOBAL | SCOPE_PER_ENTRY
+     * @param  list<string>|null  $requestingEntryIds  entry-set the new job would mutate
+     */
+    public static function conflicts(
+        string $activeScope,
+        ?array $activeEntryIds,
+        string $requestingScope,
+        ?array $requestingEntryIds,
+    ): bool {
+        // Any global participation → always conflict. Index-rebuild
+        // semaphore: scan/check take exclusive lock against everything.
+        if ($activeScope === self::SCOPE_GLOBAL || $requestingScope === self::SCOPE_GLOBAL) {
+            return true;
+        }
+
+        // Both per-entry. Without entry-id information on either side,
+        // play safe — assume potential intersection.
+        if ($activeEntryIds === null || $requestingEntryIds === null) {
+            return true;
+        }
+
+        // Disjoint entry sets → no conflict. Two editors on different
+        // posts can run their bulks in parallel.
+        $intersection = array_intersect(
+            array_map('strval', $activeEntryIds),
+            array_map('strval', $requestingEntryIds),
+        );
+
+        return $intersection !== [];
+    }
+
+    /**
+     * Extract the entry-id set a running job is mutating from its status
+     * cache. Commands write the set under `status.extra.entry_ids` when
+     * they start (Sprint 6 REV-BJ-03 wire-in). Returns null when the
+     * set hasn't been written yet — callers should treat null as "unknown,
+     * assume conflict" via `conflicts()`.
+     *
+     * @return list<string>|null
+     */
+    public static function entryIdsOf(array $status): ?array
+    {
+        $extra = $status['extra'] ?? null;
+        if (! is_array($extra)) {
+            return null;
+        }
+        $ids = $extra['entry_ids'] ?? null;
+        if (! is_array($ids)) {
+            return null;
+        }
+
+        // Coerce to list<string> + drop non-scalar entries (defensive
+        // against malformed cache state from old/dev runs).
+        $clean = [];
+        foreach ($ids as $id) {
+            if (is_string($id) || is_int($id)) {
+                $clean[] = (string) $id;
+            }
+        }
+
+        return $clean;
     }
 
     /**
