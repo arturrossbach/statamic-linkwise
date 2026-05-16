@@ -240,6 +240,7 @@ import { Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem
 import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterruptedBulk, recordCompletion, getLastCompletion, clearLastCompletion } from '../services/bulkOperationService.js';
 import { activeLabel, shortLabel, completionLabel, completionVariant } from '../services/bulkLabels.js';
 import { buildCompletionSignature, isCompletionStale } from '../services/bulkSignature.js';
+import { pickTerminalReload } from '../services/bulkTerminalReload.js';
 import { readString, writeString } from '../utils/safeStorage.js';
 
 // Hardcoded for V1 — wire from composer.json via route props once we tag a
@@ -859,39 +860,30 @@ export default {
                 // shared) — the layout's `lastCompletion` computed picks it up.
                 recordCompletion(completionSnap);
 
-                // Scan needs a full reload to refresh entries data — but only
-                // if WE observed the scan running in this layout instance.
-                // Otherwise stale 'done' from a previous session (cache TTL
-                // 300s) would cause an infinite reload loop.
-                if (status.kind === 'scan' && phase === 'done' && this.seenRunning.scan) {
-                    this.seenRunning.scan = false;
-                    window.location.reload();
-                }
-                // After a broken-link check, reload so staleCheck.is_stale
-                // re-computes server-side. Without this, the "Recent edits..."
-                // banner sticks around because Inertia keeps the prop value
-                // from before the check ran. Same once-per-instance guard
-                // pattern as scan to avoid infinite reload loops.
-                if (status.kind === 'check' && phase === 'done' && this.seenRunning.check) {
-                    this.seenRunning.check = false;
-                    window.location.reload();
-                }
-                // After inbound/outbound bulk-add: refresh so the entries
-                // table reflects new outbound/inbound counts. Use Inertia's
-                // partial reload instead of window.location.reload() —
-                // bug 2 (2026-05-11): the hard-reload killed the success
-                // toast that fireTerminalToast had just queued (Vue's render
-                // tick never completed before the page navigated away), and
-                // because the toast/banner state lived only in JS memory the
-                // user saw "Progressbanner flackert kurz auf, kein Toast,
-                // kein Success-Banner". inertiaRouter.reload() re-fetches
-                // page props (the entries data) while preserving the Vue
-                // component tree — toast + completion-banner survive.
-                if ((status.kind === 'inboundinsert' || status.kind === 'outboundinsert')
-                    && phase === 'done'
-                    && this.seenRunning[status.kind]) {
+                // Terminal-reload decision is extracted to
+                // `services/bulkTerminalReload.js` (Sprint 5 PR 3b). The
+                // truth-table — including the `seenRunning` stale-cache
+                // guard against infinite reload loops — is pinned by
+                // `tests/Vue/services/bulkTerminalReload.test.js`.
+                //
+                // IMPORTANT ordering: clear `seenRunning[kind]` BEFORE
+                // calling reload(). Otherwise a re-poll of the same
+                // terminal status before the page actually navigates
+                // away would re-fire the helper → second reload → loop.
+                const reloadAction = pickTerminalReload(status, this.seenRunning);
+                if (reloadAction !== 'none') {
                     this.seenRunning[status.kind] = false;
-                    inertiaRouter.reload({ preserveState: true, preserveScroll: true });
+                    if (reloadAction === 'full') {
+                        // scan / check: refresh server-side props (summary,
+                        // staleCheck, index_built_at) — needs a hard reload.
+                        window.location.reload();
+                    } else if (reloadAction === 'partial') {
+                        // inbound/outbound: Inertia partial reload preserves
+                        // the Vue tree so the success toast + completion-banner
+                        // survive (bug 2026-05-11: window.location.reload()
+                        // killed the toast mid-render).
+                        inertiaRouter.reload({ preserveState: true, preserveScroll: true });
+                    }
                 }
             } catch {
                 // transient errors — try again next tick
