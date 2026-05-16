@@ -154,7 +154,6 @@ import SortableHeader from '../shared/SortableHeader.vue';
 import SuggestedPhrase from '../shared/SuggestedPhrase.vue';
 import BardBadge from '../shared/BardBadge.vue';
 import { bulkState, setHeavyState, runBulkOperation, recordCompletion } from '../../services/bulkOperationService.js';
-import { router as inertiaRouter } from '@statamic/cms/inertia';
 import { errorToast } from '../../utils/toast.js';
 
 export default {
@@ -577,24 +576,21 @@ export default {
             this.relinking = false;
             if (modalAlive()) this.selected = [];
 
-            // Sprint 6 follow-up (user-reported 2026-05-16): after re-link
-            // the main-table count + the DetailModal's own data are stale
-            // until a manual page reload. Backend now refreshes the index
-            // + invalidates the inbound-suggestion-cache in RelinkController.
-            // Frontend triggers two complementary refreshes:
+            // Sprint 6 follow-up (user-reported 2026-05-16, refined after
+            // PR #46 caused a visible "flicker" from a `preserveScroll`
+            // partial reload):
             //
-            //   1. `recordCompletion({kind:'detailrelink',phase:'done'})` —
-            //      flips `bulkState.lastCompletion` which fires
-            //      LinksReportTab's watcher (added in PR #45) that re-fetches
-            //      suggestionCounts for the dashboard count cells.
-            //
-            //   2. `inertiaRouter.reload({only:['entries'],preserveScroll})` —
-            //      re-fetches the `entries` page-prop with the fresh
-            //      internal_links_detail anchor-text values, which the
-            //      parent's `entries` watcher then mirrors into
-            //      `localEntries`. Without this, re-opening the modal
-            //      reads the still-cloned-at-mount anchor and shows the
-            //      OLD anchor-text from before the re-link.
+            // The per-item success branch above already mutated
+            // `item.anchor_text` + `item._originalAnchor` in place — modal
+            // rendering reflects the NEW anchor immediately. The stale
+            // surface is the PARENT's `localEntries` clone (used by
+            // showDetail to rebuild items on the NEXT modal open). Fire
+            // a single `recordCompletion('detailrelink')` so the watcher
+            // in LinksReportTab refreshes the suggestionCounts endpoint
+            // AND triggers `reloadEntries()` (see LinksReportTab handler)
+            // to pull fresh `entries`/`internal_links_detail` from the
+            // server. The inertia reload runs in the BACKGROUND while the
+            // modal stays open — no flicker, no remount.
             try {
                 recordCompletion({
                     kind: 'detailrelink',
@@ -603,13 +599,6 @@ export default {
                 });
             } catch (e) {
                 console.error('[Linkwise] recordCompletion(detailrelink) failed:', e);
-            }
-            try {
-                inertiaRouter.reload({ only: ['entries'], preserveScroll: true, preserveState: true });
-            } catch (e) {
-                // Not on an Inertia page (unit tests, embedded contexts) —
-                // skip silently. The recordCompletion above still fires
-                // its watcher contract.
             }
         },
 
