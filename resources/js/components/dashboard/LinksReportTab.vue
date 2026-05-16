@@ -379,6 +379,18 @@ export default {
                 if (this.suggestionCountsUrl) {
                     this.loadSuggestionCounts();
                 }
+                // `detailrelink` mutates entries' internal_links_detail
+                // (anchor-text changes) but no other kind does — they go
+                // through pickTerminalReload's own Inertia partial reload
+                // path. For detailrelink we trigger the same background
+                // partial here so the parent's `entries` watcher re-syncs
+                // `localEntries` and the NEXT modal open shows fresh
+                // anchor-texts. Running with preserveState avoids the
+                // modal flicker observed when reload was fired from
+                // inside DetailModal during the relink (PR #46 → #47).
+                if (completion.kind === 'detailrelink') {
+                    this.reloadEntries();
+                }
             },
         );
 
