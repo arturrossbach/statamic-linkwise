@@ -147,59 +147,20 @@
                 </div>
             </details>
 
-            <!-- Tab-spanning bulk-operation banner. Single source of truth for
-                 ALL bulks (light + heavy) — visible across every Linkwise tab.
-                 Switches to a "stuck" warning variant when the heartbeat is
-                 stale (process likely crashed without the shutdown-guard
-                 firing — e.g. server restart). User gets a Force-clear button. -->
-            <Alert v-if="activeBulk" :variant="bulkStuck ? 'warning' : 'default'" class="mb-4 sticky top-0 z-30 shadow-md" role="status" aria-live="polite">
-                <div class="flex items-center justify-between gap-2 text-sm">
-                    <div class="flex items-center gap-2">
-                        <span v-if="bulkStuck" class="font-medium">Operation may be stuck —</span>
-                        <span>{{ bulkBannerLabel }}</span>
-                        <!-- N/M counter is shown for every phase that has a
-                             total — including 'indexing'. Without this the
-                             user only saw "Finalizing index…" for fast bulks
-                             that completed between polling ticks; they had no
-                             evidence the work itself had landed. Real bug
-                             2026-05-11: user said "Heavy-Banner zeigt sofort
-                             'finalizing index' statt vorher den Progress". -->
-                        <span v-if="activeBulk.total > 0" class="font-mono text-xs text-gray-500 dark:text-gray-400">
-                            {{ activeBulk.current }} / {{ activeBulk.total }}
-                        </span>
-                        <!-- Outcome counts during indexing — writes are done,
-                             surface succeeded/skipped so the user knows what
-                             actually happened before the index rebuild. -->
-                        <span v-if="activeBulk.phase === 'indexing' && (activeBulk.succeeded !== undefined || activeBulk.skipped !== undefined)" class="text-xs text-gray-500 dark:text-gray-400">
-                            ({{ activeBulk.succeeded || 0 }} done<span v-if="(activeBulk.skipped || 0) > 0">, {{ activeBulk.skipped }} skipped</span>)
-                        </span>
-                        <!-- Indexing/finalizing phase: the writes are complete
-                             but the command is still rebuilding the index +
-                             recomputing suggestion counts (can take 1-3min on
-                             large sites). -->
-                        <span v-if="activeBulk.phase === 'indexing'" class="text-xs text-gray-500 dark:text-gray-400 italic">
-                            Finalizing index…
-                        </span>
-                        <span v-else-if="!activeBulk.total && activeBulk.message" class="text-xs text-gray-500 dark:text-gray-400">
-                            {{ activeBulk.message }}
-                        </span>
-                        <span v-if="bulkStuck" class="text-xs text-gray-500 dark:text-gray-400">
-                            (no progress for {{ bulkStaleSeconds }}s)
-                        </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <Button v-if="bulkStuck" @click="forceClearBulk" :loading="forceClearing" text="Force-clear" variant="default" size="xs" />
-                        <Button v-if="activeBulk.canCancel && !bulkStuck" @click="cancelBulk" :loading="cancelling" text="Cancel" variant="default" size="xs" />
-                    </div>
-                </div>
-                <!-- Heavy bulks survive navigation/reload — they run in a detached
-                     artisan process, the banner re-attaches via a global state
-                     poll on every Linkwise tab. Telling the user means they
-                     don't have to babysit the tab during a 10-minute scan. -->
-                <p v-if="activeBulk.source === 'heavy' && !bulkStuck" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    You can safely navigate to other Linkwise tabs or away from this page — the operation continues in the background and the banner will reappear when you come back.
-                </p>
-            </Alert>
+            <!-- Active-bulk banner — extracted to BulkStatusBanner.vue in
+                 Sprint 5 PR 3c. State (activeBulk + bulkStuck + bulkBannerLabel)
+                 stays here; the sub-component is a template wrapper with
+                 props/events for cancel + force-clear. -->
+            <BulkStatusBanner
+                :active-bulk="activeBulk"
+                :bulk-stuck="bulkStuck"
+                :bulk-banner-label="bulkBannerLabel"
+                :bulk-stale-seconds="bulkStaleSeconds"
+                :cancelling="cancelling"
+                :force-clearing="forceClearing"
+                @cancel="cancelBulk"
+                @force-clear="forceClearBulk"
+            />
 
             <slot />
 
@@ -237,6 +198,7 @@
 <script>
 import { Head, Link, router as inertiaRouter } from '@statamic/cms/inertia';
 import { Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal } from '@statamic/cms/ui';
+import BulkStatusBanner from './BulkStatusBanner.vue';
 import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterruptedBulk, recordCompletion, getLastCompletion, clearLastCompletion } from '../services/bulkOperationService.js';
 import { activeLabel, shortLabel, completionLabel, completionVariant } from '../services/bulkLabels.js';
 import { buildCompletionSignature, isCompletionStale } from '../services/bulkSignature.js';
@@ -263,7 +225,7 @@ const GITHUB_ISSUES_NEW_URL = 'https://github.com/arturrossbach/statamic-linkwis
 const DISCORD_URL = 'https://statamic.com/discord';
 
 export default {
-    components: { Head, Link, Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal },
+    components: { Head, Link, Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal, BulkStatusBanner },
 
     props: {
         activeTab: { type: String, required: true },
