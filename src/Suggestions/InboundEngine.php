@@ -11,11 +11,19 @@ use Statamic\Facades\Entry;
 
 class InboundEngine
 {
+    protected InboundSuggestionCache $cache;
+
     public function __construct(
         protected EntryIndexer $indexer,
         protected SuggestionEngine $engine,
         protected TargetKeywordManager $keywordManager,
-    ) {}
+        ?InboundSuggestionCache $cache = null,
+    ) {
+        // Sprint 6 REV-IB-01: 5-minute TTL cache for suggestFiltered.
+        // Without it every modal-open re-runs N dry-run-inserts (the
+        // expensive filter step). With it only the first open pays.
+        $this->cache = $cache ?? new InboundSuggestionCache;
+    }
 
     /**
      * Find entries that mention the target entry's title and could link to it.
@@ -122,6 +130,18 @@ class InboundEngine
      */
     public function suggestFiltered(string $targetEntryId, int $limit = 0): array
     {
+        // Cache hit: skip the suggest() walk + N dry-run-inserts entirely.
+        // Sprint 6 REV-IB-01. Limit is applied AFTER cache-hit so different
+        // callers can re-use the same cached super-set with different
+        // `limit` slices. The cached array IS the full filtered set —
+        // `lastTotalCount` is its size.
+        $cached = $this->cache->getCached($targetEntryId);
+        if ($cached !== null) {
+            $this->lastTotalCount = count($cached);
+
+            return $limit > 0 ? array_slice($cached, 0, $limit) : $cached;
+        }
+
         $suggestions = $this->suggest($targetEntryId, $limit);
 
         $filtered = array_values(array_filter($suggestions, function ($s) {
@@ -151,6 +171,15 @@ class InboundEngine
         // — counting it as "available" produces the confusing "4 of 5" with
         // no 5th row in sight that started this fix.
         $this->lastTotalCount = count($filtered);
+
+        // Cache the full filtered super-set (pre-limit) so future calls
+        // with a different limit can re-use it. Sprint 6 REV-IB-01.
+        // Skipped when $limit > 0 caller asked for a subset — the
+        // upstream `suggest()` truncated `$suggestions` and we don't
+        // want to memoize a truncated row as the canonical full result.
+        if ($limit === 0) {
+            $this->cache->store($targetEntryId, $filtered);
+        }
 
         return $limit > 0 ? array_slice($filtered, 0, $limit) : $filtered;
     }
