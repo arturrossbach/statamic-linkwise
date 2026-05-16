@@ -359,27 +359,28 @@ class EntryIndexer
             $fields = [];
         }
 
+        // Top-level read/write symmetry with BardLinkInserter:363-380:
+        // the writer touches `markdown` only (text/textarea are plaintext
+        // per Statamic's contract — writing `[anchor](url)` into them
+        // would surface as visible literal syntax in any template that
+        // doesn't manually pipe through `| markdown`). Indexing text/
+        // textarea here would produce phantom anchor candidates that
+        // always fail at apply-time with "anchor text not found in
+        // writable region". Symmetric retreat keeps reads and writes
+        // operating on the same field set.
         foreach ($fields as $handle => $field) {
-            if (in_array($field->type(), ['markdown', 'textarea', 'text'], true) && $handle !== 'title') {
+            if ($field->type() === 'markdown' && $handle !== 'title') {
                 $value = $entry->get($handle);
 
                 if (is_string($value) && ! empty($value)) {
-                    // Strip Markdown formatting for plain text — safe on
-                    // plaintext fields too (no markdown syntax to strip = no-op).
+                    // Strip Markdown formatting for plain text.
                     $plain = preg_replace('/\[([^\[\]]+)\]\([^)]+\)/', '$1', $value); // [text](url) → text
                     $plain = preg_replace('/[#*_~`>]/', '', $plain); // Remove Markdown syntax
                     $text .= trim($plain)."\n";
 
-                    // Extract Markdown links as outbound links — only for
-                    // genuine `markdown` fields. `text`/`textarea` render as
-                    // plaintext per Statamic's contract, so `[…](url)` there
-                    // is literal text, not a link. Symmetric with the write-
-                    // side retreat in BardLinkInserter — reads only what
-                    // writes can also reach.
-                    if ($field->type() === 'markdown') {
-                        $links = array_merge($links, TextExtractor::linksFromMarkdown($value));
-                        $linkOccurrences = array_merge($linkOccurrences, TextExtractor::linksFromMarkdownWithOccurrences($value));
-                    }
+                    // Extract Markdown links as outbound links.
+                    $links = array_merge($links, TextExtractor::linksFromMarkdown($value));
+                    $linkOccurrences = array_merge($linkOccurrences, TextExtractor::linksFromMarkdownWithOccurrences($value));
                 }
             }
         }
