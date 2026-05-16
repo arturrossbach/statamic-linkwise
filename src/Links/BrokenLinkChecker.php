@@ -8,6 +8,7 @@ use Arturrossbach\Linkwise\Indexer\EntryIndexer;
 use Arturrossbach\Linkwise\Indexer\EntryRecord;
 use Arturrossbach\Linkwise\Support\ContextExtractor;
 use Arturrossbach\Linkwise\Support\EntryFieldWalker;
+use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Arturrossbach\Linkwise\Support\TextExtractor;
 use Statamic\Facades\Entry;
 
@@ -18,6 +19,8 @@ class BrokenLinkChecker
     protected int $retries;
 
     protected BrokenLinkReport $report;
+
+    protected BrokenLinkScanCache $scanCache;
 
     /** @var array<string, string>  Map of "postId|url" → first_detected_at ISO timestamp */
     protected array $previousDetections = [];
@@ -30,10 +33,15 @@ class BrokenLinkChecker
         ?BrokenLinkReport $report = null,
         ?int $timeout = null,
         ?int $retries = null,
+        ?BrokenLinkScanCache $scanCache = null,
     ) {
         $this->report = $report ?? new BrokenLinkReport;
         $this->timeout = $timeout ?? config('linkwise.broken_links.timeout', 10);
         $this->retries = $retries ?? config('linkwise.broken_links.retries', 2);
+        // Per-entry cache lets unchanged entries skip the walk + HTTP work
+        // on subsequent runs. Sprint 6 REV-BL-05. TTL is 24h so external
+        // URL drift (target site went down) still surfaces eventually.
+        $this->scanCache = $scanCache ?? new BrokenLinkScanCache;
     }
 
     /**
@@ -93,6 +101,7 @@ class BrokenLinkChecker
         $records = $this->indexer->load();
         $brokenLinks = [];
         $checkedUrls = [];
+        $nowUnix = time();
 
         // Count total URLs upfront so the UI can show progress
         $totalUrls = $this->countTotalExternalUrls($records);
@@ -105,6 +114,11 @@ class BrokenLinkChecker
         $ignoredLinks = config('linkwise.ignored_links', '');
         $ignoredPatterns = is_string($ignoredLinks) ? array_filter(array_map('trim', explode("\n", $ignoredLinks))) : [];
 
+        // Track which entry-ids we touched so the cache can evict rows for
+        // entries that no longer exist in the index (otherwise the cache
+        // grows unboundedly on sites with high churn). Sprint 6 REV-BL-05.
+        $seenEntryIds = [];
+
         foreach ($records as $record) {
             if (in_array($record->id, $excludedEntries, true)) {
                 continue;
@@ -113,14 +127,62 @@ class BrokenLinkChecker
                 continue;
             }
 
+            $seenEntryIds[$record->id] = true;
+
             $entry = Entry::find($record->id);
+
+            // Incremental-scan cache: skip the walk + HTTP work entirely
+            // when the entry is unchanged AND the cached scan is within TTL.
+            // Cache-hit records are appended as-is, preserving the result
+            // shape; cache-miss falls through to the full walk below and
+            // stores the result for next time.
+            //
+            // Hash is computed from the live Entry — without it any pre-
+            // existing cache row is meaningless. If the entry is gone
+            // (Entry::find returned null), there's nothing to cache against
+            // either; fall through and let the existing flow surface the
+            // missing-target as an internal broken link.
+            $currentHash = $entry ? SafeEntrySaver::hash($entry) : '';
+            if ($entry && $currentHash !== '') {
+                $cached = $this->scanCache->getCached($record->id, $currentHash, $nowUnix);
+                if ($cached !== null) {
+                    foreach ($cached as $cachedRecord) {
+                        // Re-apply the ignored flag from the current report
+                        // state — the user might have toggled ignored on a
+                        // URL since the cache row was written. The ignored
+                        // flag is metadata, not part of the dedup key.
+                        $brokenLinks[] = $this->wasIgnored($cachedRecord->postId, $cachedRecord->url)
+                            ? $cachedRecord->withIgnored(true)
+                            : $cachedRecord->withIgnored(false);
+                    }
+                    // Advance the progress counter so the UI doesn't look
+                    // frozen during a high-cache-hit run. Use the count of
+                    // external links in the cached set as a proxy.
+                    foreach ($cached as $cachedRecord) {
+                        if ($cachedRecord->type === 'external') {
+                            $progress++;
+                            if ($onProgress) {
+                                $onProgress($progress, $totalUrls, $cachedRecord->url);
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+            }
+
+            // Cache miss path — collect this entry's records so we can
+            // store them at the end of the per-entry block.
+            $entryBroken = [];
 
             // Check internal links (do target entries exist?). User-ignored internal
             // links still surface — we just carry the `ignored` flag so the UI can
             // hide or reveal them via the Status filter.
             $internalBroken = $this->checkInternalLinks($record, $records, $entry);
             foreach ($internalBroken as $r) {
-                $brokenLinks[] = $this->wasIgnored($r->postId, $r->url) ? $r->withIgnored(true) : $r;
+                $final = $this->wasIgnored($r->postId, $r->url) ? $r->withIgnored(true) : $r;
+                $brokenLinks[] = $final;
+                $entryBroken[] = $final;
             }
 
             // Check external links (HTTP status)
@@ -137,7 +199,7 @@ class BrokenLinkChecker
                 // Skip already-checked URLs
                 if (isset($checkedUrls[$url])) {
                     if ($checkedUrls[$url] !== null) {
-                        $brokenLinks[] = new BrokenLinkRecord(
+                        $broken = new BrokenLinkRecord(
                             postId: $record->id,
                             postTitle: $record->title,
                             url: $url,
@@ -150,6 +212,8 @@ class BrokenLinkChecker
                             sentenceContext: ContextExtractor::extract($record->text, $link['anchor_text']),
                             ignored: $this->wasIgnored($record->id, $url),
                         );
+                        $brokenLinks[] = $broken;
+                        $entryBroken[] = $broken;
                     }
 
                     continue;
@@ -177,12 +241,29 @@ class BrokenLinkChecker
                         ignored: $this->wasIgnored($record->id, $url),
                     );
                     $brokenLinks[] = $broken;
+                    $entryBroken[] = $broken;
                     $checkedUrls[$url] = $broken;
                 } else {
                     $checkedUrls[$url] = null; // OK
                 }
             }
+
+            // Persist this entry's complete broken-link set into the
+            // incremental-scan cache. Future runs within the TTL window
+            // and with unchanged content_hash will skip the per-entry
+            // walk + HTTP check and re-use this snapshot. Sprint 6
+            // REV-BL-05. Skip when we couldn't compute a content_hash
+            // (entry was deleted between index-load and walk) — caching
+            // against an empty hash would never hit anyway.
+            if ($currentHash !== '') {
+                $this->scanCache->store($record->id, $currentHash, $entryBroken, $nowUnix);
+            }
         }
+
+        // Cache eviction: drop rows for entry-ids no longer in the index
+        // (entry deleted since the last scan). Without this the cache file
+        // grows unboundedly on sites with high churn.
+        $this->scanCache->dropOrphans(array_keys($seenEntryIds));
 
         return $brokenLinks;
     }
