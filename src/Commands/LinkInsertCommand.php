@@ -364,6 +364,22 @@ class LinkInsertCommand extends Command
         // Cap to a small batch so the typical workflow (1–20 inserts)
         // still gets immediate count updates while large bulks finish
         // quickly with counts that catch up at the next scan.
+        // Inbound-suggestion-cache invalidation must run BEFORE the count
+        // refresh below — `computeSuggestionCountsForEntries()` internally
+        // calls `InboundEngine::suggestFiltered()` which goes through the
+        // cache. If we forget AFTER the count refresh, the recomputed
+        // count is read from the stale cache (user-reported 2026-05-16:
+        // "Count in der Haupttabelle steht still nach inbound-insert").
+        // Sprint 6 REV-IB-01 order-bug-fix.
+        if (! empty($affectedEntryIds)) {
+            try {
+                app(\Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache::class)
+                    ->forgetMany(array_map('strval', $affectedEntryIds));
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] LinkInsertCommand cache-forget failed: '.$e->getMessage());
+            }
+        }
+
         $cap = 20;
         if (! empty($affectedEntryIds) && count($affectedEntryIds) <= $cap) {
             try {
@@ -379,23 +395,6 @@ class LinkInsertCommand extends Command
                 .count($affectedEntryIds).' affected entries exceeds cap of '.$cap
                 .'. Counts will refresh at the next Scan Content.',
             );
-        }
-
-        // Inbound-suggestion-cache invalidation (Sprint 6 REV-IB-01 follow-up,
-        // user-reported 2026-05-16: "Nach Bulk-Insert muss ich erst rescannen,
-        // sonst zeigt das Inbound-Modal die schon-eingefügten Suggestions
-        // weiter und der Count in der Haupttabelle steht still"). Affects
-        // both source AND target sides because either could be queried by
-        // `InboundEngine::suggestFiltered()` afterwards. Runs unconditionally
-        // — even if the count-refresh above hit the cap, the cache still
-        // needs invalidating so the next modal/API call recomputes fresh.
-        if (! empty($affectedEntryIds)) {
-            try {
-                app(\Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache::class)
-                    ->forgetMany(array_map('strval', $affectedEntryIds));
-            } catch (\Throwable $e) {
-                Log::warning('[Linkwise] LinkInsertCommand cache-forget failed: '.$e->getMessage());
-            }
         }
     }
 }
