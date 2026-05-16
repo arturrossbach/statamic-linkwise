@@ -85,67 +85,33 @@
                 </Link>
             </nav>
 
-            <!-- Persistent-notifications accordion: groups stale-check +
-                 completion + recovery banners under one summary so users
-                 who have seen them aren't pushed downward on every page-nav.
-                 Joomla-style "X notifications" header, individual dismiss
-                 buttons inside still work. Active-bulk banner stays outside
-                 because it's transient AND critical — never collapsable. -->
-            <details
+            <!-- Persistent-notifications accordion — extracted to
+                 NotificationsAccordion.vue in Sprint 5 PR 3d. State
+                 (notificationsCollapsed, interruptedBulk,
+                 staleCheckDismissedFor, checkingFromBanner) stays here
+                 because async paths outside the accordion's mount window
+                 read/mutate them (e.g. fireTerminalToast auto-opens via
+                 setting notificationsCollapsed=false). Sub-component is a
+                 template wrapper with v-model + action emits. -->
+            <NotificationsAccordion
                 v-if="notificationCount > 0"
-                :open="!notificationsCollapsed"
-                @toggle="handleNotificationsToggle"
-                class="mb-4 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40"
-            >
-                <summary class="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/60 rounded-md">
-                    {{ notificationCount }} {{ notificationCount === 1 ? 'notification' : 'notifications' }}
-                </summary>
-                <div class="px-3 pb-3 pt-1 flex flex-col gap-2">
-                    <!-- Stale-check: index newer than last broken-link check.
-                         Always-stacked layout so buttons aren't cramped. -->
-                    <Alert v-if="showStaleCheck" variant="warning" role="status">
-                        <div class="flex flex-col gap-3 text-sm">
-                            <div>
-                                <p class="font-medium">{{ staleCheckTitle }}</p>
-                                <p class="mt-0.5 text-xs opacity-80">{{ staleCheckBody }}</p>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-2">
-                                <Button @click="runStaleCheck" :loading="checkingFromBanner" :disabled="!!activeBulk" text="Run check now" size="xs" />
-                                <Button @click="dismissStaleCheck" text="Dismiss" variant="default" size="xs" />
-                            </div>
-                        </div>
-                    </Alert>
-
-                    <!-- Completion: persistent recap of the last bulk so users
-                         who missed the toast can still see the result.
-                         Statamic's <Alert variant="..."> already renders its
-                         own variant-matched icon (check / warning / x); don't
-                         add an extra <Icon> here or the banner shows two
-                         icons side-by-side. -->
-                    <Alert v-if="lastCompletion && !activeBulk" :variant="completionBannerVariant" role="status">
-                        <div class="flex items-start justify-between gap-4 text-sm">
-                            <span>{{ completionBannerLabel }}</span>
-                            <Button @click="dismissCompletion" text="Dismiss" variant="default" size="xs" />
-                        </div>
-                    </Alert>
-
-                    <!-- Recovery: page reloaded mid-bulk — tells the user how
-                         far it got. No resume action. -->
-                    <Alert v-if="interruptedBulk" variant="warning" role="status">
-                        <div class="flex items-start justify-between gap-4 text-sm">
-                            <div>
-                                <div class="font-medium">Previous bulk operation was interrupted.</div>
-                                <div class="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                    {{ interruptedBulkLabel }} — completed {{ interruptedBulk.current }} of {{ interruptedBulk.total }} before the page was reloaded.
-                                    <span v-if="interruptedBulk.skipped > 0">{{ interruptedBulk.skipped }} skipped.</span>
-                                    Re-run the same operation if you need the rest.
-                                </div>
-                            </div>
-                            <Button @click="dismissInterruptedBulk" text="Dismiss" variant="default" size="xs" />
-                        </div>
-                    </Alert>
-                </div>
-            </details>
+                v-model:notifications-collapsed="notificationsCollapsed"
+                :notification-count="notificationCount"
+                :show-stale-check="showStaleCheck"
+                :stale-check-title="staleCheckTitle"
+                :stale-check-body="staleCheckBody"
+                :checking-from-banner="checkingFromBanner"
+                :run-check-disabled="!!activeBulk"
+                :show-completion="!!lastCompletion && !activeBulk"
+                :completion-banner-variant="completionBannerVariant"
+                :completion-banner-label="completionBannerLabel"
+                :interrupted-bulk="interruptedBulk"
+                :interrupted-bulk-label="interruptedBulkLabel"
+                @run-stale-check="runStaleCheck"
+                @dismiss-stale-check="dismissStaleCheck"
+                @dismiss-completion="dismissCompletion"
+                @dismiss-interrupted-bulk="dismissInterruptedBulk"
+            />
 
             <!-- Active-bulk banner — extracted to BulkStatusBanner.vue in
                  Sprint 5 PR 3c. State (activeBulk + bulkStuck + bulkBannerLabel)
@@ -199,6 +165,7 @@
 import { Head, Link, router as inertiaRouter } from '@statamic/cms/inertia';
 import { Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal } from '@statamic/cms/ui';
 import BulkStatusBanner from './BulkStatusBanner.vue';
+import NotificationsAccordion from './NotificationsAccordion.vue';
 import { bulkState, setHeavyState, cancelActive, getInterruptedBulk, clearInterruptedBulk, recordCompletion, getLastCompletion, clearLastCompletion } from '../services/bulkOperationService.js';
 import { activeLabel, shortLabel, completionLabel, completionVariant } from '../services/bulkLabels.js';
 import { buildCompletionSignature, isCompletionStale } from '../services/bulkSignature.js';
@@ -225,7 +192,7 @@ const GITHUB_ISSUES_NEW_URL = 'https://github.com/arturrossbach/statamic-linkwis
 const DISCORD_URL = 'https://statamic.com/discord';
 
 export default {
-    components: { Head, Link, Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal, BulkStatusBanner },
+    components: { Head, Link, Header, Card, Button, Alert, Icon, Dropdown, DropdownMenu, DropdownItem, DropdownSeparator, ConfirmationModal, BulkStatusBanner, NotificationsAccordion },
 
     props: {
         activeTab: { type: String, required: true },
@@ -494,6 +461,19 @@ export default {
         if (this.tickClockTimer) clearInterval(this.tickClockTimer);
     },
 
+    watch: {
+        // Persist notifications-accordion open/collapsed state to
+        // sessionStorage. Triggers on BOTH the v-model update from
+        // NotificationsAccordion (user clicked summary) AND the
+        // imperative `notificationsCollapsed = false` in fireTerminalToast
+        // (auto-open on new completion). The old <details>-@toggle handler
+        // only covered the first path — the watcher unifies them.
+        // Sprint 5 PR 3d.
+        notificationsCollapsed(collapsed) {
+            writeString('linkwise:notifications:collapsed', collapsed ? '1' : '0');
+        },
+    },
+
     methods: {
         /**
          * Banner CTA: kick off a broken-link check. Reuses the existing
@@ -548,20 +528,11 @@ export default {
             }
         },
 
-        /**
-         * Persist the open/collapsed state of the notifications accordion to
-         * sessionStorage so users who collapsed it don't get it pushed open
-         * on every page-nav. The <details> element fires `toggle` after the
-         * browser flips its internal `open` state — read it back into the
-         * Vue data flag and persist.
-         */
-        handleNotificationsToggle(event) {
-            this.notificationsCollapsed = !event.target.open;
-            writeString(
-                'linkwise:notifications:collapsed',
-                this.notificationsCollapsed ? '1' : '0',
-            );
-        },
+        // handleNotificationsToggle removed in Sprint 5 PR 3d — the
+        // sub-component's v-model emit + the `notificationsCollapsed`
+        // watcher below handle the toggle + persistence. The watcher
+        // also covers fireTerminalToast's auto-open mutation (which
+        // bypassed the old handler entirely).
 
         dismissStaleCheck() {
             // Persist the dismissal scoped to the current index timestamp.
