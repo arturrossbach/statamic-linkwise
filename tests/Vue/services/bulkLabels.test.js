@@ -160,7 +160,7 @@ describe('completionVariant("applyrule", "done", …)', () => {
         expect(v).toBe('success');
     });
 
-    it('all-skipped (n=0 + conflicts>0) → "warning"', () => {
+    it('all-skipped (n=0 + conflicts>0) → "info" (current behaviour, gap documented)', () => {
         // Inherits the cross-kind `succeeded===0 && skipped>0` branch.
         // Note: completionVariant maps `links_added → succeeded` fallback
         // already (line ~215 in bulkLabels.js). conflicts_skipped is NOT
