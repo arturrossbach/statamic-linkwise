@@ -463,7 +463,7 @@ class InertiaPagesController extends CpController
             'snapshots' => $listing,
             'detailUrl' => cp_route('linkwise.activity.detail', '__ID__'),
             'markRevertedUrl' => cp_route('linkwise.activity.mark-reverted', '__ID__'),
-            // Distribution-pin (InertiaRendererRebuildUrlTest): all 8
+            // Distribution-pin (InertiaRendererRequiredUrlPropsTest): all 8
             // Inertia renderers must carry the rebuild-trio so the
             // shared LinkwiseLayout's "Scan Content" button works
             // identically across tabs. Activity was the outlier
