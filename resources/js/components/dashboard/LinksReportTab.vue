@@ -293,6 +293,12 @@ export default {
         entries: { type: Array, required: true },
         collections: { type: Array, required: true },
         suggestionCountsUrl: { type: String, default: '' },
+        // Klasse-7 C-1 residual race-closure: showDetail fetches fresh
+        // content_hashes from this endpoint before populating the
+        // DetailModal so a rapid-second bulk op uses current state
+        // instead of stale localEntries[].content_hash from before the
+        // last partial reload.
+        entryHashesUrl: { type: String, default: '' },
         applyUrl: { type: String, default: '' },
         inboundSuggestionsBaseUrl: { type: String, default: '' },
         outboundSuggestionsBaseUrl: { type: String, default: '' },
@@ -335,6 +341,13 @@ export default {
             // age-based one. Honest signal: cache and engine just disagreed
             // on a real entry the user just looked at.
             divergenceDetected: false,
+            // Klasse-7 C-1 race-closure: incrementing counter so rapid
+            // back-to-back showDetail() calls don't let an older fetch's
+            // late-arrival overwrite the modal the user actually opened
+            // last. Each showDetail captures its seq at invocation time
+            // and only commits detailModal when its seq still matches
+            // the current counter post-fetch.
+            _detailRequestSeq: 0,
             // Deep-clone because Inertia prop objects are readonly reactive —
             // mutations like `entry.inbound_count++` in close handlers would
             // silently fail on the prop. Watcher below resyncs on prop changes.
@@ -1157,7 +1170,99 @@ export default {
             this.detailModal = null;
         },
 
-        showDetail(type, entry, filter = null) {
+        /**
+         * Collect involved entry IDs + fetch fresh content_hashes from
+         * the server, mutate localEntries in place. Best-effort: any
+         * failure (missing URL, network error, server 5xx) falls back
+         * to the cached hashes — modal still opens, but the C-1 race
+         * window stays open for that one click (pre-fix baseline, not
+         * worse).
+         *
+         * Hash-merge mutates localEntries[].content_hash directly. The
+         * parent's `entries` prop-watcher (Z. 548-552) only fires on
+         * Inertia prop change — our in-place mutation doesn't trigger
+         * a re-sync, so the fresh hashes survive until the next Inertia
+         * reload (which would bring even-fresher hashes anyway).
+         */
+        async _refreshHashesForDetailOpen(type, entry) {
+            if (! this.entryHashesUrl) return;
+
+            // Collect all entries that the next bulk could touch:
+            //  - inbound modal: the TARGET + every SOURCE entry that
+            //    currently links to it (those are what the unlink-flow
+            //    would mutate).
+            //  - outbound modal: the SOURCE + every internal target
+            //    listed in its internal_links_detail (a url-change op
+            //    could touch the new-target's inbound count too).
+            const ids = new Set();
+            ids.add(entry.id);
+            if (type === 'inbound') {
+                for (const e of this.localEntries) {
+                    if (e.id === entry.id) continue;
+                    const details = e.internal_links_detail || [];
+                    if (details.some((link) => link.entry_id === entry.id)) {
+                        ids.add(e.id);
+                    }
+                }
+            } else {
+                const details = entry.internal_links_detail || [];
+                for (const link of details) {
+                    if (link.entry_id) ids.add(link.entry_id);
+                }
+            }
+            if (ids.size === 0) return;
+
+            try {
+                const params = new URLSearchParams();
+                ids.forEach((id) => params.append('ids[]', id));
+                const url = `${this.entryHashesUrl}?${params.toString()}`;
+                const response = await fetch(url, {
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Cache-Control': 'no-cache',
+                    },
+                });
+                if (! response.ok) return;
+                const data = await response.json();
+                const hashes = data.hashes || {};
+                for (const [id, freshHash] of Object.entries(hashes)) {
+                    const local = this.localEntries.find((e) => e.id === id);
+                    if (local) local.content_hash = freshHash;
+                }
+            } catch (err) {
+                // Graceful fallback: log + continue. The modal still
+                // opens with cached hashes; the user may hit "modified"
+                // on the next bulk but that's the pre-fix baseline.
+                console.warn('[Linkwise] entry-hashes fetch failed, opening modal with cached hashes:', err);
+            }
+        },
+
+        async showDetail(type, entry, filter = null) {
+            // Klasse-7 C-1 residual race-closure (docs/ARCHITECTURE_REVIEW.md):
+            // fetch fresh content_hashes from the server BEFORE populating
+            // detailModal so the next bulk operation uses current state.
+            // The C-1 PR #49 reload-on-completion closed the 100% repro,
+            // but a ~100-800ms race window remains between recordCompletion
+            // and the Inertia partial-reload's roundtrip. Without this
+            // fetch, a user who opens a DetailModal in that window reads
+            // stale localEntries[].content_hash synchronously and ships
+            // OLD-hash to the next bulk — same grey toast as pre-C-1.
+            //
+            // Token-pattern: each invocation captures its seq number.
+            // Rapid back-to-back clicks (e.g. user clicks two inbound
+            // badges quickly) start parallel fetches; only the most
+            // recent one gets to set detailModal. Older fetches that
+            // resolve late silently drop their result — prevents the
+            // "second click's modal got overwritten by first click's
+            // late-arrival" UX bug.
+            const requestSeq = ++this._detailRequestSeq;
+
+            await this._refreshHashesForDetailOpen(type, entry);
+
+            // Token guard: if a newer showDetail() ran while our fetch
+            // was in flight, the user has moved on — bail silently.
+            if (requestSeq !== this._detailRequestSeq) return;
+
             if (type === 'inbound') {
                 const items = [];
                 const targetHref = 'statamic://entry::' + entry.id;

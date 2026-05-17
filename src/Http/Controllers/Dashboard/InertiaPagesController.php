@@ -182,6 +182,12 @@ class InertiaPagesController extends CpController
             'entries' => $data['entries'],
             'collections' => $data['collections'],
             'suggestionCountsUrl' => cp_route('linkwise.suggestion-counts'),
+            // Klasse-7 C-1 residual race-closure: showDetail fetches fresh
+            // content_hashes from this endpoint before populating the
+            // DetailModal so the next bulk operation uses current state
+            // (not the stale localEntries snapshot from before the last
+            // partial reload).
+            'entryHashesUrl' => cp_route('linkwise.entry-hashes'),
             'applyUrl' => cp_route('linkwise.url-changer.apply'),
             'inboundSuggestionsBaseUrl' => cp_route('linkwise.inbound.suggestions', '__ID__'),
             'outboundSuggestionsBaseUrl' => cp_route('linkwise.outbound.suggestions', '__ID__'),

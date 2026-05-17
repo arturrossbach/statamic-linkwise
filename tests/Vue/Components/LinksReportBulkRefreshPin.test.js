@@ -191,4 +191,192 @@ describe('LinksReportTab — bulkState.lastCompletion watcher', () => {
 
         expect(spy).not.toHaveBeenCalled();
     });
+
+    // ─── C-1 race-closure: showDetail async hash-refresh ────────────────
+    //
+    // The C-1 fix (PR #49) reload-after-completion closed the 100% repro
+    // case but left a ~100-800ms race window: layout-poller clears
+    // bulkState.active=null BEFORE recordCompletion() fires the
+    // reloadEntries() partial reload. If the user opens a new DetailModal
+    // via showDetail in that gap, the synchronous read of
+    // localEntries[].content_hash returns the OLD hash and the next bulk
+    // STILL ships stale state.
+    //
+    // The follow-up fix turns showDetail into async: fetch fresh hashes
+    // from entryHashesUrl for all entries involved BEFORE populating
+    // detailModal, merge into localEntries in place. By the time the
+    // modal is interactive, hashes are guaranteed current. Race closed.
+    //
+    // Three contracts pinned:
+    //   1. showDetail fetches the right ids from entryHashesUrl.
+    //   2. fresh hashes get merged into localEntries[id].content_hash
+    //      before detailModal is set (no leak of stale state into items).
+    //   3. Token-pattern: rapid back-to-back showDetail calls only let
+    //      the latest one set detailModal — older fetches that resolve
+    //      after a newer call started are no-ops (prevents the
+    //      "second click's modal got overwritten by first click's
+    //      late-arrival" UX bug).
+
+    const sampleEntries = [
+        {
+            id: 'e1',
+            title: 'Source A',
+            collection: 'pages',
+            content_hash: 'OLD-hash-a',
+            inbound_count: 2,
+            outbound_count: 0,
+            internal_links_detail: [
+                { entry_id: 'target-1', href: 'statamic://entry::target-1', anchor_text: 'click', sentence_context: 'x' },
+            ],
+        },
+        {
+            id: 'target-1',
+            title: 'Target',
+            collection: 'pages',
+            content_hash: 'OLD-hash-target',
+            inbound_count: 1,
+            outbound_count: 0,
+            internal_links_detail: [],
+        },
+    ];
+
+    it('showDetail fetches fresh hashes from entryHashesUrl for all involved entries', async () => {
+        const wrapper = mountTab({
+            entries: sampleEntries,
+            entryHashesUrl: '/cp/linkwise/entry-hashes',
+        });
+
+        const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+            ok: true,
+            json: async () => ({ hashes: { 'e1': 'NEW-hash-a', 'target-1': 'NEW-hash-target' } }),
+        });
+
+        await wrapper.vm.showDetail('inbound', sampleEntries[1]);
+
+        // Inbound flow: source entries (e1 here) + the target entry
+        // (target-1) — DetailModal's unlink-flow can touch BOTH so both
+        // need fresh hashes.
+        expect(fetchSpy).toHaveBeenCalledOnce();
+        const url = fetchSpy.mock.calls[0][0];
+        expect(url).toContain('/cp/linkwise/entry-hashes');
+        expect(url).toContain('ids');
+        // The fetched ids must include the source AND the target.
+        expect(url).toMatch(/e1/);
+        expect(url).toMatch(/target-1/);
+
+        fetchSpy.mockRestore();
+    });
+
+    it('merges fresh hashes into localEntries BEFORE detailModal becomes interactive', async () => {
+        const wrapper = mountTab({
+            entries: sampleEntries,
+            entryHashesUrl: '/cp/linkwise/entry-hashes',
+        });
+
+        let resolveFetch;
+        const fetchPromise = new Promise((resolve) => { resolveFetch = resolve; });
+        vi.spyOn(global, 'fetch').mockReturnValue(fetchPromise);
+
+        const showDetailPromise = wrapper.vm.showDetail('inbound', sampleEntries[1]);
+
+        // Modal must NOT be set yet — fetch is in flight.
+        expect(wrapper.vm.detailModal).toBeNull();
+
+        resolveFetch({
+            ok: true,
+            json: async () => ({ hashes: { 'e1': 'NEW-hash-a', 'target-1': 'NEW-hash-target' } }),
+        });
+        await showDetailPromise;
+        await nextTick();
+
+        // Modal NOW set, AND localEntries hash mutated to fresh value.
+        expect(wrapper.vm.detailModal).not.toBeNull();
+        const sourceLocal = wrapper.vm.localEntries.find(e => e.id === 'e1');
+        const targetLocal = wrapper.vm.localEntries.find(e => e.id === 'target-1');
+        expect(sourceLocal.content_hash).toBe('NEW-hash-a');
+        expect(targetLocal.content_hash).toBe('NEW-hash-target');
+    });
+
+    it('token-pattern: rapid back-to-back showDetail only lets the latest set detailModal', async () => {
+        const wrapper = mountTab({
+            entries: [
+                ...sampleEntries,
+                { id: 'e2', title: 'Source B', collection: 'pages', content_hash: 'OLD-b', inbound_count: 0, outbound_count: 0, internal_links_detail: [] },
+                { id: 'target-2', title: 'Target B', collection: 'pages', content_hash: 'OLD-target-b', inbound_count: 1, outbound_count: 0, internal_links_detail: [] },
+            ],
+            entryHashesUrl: '/cp/linkwise/entry-hashes',
+        });
+
+        // Two fetches in flight, second resolves first (typical race shape).
+        let resolveFirst;
+        let resolveSecond;
+        const firstFetch = new Promise((r) => { resolveFirst = r; });
+        const secondFetch = new Promise((r) => { resolveSecond = r; });
+        const fetchSpy = vi.spyOn(global, 'fetch')
+            .mockReturnValueOnce(firstFetch)
+            .mockReturnValueOnce(secondFetch);
+
+        // Click 1 (target-1) starts first fetch.
+        const p1 = wrapper.vm.showDetail('inbound', sampleEntries[1]);
+        // Click 2 (target-2) starts second fetch BEFORE first resolves.
+        const target2 = wrapper.vm.localEntries.find(e => e.id === 'target-2');
+        const p2 = wrapper.vm.showDetail('inbound', target2);
+
+        // Second fetch resolves first — modal should be set to the
+        // target-2 modal.
+        resolveSecond({
+            ok: true,
+            json: async () => ({ hashes: { 'target-2': 'NEW-target-b' } }),
+        });
+        await p2;
+        await nextTick();
+        expect(wrapper.vm.detailModal.entryId).toBe('target-2');
+
+        // Now first fetch resolves LATE — must NOT overwrite the modal
+        // (older request, user has already moved on).
+        resolveFirst({
+            ok: true,
+            json: async () => ({ hashes: { 'e1': 'NEW-a', 'target-1': 'NEW-target-a' } }),
+        });
+        await p1;
+        await nextTick();
+        // Modal still target-2, not target-1.
+        expect(wrapper.vm.detailModal.entryId).toBe('target-2');
+
+        fetchSpy.mockRestore();
+    });
+
+    it('falls back gracefully when entryHashesUrl is empty (legacy / config-missing)', async () => {
+        // Defensive: if the prop is not configured (broken page setup
+        // or test env), showDetail must still open the modal — just
+        // without the race-closure protection.
+        const wrapper = mountTab({
+            entries: sampleEntries,
+            entryHashesUrl: '',
+        });
+
+        const fetchSpy = vi.spyOn(global, 'fetch');
+        await wrapper.vm.showDetail('inbound', sampleEntries[1]);
+
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(wrapper.vm.detailModal).not.toBeNull();
+        fetchSpy.mockRestore();
+    });
+
+    it('falls back gracefully when fetch fails (network error / 5xx)', async () => {
+        const wrapper = mountTab({
+            entries: sampleEntries,
+            entryHashesUrl: '/cp/linkwise/entry-hashes',
+        });
+
+        vi.spyOn(global, 'fetch').mockRejectedValue(new Error('network error'));
+
+        await wrapper.vm.showDetail('inbound', sampleEntries[1]);
+
+        // Modal still opens — race-closure failed gracefully, no UX
+        // hard-block. Hashes stay at their cached values (next bulk may
+        // still surface 'modified' but that's the pre-fix baseline, not
+        // worse).
+        expect(wrapper.vm.detailModal).not.toBeNull();
+    });
 });
