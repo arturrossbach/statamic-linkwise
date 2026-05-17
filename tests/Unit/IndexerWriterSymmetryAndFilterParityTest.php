@@ -262,6 +262,49 @@ class IndexerWriterSymmetryAndFilterParityTest extends TestCase
         );
     }
 
+    // ── B-1 (sister of InboundEngine, audit 2026-05-16): Outbound modal ─
+    //    OutboundSuggestionGrouper::groupAndFilter dry-runs every raw
+    //    Suggestion through the inserter to keep only writable ones.
+    //    Pre-fix it omitted $s->sentenceContext — the modal showed
+    //    suggestions whose context-row would silently rejected at apply
+    //    time with `context_mismatch`. The grouper is also called from
+    //    `EntryIndexer:148`/`:258` to compute persisted
+    //    `outboundSuggestionCount`; the bug also over-counted there.
+
+    public function test_outbound_grouper_passes_sentence_context_to_dryrun_inserter(): void
+    {
+        // Contract: `OutboundSuggestionGrouper::groupAndFilter`'s
+        // dry-run filter must call insertLinkIntoEntryWithHref with
+        // $s->sentenceContext as the 6th positional argument. Pinning
+        // the call shape rather than end-to-end behaviour matches the
+        // existing parity tests (3/4/8/9) — direct behavioural test
+        // would require Statamic-Entry facade interception that the
+        // unit-test harness doesn't support.
+        $src = file_get_contents(dirname(__DIR__, 2).'/src/Suggestions/OutboundSuggestionGrouper.php');
+        $this->assertMatchesRegularExpression(
+            "/insertLinkIntoEntryWithHref\\s*\\(\\s*\\\$entryId\\s*,\\s*\\\$s->anchorText\\s*,\\s*\\\$href\\s*,\\s*false\\s*,\\s*false\\s*,\\s*\\\$s->sentenceContext\\s*\\)/s",
+            $src,
+            'OutboundSuggestionGrouper::groupAndFilter must call insertLinkIntoEntryWithHref '
+            .'with $s->sentenceContext as the 6th argument — matching the InboundEngine parity '
+            .'fixed in 4e6573d and the EntryIndexer Phase-2 parity (Test 9).',
+        );
+    }
+
+    public function test_outbound_grouper_passes_sentence_context_literally_no_transform(): void
+    {
+        // Regression pin (analog Test 4): the call must use
+        // $s->sentenceContext literally — no ?: / ?? transformation
+        // that would re-introduce the asymmetry against the real-write
+        // path (LinkInsertCommand:198-211 also passes it literally).
+        $src = file_get_contents(dirname(__DIR__, 2).'/src/Suggestions/OutboundSuggestionGrouper.php');
+        $this->assertDoesNotMatchRegularExpression(
+            '/insertLinkIntoEntryWithHref\s*\([^)]*\$s->sentenceContext\s*\?[?:]/s',
+            $src,
+            'sentenceContext must be passed literally — no ?: / ?? transformation that '
+            .'would re-introduce the dry-run vs. real-write asymmetry.',
+        );
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────
 
     /**
