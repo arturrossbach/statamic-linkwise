@@ -10,6 +10,7 @@ use Arturrossbach\Linkwise\Http\Controllers\Dashboard\InertiaPagesController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\JobsAggregatorController;
 use Arturrossbach\Linkwise\Http\Controllers\Dashboard\StatsApiController;
 use Arturrossbach\Linkwise\Http\Controllers\DashboardController;
+use Arturrossbach\Linkwise\Http\Controllers\EntryHashesController;
 use Arturrossbach\Linkwise\Http\Controllers\IgnoredLinkController;
 use Arturrossbach\Linkwise\Http\Controllers\InboundController;
 use Arturrossbach\Linkwise\Http\Controllers\OutboundController;
@@ -68,6 +69,14 @@ Route::middleware('can:manage linkwise')->group(function () {
 
     Route::get('linkwise/suggestion-counts', [StatsApiController::class, 'suggestionCounts'])
         ->name('linkwise.suggestion-counts');
+
+    // Bulk content-hash fetch — Klasse-7 C-1 residual race closure
+    // (docs/ARCHITECTURE_REVIEW.md). Frontend's `showDetail` async-
+    // fetches fresh hashes before populating DetailModal so the next
+    // bulk-unlink/url-change/apply uses current state instead of the
+    // stale localEntries snapshot from before the last partial-reload.
+    Route::get('linkwise/entry-hashes', [EntryHashesController::class, 'index'])
+        ->name('linkwise.entry-hashes');
 
     Route::post('linkwise/rebuild-index', [BulkJobsController::class, 'rebuildIndex'])
         ->name('linkwise.rebuild-index');
