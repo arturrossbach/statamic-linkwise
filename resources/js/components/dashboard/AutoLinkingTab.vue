@@ -497,7 +497,16 @@ export default {
             });
 
             // Wait for the heavy job to finish (success/cancel/error all clear
-            // bulkState). Then re-fetch entry hashes etc. via Inertia reload.
+            // bulkState). Then refresh page data — link counts on every rule
+            // changed, and `wouldLinkForRule()` reads from `data.entries[]` so
+            // a stale entries-prop leaves "Apply (N)" buttons showing pre-apply
+            // counts. Sister-pattern to BrokenLinksTab:708.
+            //
+            // Pre-fix this branch called `this.fetchData()` which was NEVER
+            // defined anywhere — `typeof === 'function'` silently no-op'd
+            // since the AutoLinking-Tab was extracted. User-Smoke 2026-05-17
+            // hidden 4th sister of Klasse 7 — fixed alongside the
+            // unlinkSelectedFromPreview gap below.
             const stop = this.$watch(
                 () => bulkState.active,
                 (current, previous) => {
@@ -505,8 +514,10 @@ export default {
                         stop();
                         this.selectedRules = [];
                         this.applyingAll = false;
-                        // Refresh page data — link counts changed.
-                        if (typeof this.fetchData === 'function') this.fetchData();
+                        inertiaRouter.reload({
+                            only: ['autolinkData', 'entries'],
+                            preserveScroll: true,
+                        });
                     }
                 },
             );
@@ -1091,6 +1102,17 @@ export default {
                         stop();
                         this.unlinkingFromPreview = false;
                         this.selectedUnlinkIds = [];
+                        // Refresh rule-table counts after bulk-unlink completes.
+                        // Sister-pattern to BrokenLinksTab:708 + the now-fixed
+                        // applyrule branch at line 504. Pre-fix this branch
+                        // only cleared selection state but never refreshed —
+                        // "Apply (N)" stayed showing pre-unlink count after
+                        // closing the modal (User-Smoke 2026-05-17 Bug #3,
+                        // Klasse 7 sister-gap).
+                        inertiaRouter.reload({
+                            only: ['autolinkData', 'entries'],
+                            preserveScroll: true,
+                        });
                     }
                 },
             );
