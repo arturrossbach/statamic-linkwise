@@ -336,17 +336,49 @@ class BulkSnapshotStore
      * @param  array  $skipped  list of records, each {entry_id, entry_title, reason, modified_by?, modified_at?}
      */
     /**
-     * Build a skip record for one entry that was bypassed during a revert.
+     * Build a skip record for one entry that was bypassed during a revert
+     * (or during the forward bulk run, when the per-item write was refused).
+     *
      * Resolves entry-title + last-modified-by + last-modified-at via Statamic
      * so the activity-log drawer can show "modified by Artur on 2026-05-08
      * at 12:31". Falls back gracefully when the entry was deleted between
      * the original bulk and the revert (lookup returns null → reason
      * defaults to 'deleted').
      *
-     * @return array{entry_id: string, entry_title: ?string, reason: string, modified_by: ?string, modified_at: ?string}
+     * 2026-05-17 extension (Klasse-7 follow-up, activity_log_skip_context_gap):
+     * carries `anchor_text` + `target_entry_id` + `target_entry_title` +
+     * `target_href` so the Activity-Log drawer can render WHICH anchor +
+     * WHICH target was skipped. Without these the user saw "anchor text
+     * not found in entry content" with no clue which anchor. Args are
+     * optional + default null so legacy 2-arg callers stay green.
+     * `target_entry_title` is resolved from `target_entry_id` via Entry::find
+     * (same defensive try/catch pattern as the source-entry resolution).
+     *
+     * @return array{entry_id: string, entry_title: ?string, reason: string, modified_by: ?string, modified_at: ?string, anchor_text: ?string, target_entry_id: ?string, target_entry_title: ?string, target_href: ?string}
      */
-    public static function buildSkipRecord(string $entryId, string $reason): array
-    {
+    public static function buildSkipRecord(
+        string $entryId,
+        string $reason,
+        ?string $anchorText = null,
+        ?string $targetEntryId = null,
+        ?string $targetHref = null,
+    ): array {
+        // Resolve target title best-effort. Internal targets carry an
+        // entry_id; external targets carry only the URL (handled below).
+        // try/catch mirrors the source-entry resolution so a deleted
+        // target doesn't crash the snapshot record.
+        $targetEntryTitle = null;
+        if ($targetEntryId !== null && $targetEntryId !== '') {
+            try {
+                $targetEntry = \Statamic\Facades\Entry::find($targetEntryId);
+                if ($targetEntry) {
+                    $targetEntryTitle = $targetEntry->get('title') ?? $targetEntryId;
+                }
+            } catch (\Throwable) {
+                // Statamic test envs without Entry facade resolver — leave null.
+            }
+        }
+
         $entry = \Statamic\Facades\Entry::find($entryId);
         if (! $entry) {
             return [
@@ -355,6 +387,10 @@ class BulkSnapshotStore
                 'reason' => 'deleted',
                 'modified_by' => null,
                 'modified_at' => null,
+                'anchor_text' => $anchorText,
+                'target_entry_id' => $targetEntryId,
+                'target_entry_title' => $targetEntryTitle,
+                'target_href' => $targetHref,
             ];
         }
         $modifiedBy = null;
@@ -380,6 +416,10 @@ class BulkSnapshotStore
             'reason' => $reason,
             'modified_by' => $modifiedBy,
             'modified_at' => $modifiedAt,
+            'anchor_text' => $anchorText,
+            'target_entry_id' => $targetEntryId,
+            'target_entry_title' => $targetEntryTitle,
+            'target_href' => $targetHref,
         ];
     }
 

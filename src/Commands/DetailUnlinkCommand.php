@@ -168,7 +168,16 @@ class DetailUnlinkCommand extends Command
                     // by X on Y" — both on this snapshot AND, for revert
                     // flows, on the ORIGINAL snapshot too (recorded after
                     // the loop below).
-                    $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                    // Klasse-7 follow-up (activity_log_skip_context_gap,
+                    // 2026-05-17): one skip-record covers multiple $entryReps
+                    // (same entry, multiple links). Take the first replacement's
+                    // anchor + matched_url as representative — the drawer
+                    // shows "Anchor 'X' → 'target'" which is honest if
+                    // ambiguous when several anchors are skipped together
+                    // for one entry (rare in practice).
+                    $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                    $repHref = $entryReps[0]['matched_url'] ?? null;
+                    $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified', $repAnchor, null, $repHref);
                     $revertSkippedRecords[] = $skipRec;
                     $bulkSkippedRecords[] = $skipRec;
                     Cache::put('linkwise:detailunlink:status', [
@@ -253,14 +262,20 @@ class DetailUnlinkCommand extends Command
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
                 // Same per-entry skip-record write as the pre-flight branch.
-                $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                // Representative anchor + target from first replacement —
+                // see pre-flight comment above for the rationale.
+                $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                $repHref = $entryReps[0]['matched_url'] ?? null;
+                $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified', $repAnchor, null, $repHref);
                 $revertSkippedRecords[] = $skipRec;
                 $bulkSkippedRecords[] = $skipRec;
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
-                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'error');
+                $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                $repHref = $entryReps[0]['matched_url'] ?? null;
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'error', $repAnchor, null, $repHref);
                 Log::warning('[Linkwise] DetailUnlinkCommand entry-error: '.$e->getMessage());
             }
 

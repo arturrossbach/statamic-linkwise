@@ -1133,27 +1133,60 @@ export default {
         // Example output: "Modified by <strong>Artur</strong> on 2026-05-08 at 12:31"
         formatSkipReason(row) {
             if (! row) return '';
+
+            // Reason-text first — same per-reason copy as before.
+            let reasonText;
             if (row.reason === 'deleted') {
-                return 'Entry was deleted since this bulk ran';
+                reasonText = 'Entry was deleted since this bulk ran';
+            } else if (row.reason === 'anchor_not_found') {
+                reasonText = 'Anchor text was not found in entry content — run a scan or edit the entry';
+            } else if (row.reason === 'missing_link_target') {
+                reasonText = 'Insertion payload was missing both target entry and href';
+            } else if (row.reason === 'error') {
+                reasonText = 'Unexpected error during write — see log for details';
+            } else {
+                // 'modified' (and unknown reason fallback): editor + when.
+                const who = row.modified_by ? `by <strong>${this.escape(row.modified_by)}</strong>` : 'by another editor';
+                if (row.modified_at) {
+                    reasonText = `Modified ${who} on ${this.escape(this.formatAbsolute(row.modified_at))}`;
+                } else {
+                    reasonText = `Modified ${who} since this bulk ran`;
+                }
             }
-            // Bulk-run-specific reasons (Bug 2026-05-11): non-revert bulks
-            // skip for additional causes — surface them in plain English so
-            // the user knows what to fix.
-            if (row.reason === 'anchor_not_found') {
-                return 'Anchor text was not found in entry content — run a scan or edit the entry';
+
+            // Klasse-7 follow-up (activity_log_skip_context_gap, 2026-05-17):
+            // when the skip-record carries anchor + target context, prefix
+            // the reason with "Anchor 'X' → 'Target'" so the user can see
+            // WHAT was skipped, not just WHY. Pre-fix snapshots on disk
+            // don't carry these fields → undefined → fall through to the
+            // plain reason text. Backward-compat is at the property-read
+            // layer: `row.anchor_text` is undefined for legacy rows.
+            //
+            // Three render branches:
+            //  - both anchor + target: "Anchor 'X' → 'Page': <reason>"
+            //  - anchor only (e.g. missing_link_target): "Anchor 'X': <reason>"
+            //  - neither (legacy or deleted-entry fallback): just the reason.
+            //
+            // Anchor is HTML-escaped because the parent td uses v-html.
+            const hasAnchor = row.anchor_text != null && row.anchor_text !== '';
+            // target_entry_title preferred (internal); fall back to
+            // target_href (external URL); fall back to target_entry_id
+            // (entry exists but title couldn't be resolved, e.g. test envs).
+            const targetLabel = row.target_entry_title || row.target_href || row.target_entry_id || '';
+            const hasTarget = targetLabel !== '';
+
+            if (! hasAnchor && ! hasTarget) {
+                return reasonText;
             }
-            if (row.reason === 'missing_link_target') {
-                return 'Insertion payload was missing both target entry and href';
+            if (hasAnchor && hasTarget) {
+                return `Anchor "<strong>${this.escape(row.anchor_text)}</strong>" → <em>${this.escape(targetLabel)}</em>: ${reasonText}`;
             }
-            if (row.reason === 'error') {
-                return 'Unexpected error during write — see log for details';
+            if (hasAnchor) {
+                return `Anchor "<strong>${this.escape(row.anchor_text)}</strong>": ${reasonText}`;
             }
-            // 'modified' (and unknown reason fallback): show editor + when.
-            const who = row.modified_by ? `by <strong>${this.escape(row.modified_by)}</strong>` : 'by another editor';
-            if (row.modified_at) {
-                return `Modified ${who} on ${this.escape(this.formatAbsolute(row.modified_at))}`;
-            }
-            return `Modified ${who} since this bulk ran`;
+            // hasTarget && !hasAnchor — rare but possible (target id known,
+            // anchor lost). Show what we have.
+            return `Target <em>${this.escape(targetLabel)}</em>: ${reasonText}`;
         },
 
         // Inbound bulks share a single target entry across all items; we

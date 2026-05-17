@@ -142,7 +142,19 @@ class BulkUnlinkCommand extends Command
                         $msg = 'Entry was modified — please reload';
                         $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                         $skipped++;
-                        $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                        // Klasse-7 follow-up (activity_log_skip_context_gap,
+                        // 2026-05-17): anchor + matched_url carry the
+                        // identity of the specific link the unlink would
+                        // have removed, so the Activity-Log Drawer can
+                        // surface which one was skipped. matched_url is
+                        // the target — may be internal (statamic://entry::X)
+                        // or external (https://…); the renderer resolves.
+                        $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord(
+                            $entryId, 'modified',
+                            $r['anchor_text'] ?? null,
+                            null,
+                            $r['matched_url'] ?? null,
+                        );
                         continue;
                     }
                 }
@@ -157,7 +169,12 @@ class BulkUnlinkCommand extends Command
                     $msg = 'Link was no longer in entry';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                     $skipped++;
-                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($r['entry_id'] ?? '', 'anchor_not_found');
+                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord(
+                        $r['entry_id'] ?? '', 'anchor_not_found',
+                        $r['anchor_text'] ?? null,
+                        null,
+                        $r['matched_url'] ?? null,
+                    );
                 } else {
                     $succeeded++;
                     // Append-on-success: confirmed removal lands in items.
@@ -175,12 +192,22 @@ class BulkUnlinkCommand extends Command
                 $msg = 'Entry was modified — please reload';
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
-                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($r['entry_id'] ?? '', 'modified');
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord(
+                    $r['entry_id'] ?? '', 'modified',
+                    $r['anchor_text'] ?? null,
+                    null,
+                    $r['matched_url'] ?? null,
+                );
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
-                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($r['entry_id'] ?? '', 'error');
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord(
+                    $r['entry_id'] ?? '', 'error',
+                    $r['anchor_text'] ?? null,
+                    null,
+                    $r['matched_url'] ?? null,
+                );
             }
         }
 
