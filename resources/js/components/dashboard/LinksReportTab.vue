@@ -379,16 +379,64 @@ export default {
                 if (this.suggestionCountsUrl) {
                     this.loadSuggestionCounts();
                 }
-                // `detailrelink` mutates entries' internal_links_detail
-                // (anchor-text changes) but no other kind does — they go
-                // through pickTerminalReload's own Inertia partial reload
-                // path. For detailrelink we trigger the same background
-                // partial here so the parent's `entries` watcher re-syncs
-                // `localEntries` and the NEXT modal open shows fresh
-                // anchor-texts. Running with preserveState avoids the
-                // modal flicker observed when reload was fired from
-                // inside DetailModal during the relink (PR #46 → #47).
-                if (completion.kind === 'detailrelink') {
+                // Entry-reload truth-table (C-1, user-report 2026-05-16):
+                //
+                // `localEntries[].content_hash` is the source of the per-
+                // record hash that DetailModal/SuggestionModal/RelinkModal
+                // pass back to the server as optimistic-locking token. If
+                // we don't re-fetch fresh hashes after Linkwise itself
+                // mutates an entry, the NEXT bulk operation sends the OLD
+                // hash → SafeEntrySaver::verifyHashes rejects per-record
+                // with 'modified' → grey toast "entry was modified by
+                // another editor" even though the user did nothing but
+                // bulk-unlink twice in a row. Full root + Klasse-7 fragility
+                // catalog in docs/ARCHITECTURE_REVIEW.md (Klasse C C-1) +
+                // memory architectural_health.md (Klasse 7).
+                //
+                // Split by who owns the reload:
+                //   - `inboundinsert`/`outboundinsert` → layout's
+                //     pickTerminalReload returns 'partial' and the
+                //     LinkwiseLayout poller fires the Inertia reload
+                //     (bulkTerminalReload.js:84-86). NO double-reload here.
+                //   - `bulkunlink`/`detailunlink`/`urlchanger`/`applyrule`
+                //     → pickTerminalReload returns 'none' for these. THIS
+                //     watcher is the only safe point to refresh fresh
+                //     hashes. Without it, C-1 surfaces.
+                //   - `detailrelink` → same as the four above (pre-C-1
+                //     behaviour preserved; PR #46 → #47 chose this watcher
+                //     as the reload point precisely to avoid the
+                //     in-DetailModal flicker).
+                //
+                // reloadEntries() runs `inertiaRouter.reload({ only:
+                // ['entries'], preserveScroll: true })` — partial Inertia
+                // reload triggers InertiaPagesController::links which
+                // recomputes `content_hash` for each entry (Z. 114). The
+                // `entries` prop-watcher in this component (Z. 548-552)
+                // resyncs `localEntries` from the fresh prop. The next
+                // bulk uses fresh hashes.
+                //
+                // Known residual race: layout's pollBulkStatusOnce clears
+                // `bulkState.active = null` (LinkwiseLayout:765) BEFORE
+                // it calls `recordCompletion()` (Z. 794) which triggers
+                // this watcher and the partial reload. The reload is
+                // async (~100–800 ms Inertia roundtrip). If the user
+                // clicks "open DetailModal" inside that window, `showDetail`
+                // (Z. 1143) reads stale `localEntries[].content_hash`
+                // synchronously — the next bulk still ships OLD hashes,
+                // surfacing the same "entry was modified" per-record skip
+                // for that one occurrence. C-1 thus turns a 100% second-
+                // bulk failure into a rare race-window failure (user has
+                // to click within ~half a second of the toast). Full race
+                // closure requires `showDetail` itself to fetch fresh
+                // hashes on open (analogous to SuggestModal's
+                // `loadSuggestionsForEntry`, Z. 690-704) — separate fix,
+                // out of scope for C-1.
+                const kindsThatNeedEntryReload = [
+                    'bulkunlink', 'detailunlink',
+                    'urlchanger', 'applyrule',
+                    'detailrelink',
+                ];
+                if (kindsThatNeedEntryReload.includes(completion.kind)) {
                     this.reloadEntries();
                 }
             },

@@ -120,4 +120,75 @@ describe('LinksReportTab — bulkState.lastCompletion watcher', () => {
 
         expect(spy).not.toHaveBeenCalled();
     });
+
+    // ─── reloadEntries truth-table (C-1, user-report 2026-05-16) ────────
+    //
+    // `localEntries[].content_hash` stays stale unless the watcher triggers
+    // an Inertia partial reload of the `entries` prop after destructive
+    // bulks complete. Stale hashes → next bulk-unlink sends OLD hashes →
+    // SafeEntrySaver::verifyHashes rejects per-record with 'modified' →
+    // grey toast "entry was modified by another editor" (real bug 2026-05-16,
+    // documented in docs/ARCHITECTURE_REVIEW.md Klasse C C-1).
+    //
+    // Truth-table:
+    //   - `inboundinsert`/`outboundinsert` → layout's pickTerminalReload
+    //     returns 'partial' (LinkwiseLayout:818) — no need to reload here.
+    //   - `bulkunlink`/`detailunlink`/`urlchanger`/`applyrule` →
+    //     pickTerminalReload returns 'none' (bulkTerminalReload.js:88) —
+    //     this watcher MUST reload, otherwise the bug surfaces.
+    //   - `detailrelink` → existing pre-C-1 behaviour, preserved.
+
+    const reloadKinds = ['bulkunlink', 'detailunlink', 'urlchanger', 'applyrule', 'detailrelink'];
+    for (const kind of reloadKinds) {
+        it(`triggers reloadEntries when ${kind} bulk reaches 'done' (C-1 fix)`, async () => {
+            const wrapper = mountTab();
+            const spy = vi.spyOn(wrapper.vm, 'reloadEntries').mockImplementation(() => {});
+            // Suppress the parallel loadSuggestionCounts so the assertion
+            // focuses on reloadEntries — the loadSuggestionCounts coverage
+            // is the truth-table above.
+            vi.spyOn(wrapper.vm, 'loadSuggestionCounts').mockResolvedValue();
+
+            bulkState.lastCompletion = { kind, phase: 'done' };
+            await nextTick();
+
+            expect(spy).toHaveBeenCalledOnce();
+        });
+    }
+
+    const noReloadKinds = ['inboundinsert', 'outboundinsert'];
+    for (const kind of noReloadKinds) {
+        it(`does NOT trigger reloadEntries for ${kind} (handled by layout's pickTerminalReload partial reload)`, async () => {
+            const wrapper = mountTab();
+            const spy = vi.spyOn(wrapper.vm, 'reloadEntries').mockImplementation(() => {});
+            vi.spyOn(wrapper.vm, 'loadSuggestionCounts').mockResolvedValue();
+
+            bulkState.lastCompletion = { kind, phase: 'done' };
+            await nextTick();
+
+            expect(spy).not.toHaveBeenCalled();
+        });
+    }
+
+    it('does NOT trigger reloadEntries for unrelated kinds (scan)', async () => {
+        const wrapper = mountTab();
+        const spy = vi.spyOn(wrapper.vm, 'reloadEntries').mockImplementation(() => {});
+
+        bulkState.lastCompletion = { kind: 'scan', phase: 'done' };
+        await nextTick();
+
+        expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("does NOT trigger reloadEntries when phase is 'cancelled' or 'error'", async () => {
+        const wrapper = mountTab();
+        const spy = vi.spyOn(wrapper.vm, 'reloadEntries').mockImplementation(() => {});
+        vi.spyOn(wrapper.vm, 'loadSuggestionCounts').mockResolvedValue();
+
+        bulkState.lastCompletion = { kind: 'detailunlink', phase: 'cancelled' };
+        await nextTick();
+        bulkState.lastCompletion = { kind: 'bulkunlink', phase: 'error' };
+        await nextTick();
+
+        expect(spy).not.toHaveBeenCalled();
+    });
 });

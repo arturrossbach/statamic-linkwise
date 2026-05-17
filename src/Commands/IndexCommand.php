@@ -5,6 +5,7 @@ namespace Arturrossbach\Linkwise\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache;
 use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use Arturrossbach\Linkwise\Support\JobLock;
 
@@ -85,6 +86,18 @@ class IndexCommand extends Command
                 Cache::put('linkwise:scan:status', ['phase' => 'saving', 'message' => 'Saving index...'], 600);
             }
             $this->indexer->save($records);
+
+            // Reindex altered the suggestion-output structurally
+            // (different extraction rules, different anchor pool).
+            // Cached suggestions computed against the previous index
+            // are stale by definition; purge so the next request
+            // rebuilds from the fresh index. Sister of the per-write
+            // pin-set (PRs #44-#48) but for index-shape changes.
+            // forgetMany over array_keys covers every entry that
+            // exists post-save; cache rows for entries deleted
+            // between reindexes time out via TTL (no UI surface
+            // remains to read them anyway).
+            app(InboundSuggestionCache::class)->forgetMany(array_keys($records));
         } catch (\RuntimeException $e) {
             if ($e->getMessage() === 'cancelled') {
                 Cache::put('linkwise:scan:status', ['phase' => 'cancelled'], 60);

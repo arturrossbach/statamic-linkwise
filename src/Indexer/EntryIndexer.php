@@ -345,41 +345,35 @@ class EntryIndexer
             $linkOccurrences = array_merge($linkOccurrences, TextExtractor::linksFromBardWithOccurrences($bardContent));
         }
 
-        // Plain text from text/textarea/markdown fields nested in Replicator
-        // sets — Peak Cards/Accordion/Quote/etc. live here. Without this loop
-        // entries whose content sits in non-Bard sets are indexed as empty.
-        if (! empty($extracted['plain'])) {
-            $text .= implode("\n", $extracted['plain'])."\n";
-        }
-
-        // Also extract from Markdown and Textarea fields
+        // Also extract from Markdown fields
         try {
             $fields = $entry->blueprint()->fields()->all();
         } catch (\Throwable) {
             $fields = [];
         }
 
+        // Top-level read/write symmetry with BardLinkInserter:363-380:
+        // the writer touches `markdown` only (text/textarea are plaintext
+        // per Statamic's contract — writing `[anchor](url)` into them
+        // would surface as visible literal syntax in any template that
+        // doesn't manually pipe through `| markdown`). Indexing text/
+        // textarea here would produce phantom anchor candidates that
+        // always fail at apply-time with "anchor text not found in
+        // writable region". Symmetric retreat keeps reads and writes
+        // operating on the same field set.
         foreach ($fields as $handle => $field) {
-            if (in_array($field->type(), ['markdown', 'textarea', 'text'], true) && $handle !== 'title') {
+            if ($field->type() === 'markdown' && $handle !== 'title') {
                 $value = $entry->get($handle);
 
                 if (is_string($value) && ! empty($value)) {
-                    // Strip Markdown formatting for plain text — safe on
-                    // plaintext fields too (no markdown syntax to strip = no-op).
+                    // Strip Markdown formatting for plain text.
                     $plain = preg_replace('/\[([^\[\]]+)\]\([^)]+\)/', '$1', $value); // [text](url) → text
                     $plain = preg_replace('/[#*_~`>]/', '', $plain); // Remove Markdown syntax
                     $text .= trim($plain)."\n";
 
-                    // Extract Markdown links as outbound links — only for
-                    // genuine `markdown` fields. `text`/`textarea` render as
-                    // plaintext per Statamic's contract, so `[…](url)` there
-                    // is literal text, not a link. Symmetric with the write-
-                    // side retreat in BardLinkInserter — reads only what
-                    // writes can also reach.
-                    if ($field->type() === 'markdown') {
-                        $links = array_merge($links, TextExtractor::linksFromMarkdown($value));
-                        $linkOccurrences = array_merge($linkOccurrences, TextExtractor::linksFromMarkdownWithOccurrences($value));
-                    }
+                    // Extract Markdown links as outbound links.
+                    $links = array_merge($links, TextExtractor::linksFromMarkdown($value));
+                    $linkOccurrences = array_merge($linkOccurrences, TextExtractor::linksFromMarkdownWithOccurrences($value));
                 }
             }
         }
@@ -539,26 +533,30 @@ class EntryIndexer
     }
 
     /**
-     * Extract searchable content from an entry — both Bard JSON trees AND
-     * plain strings nested inside Replicator sets (card headings, card text,
-     * accordion content, button labels, etc.). Without the plain-string
-     * branch, Peak sites that use Cards/Accordion/Quote sets had 0% of their
-     * content indexed; Linkwise saw only entries with the dedicated `article`
-     * Bard set.
+     * Extract searchable content from an entry — Bard JSON trees only,
+     * including Bard fragments nested inside Replicator sets.
      *
-     * @return array{bard: array, plain: array<int, string>}
+     * Symmetric with the writer's retreat for plain-string set fields
+     * (see {@see \Arturrossbach\Linkwise\Support\Replicator\ReplicatorLinkRouter::processReplicatorWithHref}
+     * lines 160-167: writing `[anchor](url)` into a plaintext template
+     * surfaces as visible literal syntax — the writer skips them, so the
+     * indexer must too). Indexing card headings, button labels, accordion
+     * plaintext bodies, etc. produced phantom anchor candidates that
+     * always failed at apply-time. Bard fragments inside the same sets
+     * are still walked below.
+     *
+     * @return array{bard: array}
      */
     protected function extractBardContent(Entry $entry): array
     {
         $bardContents = [];
-        $plainTexts = [];
 
         try {
             $fields = $entry->blueprint()->fields()->all();
         } catch (\Throwable $e) {
             Log::warning('[Linkwise] Could not read blueprint for entry '.$entry->id().': '.$e->getMessage());
 
-            return ['bard' => $bardContents, 'plain' => $plainTexts];
+            return ['bard' => $bardContents];
         }
 
         foreach ($fields as $handle => $field) {
@@ -571,21 +569,20 @@ class EntryIndexer
             if ($field->type() === 'bard') {
                 $bardContents[] = $value;
             } elseif ($field->type() === 'replicator') {
-                $this->extractBardFromReplicator($value, $bardContents, $plainTexts);
+                $this->extractBardFromReplicator($value, $bardContents);
             }
         }
 
-        return ['bard' => $bardContents, 'plain' => $plainTexts];
+        return ['bard' => $bardContents];
     }
 
     /**
-     * Recursively walk Replicator set items, collecting both Bard arrays AND
-     * plain string values (text, textarea, markdown fields). Filters out
-     * replicator metadata, UUIDs (entry/asset references), numeric values,
-     * boolean-like strings, and very short strings to keep noise out of the
-     * keyword pool.
+     * Recursively walk Replicator set items, collecting Bard fragments
+     * only. Plain-string set fields (card headings, button labels,
+     * accordion plaintext bodies, …) are intentionally skipped — they
+     * mirror the writer's retreat (see class docblock).
      */
-    protected function extractBardFromReplicator(array $sets, array &$bardContents, array &$plainTexts): void
+    protected function extractBardFromReplicator(array $sets, array &$bardContents): void
     {
         foreach ($sets as $set) {
             if (! is_array($set)) {
@@ -598,14 +595,6 @@ class EntryIndexer
                     continue;
                 }
 
-                // Plain string — gather if it carries actual content. Skip
-                // UUIDs leaked from entry/asset link fields, numeric values
-                // (image dimensions, sort indexes), and boolean-like markers.
-                if (is_string($value)) {
-                    $this->collectPlainString($value, $plainTexts);
-                    continue;
-                }
-
                 if (! is_array($value) || empty($value)) {
                     continue;
                 }
@@ -613,46 +602,9 @@ class EntryIndexer
                 if (ProseMirrorTypes::looksLikeBardContent($value)) {
                     $bardContents[] = $value;
                 } elseif ($this->looksLikeReplicatorContent($value)) {
-                    $this->extractBardFromReplicator($value, $bardContents, $plainTexts);
+                    $this->extractBardFromReplicator($value, $bardContents);
                 }
             }
-        }
-    }
-
-    /**
-     * Apply quality filters before adding a string value to the plain-text
-     * pool. Anything that survives gets fed into keyword extraction and
-     * anchor matching downstream, so the filters guard against UUIDs
-     * surfacing as anchors and against pure-noise tokens polluting TF-IDF.
-     */
-    protected function collectPlainString(string $value, array &$plainTexts): void
-    {
-        $trimmed = trim($value);
-
-        if (mb_strlen($trimmed) < 5) {
-            return;
-        }
-        if (is_numeric($trimmed)) {
-            return;
-        }
-        if (in_array(mb_strtolower($trimmed), ['true', 'false', 'yes', 'no', 'null'], true)) {
-            return;
-        }
-        // UUID v4 pattern — entry references, asset IDs, button IDs leak
-        // through replicator value lists. Without this filter they showed
-        // up as anchor candidates ("9beb33f6-..." as match keyword).
-        if (preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i', $trimmed)) {
-            return;
-        }
-        // Strip Markdown formatting so the plain content reads cleanly when
-        // it gets embedded into the entry text — same approach as the
-        // top-level markdown handling in indexEntry().
-        $clean = preg_replace('/\[([^\[\]]+)\]\([^)]+\)/', '$1', $trimmed);
-        $clean = preg_replace('/[#*_~`>]/', '', $clean);
-        $clean = trim($clean);
-
-        if ($clean !== '') {
-            $plainTexts[] = $clean;
         }
     }
 
