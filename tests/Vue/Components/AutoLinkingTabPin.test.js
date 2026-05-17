@@ -659,6 +659,140 @@ describe('AutoLinkingTab (Phase A characterisation)', () => {
         });
     });
 
+    // ── teardownApplyAsync — Klasse-9a button-stuck pin (2026-05-17) ───
+    //
+    // User-Smoke 2026-05-17: After Apply via Preview Modal, the row's
+    // Apply button stayed in loading state and ALL other rules' Apply
+    // buttons stayed greyed out via RuleListTable's gate
+    // (`applyAsyncRuleId !== rule.id`, RuleListTable.vue:116). Root:
+    // `pollApplyAsyncStatusOnce` had two exit branches (idle/unknown
+    // and `wasActive=false` early-return) that cleared
+    // `applyAsyncProgress` but forgot `applyAsyncRuleId`.
+    //
+    // These pins assert that for EVERY terminal-or-unknown phase the
+    // poller can see, the cleanup is complete. New helper
+    // `teardownApplyAsync()` is the single source of truth — if a
+    // future branch is added that bypasses it, these tests fail.
+
+    describe('teardownApplyAsync (Klasse 9a button-stuck pin)', () => {
+        const seedApplyState = (w, ruleId = 'rule-x') => {
+            w.vm.applyAsyncRuleId = ruleId;
+            w.vm.applyAsyncProgress = { rule_keyword: 'kw', current: 0, total: 0 };
+            // Pretend the poll-interval is live so we can assert it
+            // gets cleared too. We don't actually run any timers — the
+            // ID is what matters for the cleanup contract.
+            w.vm.applyAsyncPollTimer = 42;
+        };
+
+        it('clears all three async-apply state fields in one call', () => {
+            seedApplyState(wrapper);
+            // Stub away the real clearInterval — jsdom would yell about
+            // the fake 42 timer ID. We only care about the state mutation.
+            const originalClearInterval = globalThis.clearInterval;
+            globalThis.clearInterval = vi.fn();
+
+            wrapper.vm.teardownApplyAsync();
+
+            expect(wrapper.vm.applyAsyncRuleId).toBeNull();
+            expect(wrapper.vm.applyAsyncProgress).toBeNull();
+            expect(wrapper.vm.applyAsyncPollTimer).toBeNull();
+            expect(globalThis.clearInterval).toHaveBeenCalledWith(42);
+
+            globalThis.clearInterval = originalClearInterval;
+        });
+
+        it('is idempotent (calling twice on already-clean state is safe)', () => {
+            const originalClearInterval = globalThis.clearInterval;
+            globalThis.clearInterval = vi.fn();
+
+            wrapper.vm.teardownApplyAsync();
+            expect(() => wrapper.vm.teardownApplyAsync()).not.toThrow();
+            expect(wrapper.vm.applyAsyncRuleId).toBeNull();
+            expect(wrapper.vm.applyAsyncProgress).toBeNull();
+
+            globalThis.clearInterval = originalClearInterval;
+        });
+
+        // ── Per-phase Pin (every terminal-or-soft-terminal phase
+        // returned by the apply-async-status endpoint must end in a
+        // teardown). The poller's else-branch catches `idle` and any
+        // unknown phase string — both must teardown like a terminal.
+
+        const terminalPhases = ['done', 'cancelled', 'error', 'idle', 'unknown-phase-string'];
+
+        terminalPhases.forEach((phase) => {
+            it(`pollApplyAsyncStatusOnce clears applyAsyncRuleId on phase="${phase}"`, async () => {
+                // Wire a fetch stub returning the phase under test. We
+                // only need the cleanup contract; the rule-row update
+                // and applyAsyncResult side-effects are not pinned here
+                // (those are toast / table-render details).
+                seedApplyState(wrapper, 'rule-x');
+                const originalFetch = globalThis.fetch;
+                globalThis.fetch = vi.fn().mockResolvedValue({
+                    ok: true,
+                    json: () => Promise.resolve({
+                        phase,
+                        rule_id: 'rule-x',
+                        rule_keyword: 'kw',
+                        links_added: 0,
+                    }),
+                });
+                const originalClearInterval = globalThis.clearInterval;
+                globalThis.clearInterval = vi.fn();
+
+                // status_url has to be non-empty or the method returns
+                // before the fetch — see line 833-834 of AutoLinkingTab.
+                wrapper.vm.data.urls.apply_async_status = '/cp/linkwise/autolink/apply-async/status';
+
+                await wrapper.vm.pollApplyAsyncStatusOnce();
+
+                expect(wrapper.vm.applyAsyncRuleId).toBeNull();
+                expect(wrapper.vm.applyAsyncProgress).toBeNull();
+
+                globalThis.fetch = originalFetch;
+                globalThis.clearInterval = originalClearInterval;
+            });
+        });
+
+        // ── wasActive=false early-return: was the second of the two
+        // hangs found in User-Smoke 2026-05-17. Before the fix, the
+        // `if (!wasActive) return;` short-circuited before the
+        // `applyAsyncRuleId = null` write. Now `teardownApplyAsync()`
+        // runs FIRST, so the early-return doesn't matter.
+
+        it('done-phase with wasActive=false still clears applyAsyncRuleId (stale-done path)', async () => {
+            // Seed the ruleId but NOT the progress — simulates the
+            // race where polling fires before dispatchApplyAsync's
+            // progress-set lands, OR a leftover cache 'done' from a
+            // prior session.
+            wrapper.vm.applyAsyncRuleId = 'rule-x';
+            wrapper.vm.applyAsyncProgress = null;
+            wrapper.vm.applyAsyncPollTimer = 42;
+
+            const originalFetch = globalThis.fetch;
+            globalThis.fetch = vi.fn().mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({
+                    phase: 'done',
+                    rule_id: 'rule-x',
+                    rule_keyword: 'kw',
+                    links_added: 5,
+                }),
+            });
+            const originalClearInterval = globalThis.clearInterval;
+            globalThis.clearInterval = vi.fn();
+            wrapper.vm.data.urls.apply_async_status = '/cp/linkwise/autolink/apply-async/status';
+
+            await wrapper.vm.pollApplyAsyncStatusOnce();
+
+            // Pre-fix: this assertion failed — early-return bypassed cleanup.
+            expect(wrapper.vm.applyAsyncRuleId).toBeNull();
+
+            globalThis.fetch = originalFetch;
+            globalThis.clearInterval = originalClearInterval;
+        });
+    });
+
     // ── entryHashes — derives hash map from prop ───────────────────────
 
     describe('entryHashes computed', () => {

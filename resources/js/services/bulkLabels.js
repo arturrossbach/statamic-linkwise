@@ -138,15 +138,29 @@ export function completionLabel(kind, phase, extra = {}, fallbackLabel = 'Operat
         return 'Broken-link check complete.';
     }
     if (kind === 'applyrule') {
+        // `conflicts_skipped` is the USER-ACTIONABLE skip bucket: only
+        // Hash-Conflict skips (entry was edited while Preview was open).
+        // The other bucket — `entries_skipped` — covers engine-internal
+        // skips (no-anchor / already-linked / self-referencing) over the
+        // FULL index and would read "96 skipped" for a rule that only
+        // touched 4 of 100 entries — meaningless to the user. See
+        // [[architectural_health]] Klasse 9b. Field added 2026-05-17 by
+        // ApplyRuleCommand single + multi terminal-status writes.
+        const conflicts = extra.conflicts_skipped || 0;
+        const conflictSuffix = conflicts > 0
+            ? `, ${conflicts} skipped (entry was modified by another editor)`
+            : '';
         if (extra.total_rules && extra.total_rules > 1) {
             const total = extra.total_links_added || 0;
             return total > 0
-                ? `${total} link(s) added across ${extra.total_rules} rule(s).`
-                : `No new links to add for ${extra.total_rules} rule(s).`;
+                ? `${total} link(s) added across ${extra.total_rules} rule(s)${conflictSuffix}.`
+                : `No new links to add for ${extra.total_rules} rule(s)${conflictSuffix}.`;
         }
         const n = extra.links_added || 0;
         const kw = extra.rule_keyword ? ` for "${extra.rule_keyword}"` : '';
-        return n > 0 ? `${n} link(s) added${kw}.` : `No new links to add${kw}.`;
+        return n > 0
+            ? `${n} link(s) added${kw}${conflictSuffix}.`
+            : `No new links to add${kw}${conflictSuffix}.`;
     }
     if (kind === 'bulkunlink') {
         const n = extra.succeeded || 0;

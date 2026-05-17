@@ -231,8 +231,18 @@ class ApplyRuleCommand extends Command
         }
 
         app(BulkSnapshotStore::class)->recordPostHashesForEntries($snapshotId, $previewEntryIds);
+        // markCompleted shape parity (Klasse 9a, 2026-05-17): mirror
+        // BulkUnlinkCommand / UrlChangerApplyCommand / DetailUnlinkCommand
+        // / LinkInsertCommand which all carry `succeeded`/`skipped` in
+        // completion_stats. Pre-fix this command shipped only
+        // `links_added`, which left `apply-counter-honesty` audit
+        // ALWAYS failing (completion_stats.succeeded was undefined ⇒ 0).
+        // We keep `links_added` for backwards-compat with the activity-
+        // log drawer that may already read it.
         app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
             'phase' => 'done',
+            'succeeded' => $result['links_added'] ?? 0,
+            'skipped' => count($conflictedEntries),
             'links_added' => $result['links_added'] ?? 0,
         ]);
 
@@ -243,7 +253,17 @@ class ApplyRuleCommand extends Command
             'current' => $result['links_added'] ?? 0,
             'total' => $totalEstimate,
             'links_added' => $result['links_added'] ?? 0,
+            // `entries_skipped` is the engine-internal total: includes
+            // no-anchor, already-linked, self-referencing, etc. Over the
+            // FULL index, not the preview slice. Kept for debug/telemetry
+            // but explicitly NOT used by the Toast — would otherwise read
+            // "96 skipped" on a rule that touched 4 of 100 entries.
             'entries_skipped' => $result['entries_skipped'] ?? 0,
+            // `conflicts_skipped` is the user-actionable bucket: only the
+            // Hash-Conflict skips ("entry was modified by another editor
+            // while Preview was open"). This is the Toast-relevant count.
+            // See [[architectural_health]] Klasse 9b.
+            'conflicts_skipped' => count($conflictedEntries),
             'conflicts' => array_values($conflictedEntries),
             // Root-level heartbeat — see LinkInsertCommand for rationale.
             'heartbeat' => time(),
@@ -462,8 +482,21 @@ class ApplyRuleCommand extends Command
                 $ruleSnapshotId,
                 $writtenIds ?: $rulePreviewEntryIds,
             );
+            // markCompleted shape parity — see single-rule branch for
+            // rationale. Per-rule `skipped` here counts the conflicts
+            // that intersected THIS rule's preview set (entries the
+            // rule wanted to touch but couldn't because hash mismatched).
+            // Falling back to the global $conflictedEntries count is
+            // an overestimate when rules touch disjoint entry sets,
+            // but it's still tighter than 0 and keeps the audit honest.
+            $ruleSkipped = count(array_intersect(
+                array_keys($conflictedEntries),
+                $rulePreviewEntryIds,
+            ));
             app(BulkSnapshotStore::class)->markCompleted($ruleSnapshotId, [
                 'phase' => 'done',
+                'succeeded' => $linksAdded,
+                'skipped' => $ruleSkipped,
                 'links_added' => $linksAdded,
             ]);
 
@@ -500,6 +533,10 @@ class ApplyRuleCommand extends Command
             'total_rules' => $totalRules,
             'total_links_added' => $totalLinksAdded,
             'rule_results' => $ruleResults,
+            // User-actionable Hash-Conflict-Skip count for the Toast.
+            // Mirrors the single-rule branch (line 256). See
+            // [[architectural_health]] Klasse 9b.
+            'conflicts_skipped' => count($conflictedEntries),
             'conflicts' => array_values($conflictedEntries),
             // Banner shows "Applied X rules" via the multi-rule label.
             'rule_keyword' => '',
