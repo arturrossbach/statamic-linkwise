@@ -160,6 +160,21 @@ class EntryIndexer
                     'sourceEntryId' => $entryId,
                     'anchorText' => $s->anchorText,
                     'targetEntryId' => $s->targetEntryId,
+                    // Carried so the Phase-2 verify-loop's dry-run-insert
+                    // call below uses the SAME 6-argument shape that
+                    // `InboundEngine::suggestFiltered` (post-`4e6573d`) and
+                    // `LinkInsertCommand::execute` real-write (Z. 198-211)
+                    // use. Without it, Phase-2 over-counts: a candidate
+                    // whose anchor sits in a writable region but whose
+                    // sentence-context lives in a non-writable field
+                    // would be accepted by a 5-arg dry-run but rejected
+                    // by the real-write at apply-time. Persisted
+                    // `inboundSuggestionCount` would surface the over-
+                    // count as a higher table number than what
+                    // `suggestFiltered` shows on modal drill-in (sister
+                    // of the InboundEngine bug; Klasse-B B-2 audit
+                    // 2026-05-16).
+                    'sentenceContext' => $s->sentenceContext,
                 ];
             }
         }
@@ -201,11 +216,20 @@ class EntryIndexer
                     Log::warning('[Linkwise] anchorIsLinkedInEntry failed during Phase 2: '.$e->getMessage());
                 }
 
-                // Filter 2: dry-run insert (same as modal endpoint)
+                // Filter 2: dry-run insert (same as modal endpoint).
+                // The 6th argument ($candidate['sentenceContext']) mirrors
+                // `InboundEngine::suggestFiltered` (post-`4e6573d`) and the
+                // real-write `LinkInsertCommand:198-211`. Without it, this
+                // verify-loop accepts candidates whose sentence-context
+                // lies in a non-writable region (subtitle/textarea/plain-
+                // string replicator set) — the persisted
+                // `inboundSuggestionCount` would over-count vs. what the
+                // modal's `suggestFiltered` shows on drill-in. Klasse-B
+                // B-2 audit-finding 2026-05-16.
                 $href = 'statamic://entry::'.$candidate['targetEntryId'];
                 try {
                     if (\Arturrossbach\Linkwise\Support\BardLinkInserter::insertLinkIntoEntryWithHref(
-                        $candidate['sourceEntryId'], $candidate['anchorText'], $href, false, false
+                        $candidate['sourceEntryId'], $candidate['anchorText'], $href, false, false, $candidate['sentenceContext']
                     )) {
                         $verified++;
                         $seen[$dedupKey] = true;

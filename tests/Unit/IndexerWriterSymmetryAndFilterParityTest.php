@@ -215,6 +215,53 @@ class IndexerWriterSymmetryAndFilterParityTest extends TestCase
         );
     }
 
+    // ── B-2 (sister of InboundEngine, audit 2026-05-16): EntryIndexer ───
+    //    Phase-2 inbound-count verify-loop must match InboundEngine's
+    //    `suggestFiltered` argument shape. Without parity, persisted
+    //    `inboundSuggestionCount` over-counts candidates whose real-write
+    //    would reject with `context_mismatch` — the Links Report
+    //    inbound-column shows higher numbers than the modal's
+    //    `suggestFiltered` (which post-`4e6573d` does pass context).
+    //
+    //    Same source-level pin pattern as Tests 3/4/5 above — direct
+    //    Phase-2 behavioural test would require Statamic-Entry facade
+    //    interception that the unit-test harness doesn't support.
+
+    public function test_phase2_candidate_shape_carries_sentence_context(): void
+    {
+        // Contract: the candidate hash carries `sentenceContext` from
+        // the Suggestion source. Without this field at build-time, the
+        // Phase-2 verify call (Test 7) cannot pass it to the inserter.
+        // Pin the field's presence in the candidate-build literal at
+        // EntryIndexer::enrichWithSuggestionCountsStreamed (line ~159).
+        $src = file_get_contents(dirname(__DIR__, 2).'/src/Indexer/EntryIndexer.php');
+        $this->assertMatchesRegularExpression(
+            "/\\\$inboundCandidates\\[\\\$s->targetEntryId\\]\\[\\] = \\[[^\\]]*'sentenceContext'\\s*=>\\s*\\\$s->sentenceContext/s",
+            $src,
+            'EntryIndexer Phase-1 must carry $s->sentenceContext into the inbound candidate '
+            .'so the Phase-2 verify-loop can pass it to the dry-run inserter for parity '
+            .'with InboundEngine::suggestFiltered (Test 3) and LinkInsertCommand:198-211 real-write.',
+        );
+    }
+
+    public function test_phase2_verify_passes_sentence_context_to_dryrun_inserter(): void
+    {
+        // Contract: Phase-2 verify-loop calls the dry-run inserter with
+        // the candidate's `sentenceContext` as the 6th positional
+        // argument. Without parity, persisted inboundSuggestionCount
+        // over-counts — the same parity violation that InboundEngine
+        // had pre-`4e6573d`, but in the indexer's count-computation
+        // path instead of the modal's filter path.
+        $src = file_get_contents(dirname(__DIR__, 2).'/src/Indexer/EntryIndexer.php');
+        $this->assertMatchesRegularExpression(
+            "/insertLinkIntoEntryWithHref\\s*\\(\\s*\\\$candidate\\['sourceEntryId'\\]\\s*,\\s*\\\$candidate\\['anchorText'\\]\\s*,\\s*\\\$href\\s*,\\s*false\\s*,\\s*false\\s*,\\s*\\\$candidate\\['sentenceContext'\\]/s",
+            $src,
+            'EntryIndexer Phase-2 verify-loop must call insertLinkIntoEntryWithHref with '
+            ."\$candidate['sentenceContext'] as the 6th argument — matching the InboundEngine "
+            .'parity fixed in 4e6573d.',
+        );
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────
 
     /**
