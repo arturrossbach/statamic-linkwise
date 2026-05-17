@@ -463,6 +463,16 @@ class InertiaPagesController extends CpController
             'snapshots' => $listing,
             'detailUrl' => cp_route('linkwise.activity.detail', '__ID__'),
             'markRevertedUrl' => cp_route('linkwise.activity.mark-reverted', '__ID__'),
+            // Distribution-pin (InertiaRendererRebuildUrlTest): all 8
+            // Inertia renderers must carry the rebuild-trio so the
+            // shared LinkwiseLayout's "Scan Content" button works
+            // identically across tabs. Activity was the outlier
+            // (User-Smoke 2026-05-17: "Could not scan content: HTTP
+            // 404" on Activity tab only) — fix forces the prop into
+            // the response, pin prevents regression.
+            'rebuildUrl' => cp_route('linkwise.rebuild-index'),
+            'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
+            'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
             // Endpoints used by the Revert flow — frontend builds the inverse
             // payload from snapshot.items and POSTs to whichever fits the kind.
             'revertEndpoints' => [
