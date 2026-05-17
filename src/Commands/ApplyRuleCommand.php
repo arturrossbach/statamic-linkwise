@@ -246,6 +246,30 @@ class ApplyRuleCommand extends Command
             'links_added' => $result['links_added'] ?? 0,
         ]);
 
+        // Per-entry skip-record write — sister-pattern to
+        // BulkUnlinkCommand:215 / LinkInsertCommand:302 / DetailUnlinkCommand:335
+        // / UrlChangerApplyCommand:314. ApplyRule was the missing 5th
+        // command (User-Smoke 2026-05-17 Bug #2). Without this, the
+        // Activity-Log drawer for an applyrule snapshot showed no
+        // skipped-entries table even when conflicts were skipped.
+        // Reason 'modified' is the convention used by the other 4
+        // commands for hash-conflict skips.
+        if (! empty($conflictedEntries)) {
+            $bulkSkippedRecords = [];
+            foreach (array_keys($conflictedEntries) as $entryId) {
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord(
+                    (string) $entryId,
+                    'modified',
+                    $rule->keyword,
+                    $rule->targetEntryId,
+                    $rule->targetEntryId
+                        ? 'statamic://entry::'.$rule->targetEntryId
+                        : $rule->url,
+                );
+            }
+            app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
+        }
+
         Cache::put('linkwise:applyrule:status', [
             'phase' => 'done',
             'rule_id' => $rule->id,
@@ -499,6 +523,29 @@ class ApplyRuleCommand extends Command
                 'skipped' => $ruleSkipped,
                 'links_added' => $linksAdded,
             ]);
+
+            // Per-rule skip-record write — sister-pattern to single-rule
+            // branch above. Only the conflicted entries that intersected
+            // THIS rule's preview set count as skipped FOR this rule.
+            $ruleConflictIds = array_intersect(
+                array_keys($conflictedEntries),
+                $rulePreviewEntryIds,
+            );
+            if (! empty($ruleConflictIds)) {
+                $ruleSkipRecords = [];
+                foreach ($ruleConflictIds as $entryId) {
+                    $ruleSkipRecords[] = BulkSnapshotStore::buildSkipRecord(
+                        (string) $entryId,
+                        'modified',
+                        $rule->keyword,
+                        $rule->targetEntryId,
+                        $rule->targetEntryId
+                            ? 'statamic://entry::'.$rule->targetEntryId
+                            : $rule->url,
+                    );
+                }
+                app(BulkSnapshotStore::class)->recordBulkSkipped($ruleSnapshotId, $ruleSkipRecords);
+            }
 
             // Stamp last-applied per rule (same semantics as single-rule path).
             try {
