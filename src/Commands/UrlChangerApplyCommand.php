@@ -169,7 +169,13 @@ class UrlChangerApplyCommand extends Command
                     $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                     $skipped += count($entryReps);
                     $processedReplacements += count($entryReps);
-                    $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                    // Klasse-7 follow-up (activity_log_skip_context_gap, 2026-05-17):
+                    // representative anchor + matched_url from first replacement.
+                    // See DetailUnlinkCommand for the same per-entry skip-record
+                    // rationale (one record covers N replacements grouped per entry).
+                    $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                    $repHref = $entryReps[0]['matched_url'] ?? null;
+                    $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified', $repAnchor, null, $repHref);
                     $revertSkippedRecords[] = $skipRec;
                     $bulkSkippedRecords[] = $skipRec;
                     Cache::put('linkwise:urlchanger:status', [
@@ -243,14 +249,18 @@ class UrlChangerApplyCommand extends Command
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
-                $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified');
+                $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                $repHref = $entryReps[0]['matched_url'] ?? null;
+                $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified', $repAnchor, null, $repHref);
                 $revertSkippedRecords[] = $skipRec;
                 $bulkSkippedRecords[] = $skipRec;
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
                 $skipped += count($entryReps);
-                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'error');
+                $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                $repHref = $entryReps[0]['matched_url'] ?? null;
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'error', $repAnchor, null, $repHref);
                 Log::warning('[Linkwise] UrlChangerApplyCommand entry-error: '.$e->getMessage());
             }
 

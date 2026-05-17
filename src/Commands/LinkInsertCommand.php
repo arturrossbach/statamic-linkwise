@@ -165,7 +165,10 @@ class LinkInsertCommand extends Command
                     $msg = 'Insertion missing both target_entry_id and href';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                     $skipped++;
-                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'missing_link_target');
+                    // 'missing_link_target' by definition has no target — pass
+                    // only anchor for Activity-Log render. Klasse-7 follow-up
+                    // (activity_log_skip_context_gap, 2026-05-17).
+                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'missing_link_target', $anchorText, null, null);
                     $status->running($i + 1, $total, $succeeded, $skipped);
                     continue;
                 }
@@ -187,7 +190,7 @@ class LinkInsertCommand extends Command
                         $msg = 'Entry was modified by another editor';
                         $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                         $skipped++;
-                        $skipRec = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
+                        $skipRec = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified', $anchorText, $targetEntryId, $href);
                         $revertSkippedRecords[] = $skipRec;
                         $bulkSkippedRecords[] = $skipRec;
                         $status->running($i + 1, $total, $succeeded, $skipped);
@@ -257,20 +260,20 @@ class LinkInsertCommand extends Command
                     $msg = 'Anchor text not found in entry';
                     $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                     $skipped++;
-                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'anchor_not_found');
+                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'anchor_not_found', $anchorText, $targetEntryId, $href);
                 }
             } catch (EntryConflictException $e) {
                 $msg = 'Entry was modified by another editor';
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
-                $skipRec = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified');
+                $skipRec = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'modified', $anchorText, $targetEntryId, $href);
                 $revertSkippedRecords[] = $skipRec;
                 $bulkSkippedRecords[] = $skipRec;
             } catch (\Throwable $e) {
                 $msg = mb_substr($e->getMessage(), 0, 120);
                 $errors[$msg] = ($errors[$msg] ?? 0) + 1;
                 $skipped++;
-                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'error');
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'error', $anchorText, $targetEntryId, $href);
                 Log::warning('[Linkwise] LinkInsertCommand item-error: '.$e->getMessage());
             }
 
