@@ -780,22 +780,19 @@ export default {
                 if (response.status === 409) {
                     const data = await response.json().catch(() => ({}));
                     Statamic.$toast.info(data.message || 'Another bulk operation is running. Wait for it to finish.');
-                    this.applyAsyncRuleId = null;
-                    this.applyAsyncProgress = null;
+                    this.teardownApplyAsync();
                     return;
                 }
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
                     const reason = data?.error || data?.message || `HTTP ${response.status}`;
                     Statamic.$toast.error(`Could not start apply: ${reason}`);
-                    this.applyAsyncRuleId = null;
-                    this.applyAsyncProgress = null;
+                    this.teardownApplyAsync();
                     return;
                 }
             } catch (e) {
                 Statamic.$toast.error(`Could not start apply: ${e.message || 'network error'}`);
-                this.applyAsyncRuleId = null;
-                this.applyAsyncProgress = null;
+                this.teardownApplyAsync();
                 return;
             }
 
@@ -829,6 +826,28 @@ export default {
             }
         },
 
+        /**
+         * Single source of truth for ending an async-apply lifecycle.
+         *
+         * User-Smoke 2026-05-17 found two branches in
+         * pollApplyAsyncStatusOnce that cleared `applyAsyncProgress` but
+         * forgot `applyAsyncRuleId` (idle/unknown branch and `wasActive=
+         * false` early-return). Effect: the row's Apply button stayed
+         * stuck in loading-state and ALL other rules' Apply buttons
+         * stayed greyed out via RuleListTable's
+         * `applyAsyncRuleId !== rule.id` gate (RuleListTable.vue:116).
+         *
+         * Bundling all teardown into one helper means every future exit
+         * point gets the full cleanup for free — analog to a `finally`
+         * block. See [[architectural_health]] Klasse 9a (per-kind
+         * terminal-status shape parity).
+         */
+        teardownApplyAsync() {
+            this.stopApplyAsyncPolling();
+            this.applyAsyncProgress = null;
+            this.applyAsyncRuleId = null;
+        },
+
         async pollApplyAsyncStatusOnce() {
             const url = this.data.urls.apply_async_status;
             if (!url) return;
@@ -848,40 +867,47 @@ export default {
                     };
                 } else if (status.phase === 'done' || status.phase === 'cancelled') {
                     const wasActive = this.applyAsyncProgress !== null;
-                    this.stopApplyAsyncPolling();
-                    this.applyAsyncProgress = null;
+                    const linksAdded = status.links_added || 0;
+                    const ruleId = status.rule_id;
+                    const ruleKeyword = status.rule_keyword || '';
+                    const cancelled = status.phase === 'cancelled';
+
+                    // Teardown FIRST — covers both the wasActive=true and
+                    // the wasActive=false (stale-done) path. Pre-fix, the
+                    // early-return for stale-done left `applyAsyncRuleId`
+                    // set and stuck the row's Apply button (User-Smoke
+                    // 2026-05-17). teardownApplyAsync() makes that
+                    // structurally impossible.
+                    this.teardownApplyAsync();
 
                     if (!wasActive) {
-                        // Stale done from a previous session — ignore.
+                        // Stale done from a previous session — UI was already
+                        // idle, no need to surface a result banner.
                         return;
                     }
 
-                    const linksAdded = status.links_added || 0;
                     this.applyAsyncResult = {
-                        rule_keyword: status.rule_keyword || '',
+                        rule_keyword: ruleKeyword,
                         links_added: linksAdded,
-                        cancelled: status.phase === 'cancelled',
+                        cancelled,
                     };
 
                     // Update the rule row's counts so the table reflects what just happened.
-                    const rule = this.rules.find(r => r.id === status.rule_id);
+                    const rule = this.rules.find(r => r.id === ruleId);
                     if (rule && linksAdded > 0) {
                         rule.links_added = (rule.links_added || 0) + linksAdded;
                         rule.linked_count = (rule.linked_count || 0) + linksAdded;
                     }
-
                     // Toast firing is delegated to LinkwiseLayout (cross-tab dedup'd).
-                    // We only update local UI state here.
-                    this.applyAsyncRuleId = null;
                 } else if (status.phase === 'error') {
-                    this.stopApplyAsyncPolling();
-                    this.applyAsyncProgress = null;
-                    this.applyAsyncRuleId = null;
                     // Error toast also handled by LinkwiseLayout.
+                    this.teardownApplyAsync();
                 } else {
-                    // idle / unknown — nothing to attach to
-                    this.stopApplyAsyncPolling();
-                    this.applyAsyncProgress = null;
+                    // idle / unknown phase — server lost the job or TTL
+                    // expired. Pre-fix this branch only cleared progress
+                    // and left applyAsyncRuleId stuck (User-Smoke 2026-
+                    // 05-17). Treat as a soft-terminal: full teardown.
+                    this.teardownApplyAsync();
                 }
             } catch {
                 // ignore transient errors
