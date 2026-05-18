@@ -904,10 +904,28 @@ export default {
                     };
 
                     // Update the rule row's counts so the table reflects what just happened.
+                    // The inline update covers the happy path quickly (no network
+                    // roundtrip) for the most-affected fields.
                     const rule = this.rules.find(r => r.id === ruleId);
                     if (rule && linksAdded > 0) {
                         rule.links_added = (rule.links_added || 0) + linksAdded;
                         rule.linked_count = (rule.linked_count || 0) + linksAdded;
+                    }
+
+                    // Klasse-7 sister-symmetry to the multi-rule path at line 504
+                    // and the unlink-from-preview path at line 1100. The inline
+                    // counter-bump above doesn't refresh `linked_elsewhere_count`,
+                    // `not_insertable_count`, or `match_count` — if an entry was
+                    // skipped during apply because the engine couldn't insert
+                    // (linked-elsewhere, not-insertable), `wouldLinkForRule()`
+                    // reads a stale "Apply (N)" count until the next page-level
+                    // refresh. Reload makes the row truthful.
+                    // (Welle 6 follow-up to the PR #59 known-gap note.)
+                    if (linksAdded > 0) {
+                        inertiaRouter.reload({
+                            only: ['autolinkData', 'entries'],
+                            preserveScroll: true,
+                        });
                     }
                     // Toast firing is delegated to LinkwiseLayout (cross-tab dedup'd).
                 } else if (status.phase === 'error') {
