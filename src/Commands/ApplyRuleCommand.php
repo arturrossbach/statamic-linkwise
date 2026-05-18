@@ -276,7 +276,21 @@ class ApplyRuleCommand extends Command
             'rule_keyword' => $rule->keyword,
             'current' => $result['links_added'] ?? 0,
             'total' => $totalEstimate,
+            // Shape-parity with the 4 sister commands (BulkUnlink /
+            // DetailUnlink / UrlChangerApply / LinkInsert via
+            // BulkStatusWriter): they all carry `succeeded` + `skipped`
+            // + `errors` in the terminal Cache::put status. ApplyRule's
+            // legacy shape used `links_added` instead of `succeeded` —
+            // we now write BOTH for cross-kind consistency. Frontend
+            // `completionVariant` already reads `succeeded ?? links_added`
+            // so the dual-write is consumer-safe. Welle 4, 2026-05-18.
+            'succeeded' => $result['links_added'] ?? 0,
+            'skipped' => count($conflictedEntries),
             'links_added' => $result['links_added'] ?? 0,
+            // Klasse-9-sister-fill (Welle 4): AutoLinkApplier populates
+            // `$result['errors']` on Throwables (line 222-224). Forwarding
+            // unblocks future error-toast surfacing for applyrule.
+            'errors' => $result['errors'] ?? [],
             // `entries_skipped` is the engine-internal total: includes
             // no-anchor, already-linked, self-referencing, etc. Over the
             // FULL index, not the preview slice. Kept for debug/telemetry
@@ -356,6 +370,13 @@ class ApplyRuleCommand extends Command
         // their suggestion counts so the table stops showing stale
         // pre-apply numbers.
         $allAffectedIds = [];
+
+        // Klasse-9-sister-fill (Welle 4): aggregate per-rule errors so the
+        // multi-rule terminal-status carries them in the same `errors`
+        // shape as other commands (`[msg => count]`). Without this, the
+        // banner/toast can never surface a top error reason for "Apply
+        // Selected" runs even when a sister kind would.
+        $batchErrors = [];
 
         foreach ($ruleIds as $idx => $ruleId) {
             // Cancel mid-batch: stops cleanly, reports partial result.
@@ -466,6 +487,13 @@ class ApplyRuleCommand extends Command
 
             $linksAdded = $result['links_added'] ?? 0;
             $totalLinksAdded += $linksAdded;
+
+            // Aggregate this rule's errors into batch total (Klasse 9
+            // sister-fill). Merge by msg-key with sum-of-counts so the
+            // shape stays `[msg => count]` consistent across single/multi.
+            foreach (($result['errors'] ?? []) as $msg => $count) {
+                $batchErrors[$msg] = ($batchErrors[$msg] ?? 0) + (int) $count;
+            }
             $ruleResults[$rule->id] = $linksAdded;
 
             // Append-on-success — items into THIS rule's snapshot, single-
@@ -522,6 +550,9 @@ class ApplyRuleCommand extends Command
                 'succeeded' => $linksAdded,
                 'skipped' => $ruleSkipped,
                 'links_added' => $linksAdded,
+                // Klasse-9-sister-fill (Welle 4). Errors from this rule
+                // only; sibling rules' errors live in their own snapshots.
+                'errors' => $result['errors'] ?? [],
             ]);
 
             // Per-rule skip-record write — sister-pattern to single-rule
@@ -580,11 +611,20 @@ class ApplyRuleCommand extends Command
             'total_rules' => $totalRules,
             'total_links_added' => $totalLinksAdded,
             'rule_results' => $ruleResults,
+            // Shape-parity with single-rule branch + 4 sister commands.
+            // succeeded = total_links_added; skipped = conflict count
+            // (engine-internal entries_skipped is debug-only). Welle 4.
+            'succeeded' => $totalLinksAdded,
+            'skipped' => count($conflictedEntries),
             // User-actionable Hash-Conflict-Skip count for the Toast.
             // Mirrors the single-rule branch (line 256). See
             // [[architectural_health]] Klasse 9b.
             'conflicts_skipped' => count($conflictedEntries),
             'conflicts' => array_values($conflictedEntries),
+            // Klasse-9-sister-fill (Welle 4): aggregated batch errors,
+            // shape `[msg => count]` matches single-rule + other
+            // commands. See $batchErrors loop initialisation.
+            'errors' => $batchErrors,
             // Banner shows "Applied X rules" via the multi-rule label.
             'rule_keyword' => '',
             // Root-level heartbeat — see LinkInsertCommand for rationale.
