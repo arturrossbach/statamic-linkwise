@@ -22,7 +22,7 @@ Zeitlimit pro Klasse: 15min Grep + Diskussion, dann entweder Fix-PR oder explizi
 |---|---|---|---|
 | 1 | Klasse 7 Backend (async-bulk + Activity-Log skip-records parity) | ✅ DONE — strukturell geschlossen | #59 |
 | 2 | Klasse 7 Frontend (post-completion-reload parity) | ✅ DONE — strukturell geschlossen | (this PR) |
-| 3 | Klasse 4.x (filter-apply argument parity) | pending | — |
+| 3 | Klasse 4.x (filter-apply argument parity) | ✅ DONE — strukturell geschlossen | (this PR) |
 | 4 | Klasse 9 (terminal-status shape parity — sister-suche `errors`-Field) | pending | — |
 | 5 | Klasse 1.x latent (ambiguous-context silent-wrong-wrap) | pending | — |
 | 6 | Klassen 1/2/3/4/6/8 Verify-Pass | pending | — |
@@ -130,7 +130,52 @@ Regression-Beweis: Manuell `inertiaRouter.reload(` zu `({` zerstückelt → Test
 
 ## Welle 3 — Klasse 4.x: filter-apply argument parity
 
-*pending — audit von `*::insertLinkIntoEntryWithHref()`-call-sites + sentence_context-arg-count*
+**Pattern:** `BardLinkInserter::insertLinkIntoEntryWithHref` hat optionalen 6. Arg `?string $expectedSentenceContext = null`. Dry-Run-Filter / Audit / Verify-Loop kann mit 5 Args rufen (kein context) während Real-Write mit 6 ruft (mit context) → User-Modal zeigt Suggestion, Apply silent-rejected mit `context_mismatch`. Oder umgekehrt: persistierter Counter über-zählt weil Verify-Loop permissiver ist als die User-Filter.
+
+### Grep
+
+```bash
+grep -rnE "insertLinkIntoEntryWithHref" src/
+```
+
+### Hits (alle 9 Call-Sites)
+
+| Site | Args | sentence_context flow | Status |
+|---|---|---|---|
+| `Suggestions/OutboundSuggestionGrouper:35` | 6 | `$s->sentenceContext` | ✅ covered (PR #53 B-1) |
+| `Suggestions/InboundEngine:158` | 6 | `$s->sentenceContext` | ✅ covered (commit `4e6573d`) |
+| `Indexer/EntryIndexer:231` | 6 | `$candidate['sentenceContext']` | ✅ covered (PR #52 B-2) |
+| `Commands/LinkInsertCommand:201` | 6 | `$expectedSentenceContext` | ✅ baseline real-write |
+| `Commands/AuditCommand:753` `checkDryRunAgreesWithLinkStatus` | 5 | N/A | ✅ NOT a gap — symmetric to AutoLinkApplier (rule-based, both preview + apply use 5-arg by design) |
+| `Commands/AuditCommand:2196` `checkSuggestionInsertable` | 5 → 6 | **fehlte** ❌ → ✅ fixed Welle 3 | Audit konnte PASS sagen während real apply FAILT — false negative in unserem eigenen Audit |
+| `Subscribers/AutoLinkOnEntrySaveSubscriber:94` | 4 | N/A | ✅ NOT a gap — fire-and-forget design (kein preview, kein expected context) |
+| `AutoLink/AutoLinkApplier:267` | 6 | forwards | ✅ caller's responsibility |
+| `Support/BardLinkInserter:219` | 3 | N/A | ✅ internal helper, default args |
+
+### Fix (1 site)
+
+`AuditCommand::checkSuggestionInsertable` — Signatur um `?string $sentenceContext = null` erweitert, named arg `expectedSentenceContext: $sentenceContext` an Inserter forward, beide Caller (line 258 auditInbound + line 296 auditOutbound) passen `$s->sentenceContext`.
+
+### Struktureller Pin
+
+**NEU:** `tests/Unit/Architecture/SuggestionContextArgumentParityTest.php` (1 Test, regression-bewiesen). Source-Grep über `src/`:
+
+- Jeder Call-Site von `insertLinkIntoEntryWithHref` MUSS `sentenceContext` oder named arg `expectedSentenceContext:` enthalten — sonst Fail mit Pointer auf Klasse 4.x.
+- `EXEMPT_FILES`: AutoLinkApplier, AutoLinkOnEntrySaveSubscriber, LinkInsertCommand (baseline), BardLinkInserter — alle mit dokumentierter Begründung.
+- `PARTIAL_EXEMPT_FILES`: AuditCommand `checkDryRunAgreesWithLinkStatus` (rule-based symmetric path), aber `checkSuggestionInsertable` IS in scope.
+
+Regression-Beweis: `sed`-deleted die named-arg-Zeile + die `$s->sentenceContext`-Forwards → Test fail mit exakter Source-Line-Zuordnung → restored.
+
+### Welle-3-Status
+
+**Klasse 4.x vollständig strukturell geschlossen.** 4 bekannte Manifestationen historisch (3 gefixt + 1 in Welle 3) + struktureller Pin verhindert künftige Drift.
+
+### Bonus-Erkenntnis: Audit-Symmetrie vs Real-Symmetrie
+
+Der Original-Audit-Check-Plan (Klasse 4.x in `architectural_health.md`) erwähnte:
+> Audit-Check-Idee: linkwise:audit prüft jede *::insertLinkIntoEntryWithHref()-Call-Stelle die mit exact 5 Args ruft + im selben File `Suggestion`/`InboundSuggestion` verwendet → warn.
+
+Welle 3 hat das **als PHPUnit struktureller Pin** statt als Runtime-Audit-Check umgesetzt — fail-vor-merge ist stärker als warn-zur-Laufzeit.
 
 ---
 

@@ -261,6 +261,7 @@ class AuditCommand extends Command
                     $s->anchorText,
                     $s->targetEntryId,
                     "'{$s->anchorText}' from {$s->sourceEntryId} → '{$record->title}'",
+                    $s->sentenceContext,
                 );
             }
         }
@@ -299,6 +300,7 @@ class AuditCommand extends Command
                     $s->anchorText,
                     $s->targetEntryId,
                     "'{$s->anchorText}' on '{$record->title}' → {$s->targetTitle}",
+                    $s->sentenceContext,
                 );
             }
         }
@@ -2189,12 +2191,20 @@ class AuditCommand extends Command
         }
     }
 
-    protected function checkSuggestionInsertable(string $path, string $sourceId, string $anchor, string $targetId, string $label): void
+    protected function checkSuggestionInsertable(string $path, string $sourceId, string $anchor, string $targetId, string $label, ?string $sentenceContext = null): void
     {
         $href = 'statamic://entry::'.$targetId;
         try {
+            // Klasse-4.x sister-gap fixed Welle 3 (2026-05-18): pass
+            // sentence_context as the 6th arg so the audit is symmetric
+            // to the real user-facing paths
+            // (InboundEngine:158 + OutboundSuggestionGrouper:35) which
+            // both pass `$s->sentenceContext`. Pre-fix the audit could
+            // PASS (entry insertable somewhere) while real apply FAILED
+            // with context_mismatch — false negative in our own audit.
             $can = BardLinkInserter::insertLinkIntoEntryWithHref(
-                $sourceId, $anchor, $href, false, save: false
+                $sourceId, $anchor, $href, false, save: false,
+                expectedSentenceContext: $sentenceContext,
             );
         } catch (\Throwable $e) {
             $this->recordFailure($path, "{$label}: dry-run threw — ".$e->getMessage());
