@@ -23,7 +23,7 @@ Zeitlimit pro Klasse: 15min Grep + Diskussion, dann entweder Fix-PR oder explizi
 | 1 | Klasse 7 Backend (async-bulk + Activity-Log skip-records parity) | ✅ DONE — strukturell geschlossen | #59 |
 | 2 | Klasse 7 Frontend (post-completion-reload parity) | ✅ DONE — strukturell geschlossen | (this PR) |
 | 3 | Klasse 4.x (filter-apply argument parity) | ✅ DONE — strukturell geschlossen | (this PR) |
-| 4 | Klasse 9 (terminal-status shape parity — sister-suche `errors`-Field) | pending | — |
+| 4 | Klasse 9 (terminal-status shape parity — sister-suche `errors`-Field) | ✅ DONE — strukturell geschlossen | (this PR) |
 | 5 | Klasse 1.x latent (ambiguous-context silent-wrong-wrap) | pending | — |
 | 6 | Klassen 1/2/3/4/6/8 Verify-Pass | pending | — |
 
@@ -179,9 +179,49 @@ Welle 3 hat das **als PHPUnit struktureller Pin** statt als Runtime-Audit-Check 
 
 ---
 
-## Welle 4 — Klasse 9: terminal-status shape parity sister-suche
+## Welle 4 — Klasse 9: terminal-status shape parity sister-suche (`errors`-Field)
 
-*pending — `errors`-Field-Drift in `Cache::put('linkwise:<kind>:status')` writes; bisher nur succeeded/skipped audited*
+**Pattern:** Bulk-Command schreibt `Cache::put('linkwise:<kind>:status', [...])` für `phase=done`. Frontend `bulkLabels.completionLabel` ruft `topErrorReason(extra.errors)` für 4 Kinds. Wenn ein Command `errors`-Field nicht schreibt → silent degrade auf "no reason available". Same Klasse-9a wie PR #58 (das damals nur `succeeded`/`skipped`-Drift fixte, nicht `errors`).
+
+### Grep
+
+```bash
+grep -rnE "Cache::put.*linkwise:.*:status" src/Commands/
+```
+
+### Hits (alle 6 Commands mit terminal status)
+
+| Command | `phase=done` Cache::put shape | Status |
+|---|---|---|
+| `BulkUnlinkCommand:238` | `succeeded`+`skipped`+`errors` | ✅ covered |
+| `DetailUnlinkCommand` (3 done-writes) | `succeeded`+`skipped`+`errors` | ✅ covered |
+| `UrlChangerApplyCommand` (3 done-writes) | `succeeded`+`skipped`+`errors` | ✅ covered |
+| `LinkInsertCommand` (via `BulkStatusWriter::done`) | `succeeded`+`skipped`+`errors` | ✅ covered |
+| `ApplyRuleCommand:243` single | **`links_added` only, kein `succeeded`/`skipped`/`errors`** ❌ → ✅ fixed Welle 4 | gap |
+| `ApplyRuleCommand:~528` per-rule `markCompleted` | post-PR #58: `succeeded`+`skipped`+`links_added`, kein `errors` ❌ → ✅ fixed Welle 4 | gap |
+| `ApplyRuleCommand:~600` multi terminal Cache::put | **kein `succeeded`/`skipped`/`errors`** ❌ → ✅ fixed Welle 4 | gap |
+| `CheckLinksCommand` | eigene Semantik (non-mutating broken-check) | N/A |
+
+### Fix (3 sites)
+
+1. **Single terminal `Cache::put`** (line 243): + `succeeded`/`skipped`/`errors` (parallel zu existing `links_added` — Dual-Write, consumer akzeptiert beides via `extra.succeeded ?? extra.links_added`)
+2. **Per-rule `markCompleted`** in multi-loop (line ~528): + `errors` (forward `$result['errors']`)
+3. **Multi terminal `Cache::put`** (line ~600): + `succeeded`/`skipped`/`errors` (aggregated `$batchErrors` over the loop)
+
+Plus: `$batchErrors = []` accumulator außerhalb des Multi-Loops, merged per Rule mit msg-key sum-of-counts (shape `[msg => count]` symmetric to other commands).
+
+### Struktureller Pin
+
+**NEU:** `tests/Unit/Architecture/TerminalStatusErrorsFieldParityTest.php` (2 Tests, regression-bewiesen). Source-grep über `src/`:
+
+1. **Contract-Test:** jeder `Cache::put('linkwise:<kind>:status', ...)`-Call mit `phase=done` + `succeeded` + `skipped` MUSS auch `errors` enthalten. Sonst → fail mit Pointer auf Klasse 9a.
+2. **Sanity-Pin:** alle 4 known-compliant Commands (BulkUnlink/DetailUnlink/UrlChangerApply/ApplyRule post-Welle-4) erfüllen die Contract — verhindert silent-pass durch Regex-Drift.
+
+Regression-Beweis: `sed`-delete der `'errors' => $result['errors']`-Zeile → Test failed mit "Klasse-9a sister-gap"-Message + exakte source-line → restored → grün.
+
+### Welle-4-Status
+
+**Klasse 9 vollständig strukturell geschlossen** (9a Shape Parity + 9b Skip-Counter conflation per PR #58). Künftige neue Commands müssen den Contract erfüllen oder via EXEMPT_FILES dokumentieren.
 
 ---
 
