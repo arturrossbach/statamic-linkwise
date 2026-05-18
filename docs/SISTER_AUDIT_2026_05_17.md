@@ -24,8 +24,7 @@ Zeitlimit pro Klasse: 15min Grep + Diskussion, dann entweder Fix-PR oder explizi
 | 2 | Klasse 7 Frontend (post-completion-reload parity) | ✅ DONE — strukturell geschlossen | (this PR) |
 | 3 | Klasse 4.x (filter-apply argument parity) | ✅ DONE — strukturell geschlossen | (this PR) |
 | 4 | Klasse 9 (terminal-status shape parity — sister-suche `errors`-Field) | ✅ DONE — strukturell geschlossen | (this PR) |
-| 5 | Klasse 1.x latent (ambiguous-context silent-wrong-wrap) | pending | — |
-| 6 | Klassen 1/2/3/4/6/8 Verify-Pass | pending | — |
+| 5 | Klassen 1/1.x/2/3/4/6/8 Verify-Pass (kein Fix nötig) | ✅ DONE — alle sister-frei | (this PR, doc-only) |
 
 ## Welle 1 — Klasse 7: async-bulk + Activity-Log skip-records parity
 
@@ -225,12 +224,120 @@ Regression-Beweis: `sed`-delete der `'errors' => $result['errors']`-Zeile → Te
 
 ---
 
-## Welle 5 — Klasse 1.x latent: ambiguous-context silent-wrong-wrap
+## Welle 5 — Verify-Pass über die restlichen Klassen
 
-*pending*
+**Methode:** quick-grep pro Klasse + Sister-Stellen-Check. Ergebnis pro Klasse: closed bestätigt / Lücke gefunden → eigene Fix-PR. Doc-only PR ohne Code-Change wenn alle pass.
+
+### Klasse 1: Find-first-walker für Mutationen
+
+**Status:** Re-Link-Pfad gefixt via Position-Passing-Refactor (branch `refactor/relink-position-passing`, Commits `ab65f86..d317327`). AutoLink/ApplyRule/Outbound::insert/Inbound::insert haben safety-net via sentence_context (PRs #52/#53/#61 + Welle 3 audit). Pin: `InsertContextDisambiguationTest.php` (13 Tests / 45 Assertions) deckt F1/F1b/F5/F8/F6 systematisch.
+
+**Verify-Grep:**
+```bash
+grep -rnE "findValidMatchPosition|findFirstMatch" src/  # nur AnchorPositionFinder (REV-OB-04 Extraktion)
+```
+
+**Sister-Status:** ✅ closed. Keine neuen find-first-walker Manifestationen seit der Refactor-Welle.
+
+### Klasse 1.x latent: Ambiguous-context silent-wrong-wrap
+
+**Status:** Bewusst dokumentiert als latent in `architectural_health.md`. Bei zwei Paragraphen mit identischem `sentence_context`-Substring gewinnt heute der erste. Wurzel-Fix verlangt Walker-Erkennung von Ambiguität — eigener Refactor-Track, NICHT Sister-Audit-Scope.
+
+**Sister-Status:** ✅ explicit known latent issue, kein Sister-Bug-Audit-Aktion.
+
+### Klasse 2: Detached-exec für Bulk-Jobs
+
+**Status:** Bug 21 fix via `PhpBinary::cli()` Helper. 9+ Stellen rufen alle `exec("$php $artisan ...")` wobei `$php = PhpBinary::cli()` lokal gesetzt wird.
+
+**Verify-Grep:**
+```bash
+grep -rnE "exec\(.*artisan" src/
+# 9 Stellen: BulkJobDispatcher:86, AutoLinkController:423/476, UrlChangerController:341,
+# BulkJobsController:66/102/197/312/+1
+# Alle nutzen $php-Variable die direkt darüber via PhpBinary::cli() gesetzt wird.
+```
+
+**Sister-Status:** ✅ closed. Keine bypass-exec()-Calls die FPM-Binary fail-Pattern triggern könnten.
+
+**Tech-debt (nicht Sister):** Queue-Refactor (Laravel Job-Dispatcher) bleibt als architektonisches Upgrade dokumentiert. Aufwand 1-2 Tage, kein User-Trigger.
+
+### Klasse 3: Multi-Source-of-Truth bei Counter-Aggregation
+
+**Status:** outboundLinks (distinct targets) vs outboundLinkOccurrences (raw count) klar getrennt nach commit `dd2cd74`. EntryIndexSubscriber forwarded both fields.
+
+**Verify-Grep:**
+```bash
+grep -rnE "outboundLinks\b|outboundLinkOccurrences" src/
+# outboundLinks: 9 reads — alle konsumieren "distinct targets I link to"
+# outboundLinkOccurrences: dedicated counter field
+# Keine neue dual-semantic Field-Manifestation.
+```
+
+**Sister-Status:** ✅ closed.
+
+### Klasse 4: Statamic-Save-Triggered Re-Index Field-Forwarding
+
+**Status:** REV-DR-03 Refactor (commits ~`126f357`) ersetzte 15-line manual `new EntryRecord(...)` Field-by-Field-Copy in 5 Konstruktor-Stellen mit `EntryRecord::with(...)` Pattern. Nur 1 canonical builder bleibt bei `EntryIndexer:412`.
+
+**Verify-Grep:**
+```bash
+grep -rnE "new EntryRecord\(" src/
+# 5 Stellen: 4× Kommentar "REV-DR-03: was 15-line `new EntryRecord(...)`",
+# 1× canonical builder at EntryIndexer:412.
+```
+
+**Sister-Status:** ✅ closed. Field-Forwarding-Drift strukturell unmöglich seit REV-DR-03.
+
+### Klasse 6: AutoLink-Apply-Subscriber + Save-Cascade
+
+**Status:** Flagged + working. 3 Subscribers (AutoLinkOnEntrySaveSubscriber, EntryBlueprintSubscriber, EntryIndexSubscriber). AutoLinkOnEntrySaveSubscriber nutzt Cache::put($loopFlag) als infinite-loop-guard.
+
+**Verify-Grep:**
+```bash
+ls src/Subscribers/
+# 3 Subscribers, alle bekannt. Kein neuer Subscriber mit save-cascade-Risk ohne Flag.
+```
+
+**Sister-Status:** ✅ closed. Kein neuer cascade-Subscriber seit Bug 6 fix.
+
+### Klasse 8: Per-Page Required-Prop Completeness
+
+**Status:** `InertiaRendererRequiredUrlPropsTest` Pin live seit PR #57 (`58fb8da`).
+
+**Verify-Check:** Pin-File present, 8 Tests / 74 Assertions, deckt rebuildUrl trio + saveUrl + detailUrl + checkLinksUrl trio über alle 8 Pages.
+
+**Sister-Status:** ✅ closed.
+
+### Welle-5-Status
+
+**6 Klassen verify-passed.** Plus 4 Klassen aktiv fixed in Wellen 1-4 (Klassen 7 Backend + Frontend, 4.x, 9). Plus 1 latent-dokumentiert (1.x).
+
+**Audit-Welle-5 = doc-only**, kein Code-Change, kein neuer Strukturpin. Die existierenden Pins (REV-DR-03, PR #57, PR #59/#60/#61/#62-Strukturpins) decken die strukturelle Surface.
 
 ---
 
-## Welle 6 — Klassen 1/2/3/4/6/8 Verify-Pass
+## Audit-Welle Gesamt-Zusammenfassung
 
-*pending — Verify dass closed gemeldete Klassen tatsächlich sister-frei sind*
+| Klasse | Status | Welle | Strukturpin |
+|---|---|---|---|
+| 1 (find-first-walker) | ✅ closed | 5 verify | InsertContextDisambiguationTest |
+| 1.x latent (ambiguous-context) | ✅ latent known | 5 verify | n/a (Walker-refactor TODO) |
+| 2 (detached-exec) | ✅ closed | 5 verify | PhpBinary::cli() helper |
+| 3 (dual-semantic counter) | ✅ closed | 5 verify | doc-comments |
+| 4 (EntryRecord field-forwarding) | ✅ closed | 5 verify | REV-DR-03 EntryRecord::with |
+| 4.x (filter-apply arg parity) | ✅ closed | 3 | SuggestionContextArgumentParityTest |
+| 6 (save-cascade) | ✅ flagged | 5 verify | $loopFlag in Cache |
+| 7 backend (recordBulkSkipped) | ✅ closed | 1 | BulkCommandSkipRecordParityTest |
+| 7 frontend (post-completion reload) | ✅ closed | 2 | BulkStateWatcherReloadParityTest |
+| 8 (per-page required-prop) | ✅ closed | 5 verify | InertiaRendererRequiredUrlPropsTest |
+| 9a (terminal-status shape parity) | ✅ closed | 4 | TerminalStatusErrorsFieldParityTest |
+| 9b (skip-counter conflation) | ✅ closed | PR #58 | conflicts_skipped naming + doc |
+
+**Klassen-Status post-Audit: 10 von 10 produktiv-relevanten Klassen strukturell oder dokumentarisch geschlossen.**
+
+## Lerngeschehen für die Zukunft
+
+1. **Sister-Audit-Pass ist Pflicht bei jedem Bug-Fix** — siehe Memory [[feedback_proactive_sister_bug_search]]. NICHT warten bis User "inkonsistent" sagt.
+2. **Strukturpin > Manual-Fix** wo machbar. Source-grep PHPUnit/Vitest-Tests kosten 10 Zeilen Code und schließen Klassen strukturell für alle Zukunft.
+3. **EXEMPT-Listen mit Begründung** in jedem Strukturpin — die explicit-Escape-Hatch macht "wir wissen warum" vs "wir haben übersehen" sichtbar.
+4. **Doc-only Verify-Pass** ist ein valides Resultat, wenn Klassen bereits closed sind. NICHT erfinden neue Klassen oder spekulative Fixes anbringen ohne empirisches Symptom.
