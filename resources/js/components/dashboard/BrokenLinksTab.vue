@@ -705,7 +705,22 @@ export default {
             // to the current scan state (different anchor, different sentence
             // context, or gone entirely if the link was removed elsewhere)
             // and the user can VERIFY before clicking again.
-            inertiaRouter.reload({ only: ['brokenData', 'entryHashes'], preserveScroll: true });
+            inertiaRouter.reload({
+                only: ['brokenData', 'entryHashes'],
+                preserveScroll: true,
+                onSuccess: (page) => {
+                    // Belt-and-suspenders direct re-sync (Klasse 10,
+                    // User-Smoke 2026-05-19). Vue's watch on the
+                    // nested `data.broken_links` path is fragile when
+                    // Inertia partial-reload replaces the whole `data`
+                    // object reference; mutate `localLinks` directly
+                    // from the response payload.
+                    const fresh = page?.props?.brokenData?.broken_links;
+                    if (Array.isArray(fresh)) {
+                        this.localLinks = JSON.parse(JSON.stringify(fresh));
+                    }
+                },
+            });
         },
 
         toggleSelect(link) {
@@ -877,7 +892,22 @@ export default {
                             cancelled: status.phase === 'cancelled',
                         };
                         // Refresh broken_links + hashes from server (only those props)
-                        inertiaRouter.reload({ only: ['brokenData', 'entryHashes'], preserveScroll: true });
+                        inertiaRouter.reload({
+                only: ['brokenData', 'entryHashes'],
+                preserveScroll: true,
+                onSuccess: (page) => {
+                    // Belt-and-suspenders direct re-sync (Klasse 10,
+                    // User-Smoke 2026-05-19). Vue's watch on the
+                    // nested `data.broken_links` path is fragile when
+                    // Inertia partial-reload replaces the whole `data`
+                    // object reference; mutate `localLinks` directly
+                    // from the response payload.
+                    const fresh = page?.props?.brokenData?.broken_links;
+                    if (Array.isArray(fresh)) {
+                        this.localLinks = JSON.parse(JSON.stringify(fresh));
+                    }
+                },
+            });
                     }
                 } else {
                     // idle / unknown — nothing to attach to
@@ -971,7 +1001,22 @@ export default {
                 } else if (result.missing) {
                     this.removeLinkLocally(link);
                     Statamic.$toast.info(result.error);
-                    inertiaRouter.reload({ only: ['brokenData', 'entryHashes'], preserveScroll: true });
+                    inertiaRouter.reload({
+                only: ['brokenData', 'entryHashes'],
+                preserveScroll: true,
+                onSuccess: (page) => {
+                    // Belt-and-suspenders direct re-sync (Klasse 10,
+                    // User-Smoke 2026-05-19). Vue's watch on the
+                    // nested `data.broken_links` path is fragile when
+                    // Inertia partial-reload replaces the whole `data`
+                    // object reference; mutate `localLinks` directly
+                    // from the response payload.
+                    const fresh = page?.props?.brokenData?.broken_links;
+                    if (Array.isArray(fresh)) {
+                        this.localLinks = JSON.parse(JSON.stringify(fresh));
+                    }
+                },
+            });
                 } else {
                     Statamic.$toast.error(result.error);
                 }
@@ -1110,7 +1155,22 @@ export default {
                     // re-syncs with server truth (backend already called removeLink).
                     this.removeLinkLocally(link);
                     Statamic.$toast.info('Link was not found at the scanned position — may have moved or been removed since the scan. List refreshed.');
-                    inertiaRouter.reload({ only: ['brokenData', 'entryHashes'], preserveScroll: true });
+                    inertiaRouter.reload({
+                only: ['brokenData', 'entryHashes'],
+                preserveScroll: true,
+                onSuccess: (page) => {
+                    // Belt-and-suspenders direct re-sync (Klasse 10,
+                    // User-Smoke 2026-05-19). Vue's watch on the
+                    // nested `data.broken_links` path is fragile when
+                    // Inertia partial-reload replaces the whole `data`
+                    // object reference; mutate `localLinks` directly
+                    // from the response payload.
+                    const fresh = page?.props?.brokenData?.broken_links;
+                    if (Array.isArray(fresh)) {
+                        this.localLinks = JSON.parse(JSON.stringify(fresh));
+                    }
+                },
+            });
                     this.editingLink = null;
                     return;
                 }
