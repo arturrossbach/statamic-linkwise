@@ -63,15 +63,35 @@ const PAGES_DIR = resolve(REPO_ROOT, 'resources/js/components/pages');
  * why this state legitimately survives mount-time-only initialisation.
  */
 const EXEMPT_DEEP_CLONES = {
-    'AutoLinkingTab.vue::rules':
-        'Parent AutoLinkPage.vue uses `:key="renderKey"` + watch on '
-        + '`autolinkData`/`entries` to bump the key and force re-mount '
-        + 'of AutoLinkingTab when Inertia partial-reload updates the '
-        + 'props. data() runs fresh on remount → deep-clone is fresh. '
-        + 'No watcher needed inside AutoLinkingTab. User-Smoke 2026-05-19 '
-        + 'confirmed this is the more reliable pattern for nested-prop '
-        + 'updates than a deep-watch — see [[architectural_health]] '
-        + 'Klasse 10.',
+    // Legitimate snapshot patterns (NOT prop mirrors) — explicit
+    // mount-time / event-time snapshots whose freshness is controlled
+    // by user action, not Inertia prop updates.
+};
+
+/**
+ * Components that use the `:key="renderKey"` remount pattern in their
+ * Inertia-page parent instead of an internal `watch:` handler. Lookup
+ * key is `<ComponentName>.vue::<localStateKey>`, value is the parent
+ * file path (relative to `resources/js/components/`). The test
+ * verifies the parent actually has the :key + watch contract.
+ *
+ * This is the canonical alternative to the watch-based re-sync — see
+ * [[architectural_health]] Klasse 10 for when each pattern fits:
+ *  - watch-based: keeps tab-internal state (filters, selection) across
+ *    Inertia partial-reloads
+ *  - :key=renderKey: full remount, simpler, OK when tab-state-loss is
+ *    acceptable post-refresh (e.g. apply just changed everything)
+ */
+const PARENT_REMOUNT_PATTERN = {
+    'AutoLinkingTab.vue::rules': {
+        parentFile: 'pages/AutoLinkPage.vue',
+        // Parent-side prop name(s) that the Inertia partial-reload
+        // updates and which trigger the renderKey bump. Parent's
+        // `<Child :data="autolinkData" />` binding makes the child see
+        // `data`, but the watch in the parent is on the original
+        // Inertia-prop name. Check for ANY of these in the parent.
+        watchKeys: ['autolinkData', 'entries'],
+    },
 };
 
 function vueFilesIn(dir) {
@@ -185,6 +205,22 @@ describe('Deep-clone prop into data() must have re-sync watcher (Klasse 10)', ()
                 const exemptKey = `${componentName}::${localKey}`;
                 if (exemptKey in EXEMPT_DEEP_CLONES) continue;
 
+                // Parent-`:key="renderKey"`-remount pattern — verify the
+                // parent actually honours the contract before accepting.
+                if (exemptKey in PARENT_REMOUNT_PATTERN) {
+                    const config = PARENT_REMOUNT_PATTERN[exemptKey];
+                    const parentPath = resolve(REPO_ROOT, 'resources/js/components/' + config.parentFile);
+                    if (! verifyParentRemountPattern(parentPath, config.watchKeys)) {
+                        gaps.push(
+                            `${componentName}: declared parent-remount pattern via `
+                            + `${config.parentFile} but parent doesn't honour the contract `
+                            + '(missing :key="renderKey" on the child OR missing '
+                            + `watch on one of [${config.watchKeys.join(', ')}] that bumps renderKey)`,
+                        );
+                    }
+                    continue;
+                }
+
                 // Local-key deep-clones (e.g. `editingRuleSnapshot` deep-
                 // clones `this.newRule` not a prop) are also legitimate
                 // mount-time snapshots — only flag deep-clones of props,
@@ -254,6 +290,53 @@ describe('Deep-clone prop into data() must have re-sync watcher (Klasse 10)', ()
         }
     });
 });
+
+/**
+ * Verify the parent honours the `:key="renderKey"` remount contract for
+ * a given child component:
+ *   1. Parent template binds `:key="renderKey"` to the child element.
+ *   2. Parent's `watch:` block contains a handler keyed on the
+ *      source-prop name that increments `renderKey` (or `this.renderKey`).
+ *   3. Parent's `data()` returns a `renderKey` field.
+ *
+ * Returns true only if all three are present.
+ */
+function verifyParentRemountPattern(parentPath, watchKeys) {
+    let src;
+    try {
+        src = readFileSync(parentPath, 'utf8');
+    } catch {
+        return false;
+    }
+
+    // 1) Template binds :key="renderKey" — canonical pattern.
+    if (! /:key\s*=\s*["']renderKey["']/.test(src)) return false;
+
+    // 2) data() declares renderKey.
+    if (! /renderKey\s*:\s*\d+/.test(src)) return false;
+
+    // 3) watch block has a handler keyed on AT LEAST ONE of the
+    //    declared watchKeys, with a body that bumps renderKey.
+    const watchMatch = src.match(/^\s*watch\s*:/m);
+    if (! watchMatch) return false;
+    const braceOpen = src.indexOf('{', watchMatch.index);
+    let depth = 1;
+    let i = braceOpen + 1;
+    while (depth > 0 && i < src.length) {
+        const ch = src[i];
+        if (ch === '{') depth++;
+        else if (ch === '}') depth--;
+        i++;
+    }
+    const watchBlock = src.slice(braceOpen, i);
+
+    const bumpsRenderKey = /this\.renderKey\s*\+\+|this\.renderKey\s*=\s*this\.renderKey\s*\+\s*1/.test(watchBlock);
+    if (! bumpsRenderKey) return false;
+
+    // ANY watchKey present is sufficient — the Inertia partial-reload
+    // updates the prop that maps onto the child's deep-cloned source.
+    return watchKeys.some(key => new RegExp(`['"]?${key}['"]?\\s*:`).test(watchBlock));
+}
 
 /**
  * Check whether `name` is declared in the file's props: { ... } block.
