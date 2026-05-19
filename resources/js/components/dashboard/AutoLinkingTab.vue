@@ -406,6 +406,33 @@ export default {
         if (this.nowTickTimer) clearInterval(this.nowTickTimer);
     },
 
+    watch: {
+        // Re-sync the local `this.rules` deep-clone when the parent Inertia
+        // prop updates — e.g. after `inertiaRouter.reload({ only:
+        // ['autolinkData', 'entries'] })` returns post-apply with fresh
+        // match_count / linked_count / linked_elsewhere_count /
+        // not_insertable_count from the backend.
+        //
+        // Pre-fix (User-Smoke 2026-05-19, Bug-Klasse 10): the deep-clone in
+        // data() (line 215) ran ONCE at mount. Subsequent Inertia partial-
+        // reloads updated `this.data.rules` (prop) but `this.rules`
+        // (component state) stayed stale forever — "Apply (4)" kept showing
+        // even after 3 of 4 were just linked. Sister-symmetric to
+        // LinksReportTab.vue:608 `watch.entries → localEntries` (PR #49)
+        // and the new BrokenLinksTab + DomainsTab fixes in this PR.
+        //
+        // `deep: true` ensures nested rule-field mutations (links_added,
+        // linked_count) re-fire — without it, a backend that returned a
+        // structurally-identical array with one count flipped wouldn't
+        // trigger Vue's shallow-watch.
+        'data.rules': {
+            deep: true,
+            handler(val) {
+                this.rules = JSON.parse(JSON.stringify(val || []));
+            },
+        },
+    },
+
     methods: {
         toggleSelectAll() {
             if (this.allSelected) {
@@ -903,30 +930,18 @@ export default {
                         cancelled,
                     };
 
-                    // Update the rule row's counts so the table reflects what just happened.
-                    // The inline update covers the happy path quickly (no network
-                    // roundtrip) for the most-affected fields.
-                    const rule = this.rules.find(r => r.id === ruleId);
-                    if (rule && linksAdded > 0) {
-                        rule.links_added = (rule.links_added || 0) + linksAdded;
-                        rule.linked_count = (rule.linked_count || 0) + linksAdded;
-                    }
-
-                    // Klasse-7 sister-symmetry to the multi-rule path at line 504
-                    // and the unlink-from-preview path at line 1100. The inline
-                    // counter-bump above doesn't refresh `linked_elsewhere_count`,
-                    // `not_insertable_count`, or `match_count` — if an entry was
-                    // skipped during apply because the engine couldn't insert
-                    // (linked-elsewhere, not-insertable), `wouldLinkForRule()`
-                    // reads a stale "Apply (N)" count until the next page-level
-                    // refresh. Reload makes the row truthful.
-                    // (Welle 6 follow-up to the PR #59 known-gap note.)
-                    if (linksAdded > 0) {
-                        inertiaRouter.reload({
-                            only: ['autolinkData', 'entries'],
-                            preserveScroll: true,
-                        });
-                    }
+                    // Klasse-7 + Klasse-10 fix: refresh page-data so the
+                    // table's "Apply (N)" + entries' content_hash reflect
+                    // post-apply reality. The watch:data handler below
+                    // (Klasse-10 fix, 2026-05-19) auto-re-syncs the local
+                    // `this.rules` deep-clone — same pattern LinksReportTab
+                    // uses for its `localEntries`. Sister-symmetric to
+                    // multi-rule (line ~504) and unlink-from-preview
+                    // (line ~1100).
+                    inertiaRouter.reload({
+                        only: ['autolinkData', 'entries'],
+                        preserveScroll: true,
+                    });
                     // Toast firing is delegated to LinkwiseLayout (cross-tab dedup'd).
                 } else if (status.phase === 'error') {
                     // Error toast also handled by LinkwiseLayout.

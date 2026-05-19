@@ -278,6 +278,17 @@ export default {
         attributeFilter() { this.persistFilters(); },
         sortField() { this.persistFilters(); },
         sortDirection() { this.persistFilters(); },
+        // Re-sync the local `localDomains` deep-clone (line 251) when the
+        // parent Inertia prop updates — e.g. after a save-domain-attribute
+        // POST triggers an Inertia partial-reload, or any future bulk-op
+        // refreshes domains. Klasse-10 sister-fix (User-Smoke 2026-05-19).
+        // Mirrors LinksReportTab.vue:608 `watch.entries → localEntries`.
+        domains: {
+            deep: true,
+            handler(val) {
+                this.localDomains = JSON.parse(JSON.stringify(val || []));
+            },
+        },
     },
 
     computed: {

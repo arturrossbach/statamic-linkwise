@@ -514,6 +514,19 @@ export default {
         activeStatuses: { deep: true, handler() { this.currentPage = 1; this.persistState(); } },
         sortField() { this.persistState(); },
         sortDirection() { this.persistState(); },
+        // Re-sync the local `localLinks` deep-clone (line 493) when the
+        // parent Inertia prop updates — e.g. after `inertiaRouter.reload({
+        // only: ['brokenData', 'entryHashes'] })` runs post-bulk-unlink /
+        // post-recheck. Without this, the deep-clone done at mount runs
+        // exactly once and never sees a partial-reload update. Klasse-10
+        // sister-fix (User-Smoke 2026-05-19, surfaced via AutoLinkingTab).
+        // Mirrors LinksReportTab.vue:608 `watch.entries → localEntries`.
+        'data.broken_links': {
+            deep: true,
+            handler(val) {
+                this.localLinks = JSON.parse(JSON.stringify(val || []));
+            },
+        },
         // Drop stale activeStatuses values when their bucket disappears
         // (e.g. user unignores the last ignored row → "Ignored" no longer exists)
         availableStatuses(current) {
