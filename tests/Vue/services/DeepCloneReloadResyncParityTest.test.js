@@ -63,10 +63,15 @@ const PAGES_DIR = resolve(REPO_ROOT, 'resources/js/components/pages');
  * why this state legitimately survives mount-time-only initialisation.
  */
 const EXEMPT_DEEP_CLONES = {
-    // 'AutoLinkingTab.vue::editingRuleSnapshot':
-    //   'Snapshot taken at edit-start to compute formDirty — survives
-    //    Inertia reloads on purpose; explicit re-snapshot happens via
-    //    user clicking Edit, not via prop updates.',
+    'AutoLinkingTab.vue::rules':
+        'Parent AutoLinkPage.vue uses `:key="renderKey"` + watch on '
+        + '`autolinkData`/`entries` to bump the key and force re-mount '
+        + 'of AutoLinkingTab when Inertia partial-reload updates the '
+        + 'props. data() runs fresh on remount → deep-clone is fresh. '
+        + 'No watcher needed inside AutoLinkingTab. User-Smoke 2026-05-19 '
+        + 'confirmed this is the more reliable pattern for nested-prop '
+        + 'updates than a deep-watch — see [[architectural_health]] '
+        + 'Klasse 10.',
 };
 
 function vueFilesIn(dir) {
@@ -231,9 +236,11 @@ describe('Deep-clone prop into data() must have re-sync watcher (Klasse 10)', ()
         // Guard against the regex short-circuiting silently (path rename,
         // method rename). All 4 components were verified compliant in
         // the PR that introduced this test.
+        // AutoLinkingTab uses the `:key="renderKey"` remount pattern
+        // from its parent (AutoLinkPage), not an internal watcher — so
+        // it's exempt above and NOT in this sanity-check list.
         const checks = [
             { file: 'dashboard/LinksReportTab.vue', localKey: 'localEntries', source: 'entries' },
-            { file: 'dashboard/AutoLinkingTab.vue', localKey: 'rules', source: 'data.rules' },
             { file: 'dashboard/BrokenLinksTab.vue', localKey: 'localLinks', source: 'data.broken_links' },
             { file: 'dashboard/DomainsTab.vue', localKey: 'localDomains', source: 'domains' },
         ];

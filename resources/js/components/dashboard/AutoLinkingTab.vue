@@ -406,32 +406,13 @@ export default {
         if (this.nowTickTimer) clearInterval(this.nowTickTimer);
     },
 
-    watch: {
-        // Re-sync the local `this.rules` deep-clone when the parent Inertia
-        // prop updates — e.g. after `inertiaRouter.reload({ only:
-        // ['autolinkData', 'entries'] })` returns post-apply with fresh
-        // match_count / linked_count / linked_elsewhere_count /
-        // not_insertable_count from the backend.
-        //
-        // Pre-fix (User-Smoke 2026-05-19, Bug-Klasse 10): the deep-clone in
-        // data() (line 215) ran ONCE at mount. Subsequent Inertia partial-
-        // reloads updated `this.data.rules` (prop) but `this.rules`
-        // (component state) stayed stale forever — "Apply (4)" kept showing
-        // even after 3 of 4 were just linked. Sister-symmetric to
-        // LinksReportTab.vue:608 `watch.entries → localEntries` (PR #49)
-        // and the new BrokenLinksTab + DomainsTab fixes in this PR.
-        //
-        // `deep: true` ensures nested rule-field mutations (links_added,
-        // linked_count) re-fire — without it, a backend that returned a
-        // structurally-identical array with one count flipped wouldn't
-        // trigger Vue's shallow-watch.
-        'data.rules': {
-            deep: true,
-            handler(val) {
-                this.rules = JSON.parse(JSON.stringify(val || []));
-            },
-        },
-    },
+    // No `watch` section needed for `this.rules` re-sync — the parent
+    // AutoLinkPage uses `:key="renderKey"` (Vue idiom) which forces a
+    // full remount of this component whenever the Inertia partial-
+    // reload updates `autolinkData`. `data()` runs fresh on remount,
+    // so the deep-clone happens with the new prop in scope. No watcher
+    // overlap, single source of truth (User-Smoke 2026-05-19 confirmed
+    // — watch.data was unreliable, :key remount works reliably).
 
     methods: {
         toggleSelectAll() {
@@ -541,6 +522,10 @@ export default {
                         stop();
                         this.selectedRules = [];
                         this.applyingAll = false;
+                        // Inertia partial-reload — parent's :key="renderKey"
+                        // watch on autolinkData/entries re-mounts this
+                        // component so data() runs fresh. See single-
+                        // rule path for full rationale.
                         inertiaRouter.reload({
                             only: ['autolinkData', 'entries'],
                             preserveScroll: true,
@@ -850,6 +835,32 @@ export default {
             });
 
             this.startApplyAsyncPolling();
+
+            // Belt-and-suspenders refresh: same $watch pattern as
+            // unlinkSelectedFromPreview line 1141 + dispatchApplyMultiple
+            // line 544. The setInterval-driven reload inside
+            // pollApplyAsyncStatusOnce's done branch (line ~941) was
+            // unreliable in User-Smoke 2026-05-19 — table didn't refresh.
+            // This $watch fires reactively when the global bulkState
+            // transitions from 'applyrule' active → null (set by
+            // LinkwiseLayout's poller on terminal). It triggers the
+            // same inertiaRouter.reload, ensuring AutoLinkPage's
+            // :key="renderKey" watch picks up the prop change and
+            // re-mounts this tab with fresh data.
+            const stopApplyWatcher = this.$watch(
+                () => bulkState.active,
+                (current, previous) => {
+                    if (previous?.kind === 'applyrule' && current === null) {
+                        stopApplyWatcher();
+                        inertiaRouter.reload({
+                            only: ['autolinkData', 'entries'],
+                            preserveScroll: true,
+                        });
+                    }
+                },
+            );
+            // Safety: stop watcher after 30 min.
+            setTimeout(() => stopApplyWatcher(), 30 * 60 * 1000);
         },
 
         startApplyAsyncPolling() {
@@ -930,19 +941,18 @@ export default {
                         cancelled,
                     };
 
-                    // Klasse-7 + Klasse-10 fix: refresh page-data so the
-                    // table's "Apply (N)" + entries' content_hash reflect
-                    // post-apply reality. The watch:data handler below
-                    // (Klasse-10 fix, 2026-05-19) auto-re-syncs the local
-                    // `this.rules` deep-clone — same pattern LinksReportTab
-                    // uses for its `localEntries`. Sister-symmetric to
-                    // multi-rule (line ~504) and unlink-from-preview
-                    // (line ~1100).
+                    // Inertia partial-reload + parent :key remount.
+                    // AutoLinkPage watches autolinkData/entries deep
+                    // and bumps `renderKey` when they change, which
+                    // re-mounts this component so data() runs fresh
+                    // with the new props (User-Smoke 2026-05-19: this
+                    // was the only reliable refresh path after Vue
+                    // nested-prop watch + onSuccess direct-mutation
+                    // both failed).
                     inertiaRouter.reload({
                         only: ['autolinkData', 'entries'],
                         preserveScroll: true,
                     });
-                    // Toast firing is delegated to LinkwiseLayout (cross-tab dedup'd).
                 } else if (status.phase === 'error') {
                     // Error toast also handled by LinkwiseLayout.
                     this.teardownApplyAsync();
@@ -1135,13 +1145,10 @@ export default {
                         stop();
                         this.unlinkingFromPreview = false;
                         this.selectedUnlinkIds = [];
-                        // Refresh rule-table counts after bulk-unlink completes.
-                        // Sister-pattern to BrokenLinksTab:708 + the now-fixed
-                        // applyrule branch at line 504. Pre-fix this branch
-                        // only cleared selection state but never refreshed —
-                        // "Apply (N)" stayed showing pre-unlink count after
-                        // closing the modal (User-Smoke 2026-05-17 Bug #3,
-                        // Klasse 7 sister-gap).
+                        // Inertia partial-reload — parent's :key="renderKey"
+                        // watch on autolinkData/entries re-mounts this
+                        // component so data() runs fresh. See single-
+                        // rule path for full rationale.
                         inertiaRouter.reload({
                             only: ['autolinkData', 'entries'],
                             preserveScroll: true,
