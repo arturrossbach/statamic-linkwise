@@ -146,7 +146,9 @@
         </Panel>
 
         <!-- Detail Modal -->
-        <Stack :open="detailModal !== null" @update:open="closeDetailModal" :title="detailModal?.title || ''" size="half">
+        <!-- size="full" — wider modal so the new (longer) sentence_context
+             column has room to breathe (User-Smoke 2026-05-21). -->
+        <Stack :open="detailModal !== null" @update:open="closeDetailModal" :title="detailModal?.title || ''" size="full">
             <div v-if="detailModal">
                 <!-- Filter bar inside modal: search + count -->
                 <div class="flex items-center justify-between mb-3 gap-3">
@@ -168,7 +170,9 @@
                     <div class="overflow-x-auto"><table data-size="sm" class="data-table w-full text-sm">
                         <thead>
                             <tr>
-                                <SortableHeader v-if="detailModal.type === 'links'" label="Anchor" :active="modalSortField === 'anchor_text'" :direction="modalSortDirection" @sort="toggleModalSort('anchor_text')" />
+                                <!-- Anchor column removed (User 2026-05-21):
+                                     redundant with Context which already
+                                     highlights the anchor via highlightAnchor(). -->
                                 <SortableHeader v-if="detailModal.type === 'links'" label="Context" :sortable="false" />
                                 <SortableHeader
                                     :label="detailModal.type === 'posts' ? 'Entry' : 'URL'"
@@ -181,9 +185,8 @@
                         </thead>
                         <tbody>
                             <tr v-for="(item, idx) in sortedModalItems" :key="`${item.post_id || item.title}-${item.url || idx}`">
-                                <td v-if="detailModal.type === 'links'" class="font-medium text-gray-900 dark:text-gray-100">
-                                    {{ item.anchor_text || '—' }}
-                                </td>
+                                <!-- Anchor cell removed (header dropped above)
+                                     — anchor is highlighted inside Context. -->
                                 <td v-if="detailModal.type === 'links'" class="text-gray-400 dark:text-gray-500 text-xs">
                                     <span v-if="item.sentence_context" v-html="highlightAnchor(item.sentence_context, item.anchor_text)"></span>
                                     <span v-else>—</span>

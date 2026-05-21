@@ -130,10 +130,19 @@ class InertiaPagesController extends CpController
                 $entryText = $bundle['text'];
 
                 foreach ($bundle['external_links'] as $extLink) {
+                    // Display-only context — relax paragraph-clamp so
+                    // short-paragraph anchors (e.g. caption-style) get
+                    // surrounding sentences instead of just the anchor
+                    // alone. Suggestion-match paths use their own
+                    // context-extractor with its own clamp — see
+                    // ContextExtractor::extractAtOffset for rationale.
+                    // (User-Smoke 2026-05-21).
                     $ctx = ContextExtractor::extractAtOffset(
                         $entryText,
                         $extLink['offset'],
                         mb_strlen($extLink['anchor_text']),
+                        240,
+                        clampToParagraph: false,
                     );
                     $externalLinks[] = [
                         'url' => $extLink['url'],
@@ -150,10 +159,13 @@ class InertiaPagesController extends CpController
                 }
 
                 foreach ($bundle['internal_links'] as $intLink) {
+                    // Display-only — see external_links comment above.
                     $ctx = ContextExtractor::extractAtOffset(
                         $entryText,
                         $intLink['offset'],
                         mb_strlen($intLink['anchor_text']),
+                        240,
+                        clampToParagraph: false,
                     );
                     $internalLinksWithAnchors[] = [
                         'entry_id' => $intLink['entry_id'],

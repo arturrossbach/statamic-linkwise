@@ -144,8 +144,12 @@
                                 />
                             </th>
                             <SortableHeader label="Entry" :sortable="false" style="width: 18%" />
-                            <SortableHeader label="Anchor" :sortable="false" style="width: 8%" />
-                            <SortableHeader label="Context" :sortable="false" style="width: 22%" />
+                            <!-- Anchor column removed (User 2026-05-21):
+                                 redundant — the anchor is already
+                                 highlighted in the Context column via
+                                 highlightAnchor(). Width redistributed
+                                 to Context (22% → 30%). -->
+                            <SortableHeader label="Context" :sortable="false" style="width: 30%" />
                             <SortableHeader label="Current URL" :sortable="false" style="width: 20%" />
                             <SortableHeader label="Replace with" :sortable="false" style="width: 28%" />
                         </tr>
@@ -164,7 +168,8 @@
                                 </div>
                                 <div class="text-xs text-gray-400">{{ match.collection }}</div>
                             </td>
-                            <td class="font-medium text-gray-900 dark:text-gray-100">{{ match.anchor_text || '—' }}</td>
+                            <!-- Anchor cell removed (header dropped above) —
+                                 anchor is highlighted inside the Context. -->
                             <td class="text-xs text-gray-400 dark:text-gray-500 max-w-xs" v-html="highlightAnchor(match.context, match.anchor_text)"></td>
                             <td class="text-xs text-gray-500 dark:text-gray-400 break-all overflow-hidden">{{ match.matched_url }}</td>
                             <td>

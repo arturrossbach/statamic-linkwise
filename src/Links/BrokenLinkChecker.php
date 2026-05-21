@@ -209,7 +209,8 @@ class BrokenLinkChecker
                             errorType: $checkedUrls[$url]->errorType,
                             firstDetectedAt: $this->firstDetectedOrNow($record->id, $url),
                             lastCheckedAt: now()->toIso8601String(),
-                            sentenceContext: ContextExtractor::extract($record->text, $link['anchor_text']),
+                            // Display-only context — relax paragraph-clamp for longer surrounding text (User-Smoke 2026-05-21).
+                            sentenceContext: ContextExtractor::extract($record->text, $link['anchor_text'], clampToParagraph: false),
                             ignored: $this->wasIgnored($record->id, $url),
                         );
                         $brokenLinks[] = $broken;
@@ -237,7 +238,8 @@ class BrokenLinkChecker
                         errorType: $result['error_type'],
                         firstDetectedAt: $this->firstDetectedOrNow($record->id, $url),
                         lastCheckedAt: now()->toIso8601String(),
-                        sentenceContext: ContextExtractor::extract($record->text, $link['anchor_text']),
+                        // Display-only context — relax paragraph-clamp for longer surrounding text (User-Smoke 2026-05-21).
+                            sentenceContext: ContextExtractor::extract($record->text, $link['anchor_text'], clampToParagraph: false),
                         ignored: $this->wasIgnored($record->id, $url),
                     );
                     $brokenLinks[] = $broken;
@@ -306,7 +308,7 @@ class BrokenLinkChecker
                 errorType: 'missing_entry',
                 firstDetectedAt: $this->firstDetectedOrNow($record->id, $targetUrl),
                 lastCheckedAt: now()->toIso8601String(),
-                sentenceContext: ContextExtractor::extract($record->text, $anchor),
+                sentenceContext: ContextExtractor::extract($record->text, $anchor, clampToParagraph: false),
             );
         }
 

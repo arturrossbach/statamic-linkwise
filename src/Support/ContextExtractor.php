@@ -9,9 +9,9 @@ class ContextExtractor
      *
      * @param  int  $occurrence  Which occurrence to find (0 = first, 1 = second, etc.)
      */
-    public static function extract(string $text, string $anchorText, int $maxChars = 120, int $occurrence = 0): string
+    public static function extract(string $text, string $anchorText, int $maxChars = 240, int $occurrence = 0, bool $clampToParagraph = true): string
     {
-        $result = static::extractStructured($text, $anchorText, $maxChars, $occurrence);
+        $result = static::extractStructured($text, $anchorText, $maxChars, $occurrence, $clampToParagraph);
 
         if ($result === null) {
             return '';
@@ -35,7 +35,7 @@ class ContextExtractor
      *
      * @return array{text: string, truncated_start: bool, truncated_end: bool}|null
      */
-    public static function extractStructured(string $text, string $anchorText, int $maxChars = 120, int $occurrence = 0): ?array
+    public static function extractStructured(string $text, string $anchorText, int $maxChars = 240, int $occurrence = 0, bool $clampToParagraph = true): ?array
     {
         if ($anchorText === '' || $text === '') {
             return null;
@@ -59,7 +59,7 @@ class ContextExtractor
             return null;
         }
 
-        return static::extractAtOffset($text, $pos, $anchorLen, $maxChars);
+        return static::extractAtOffset($text, $pos, $anchorLen, $maxChars, $clampToParagraph);
     }
 
     /**
@@ -73,7 +73,7 @@ class ContextExtractor
      *
      * @return array{text: string, truncated_start: bool, truncated_end: bool}|null
      */
-    public static function extractAtOffset(string $text, int $offset, int $anchorLen, int $maxChars = 120): ?array
+    public static function extractAtOffset(string $text, int $offset, int $anchorLen, int $maxChars = 240, bool $clampToParagraph = true): ?array
     {
         if ($text === '' || $offset < 0 || $anchorLen <= 0) {
             return null;
@@ -89,20 +89,28 @@ class ContextExtractor
         $start = max(0, $offset - $halfWindow);
         $end = min($textLength, $offset + $anchorLen + $halfWindow);
 
-        // Hard-stop at paragraph boundary ("\n"). TextExtractor::fromBard
-        // joins paragraphs with "\n"; without this clamp the context can
-        // include text from a neighbouring paragraph, which BardLinkInserter
-        // then cannot find when the same string is later passed back as
-        // expectedSentenceContext (silent "Anchor text not found"). Mirror
-        // of SuggestionEngine::extractContext.
-        $textBeforeAnchor = mb_substr($text, 0, $offset);
-        $lastNl = mb_strrpos($textBeforeAnchor, "\n");
-        if ($lastNl !== false) {
-            $start = max($start, $lastNl + 1);
-        }
-        $nextNl = mb_strpos($text, "\n", $offset + $anchorLen);
-        if ($nextNl !== false) {
-            $end = min($end, $nextNl);
+        // Hard-stop at paragraph boundary ("\n") — ONLY when the caller
+        // needs the snippet to round-trip through BardLinkInserter as
+        // `expectedSentenceContext` (silent "Anchor text not found" if
+        // context spans a paragraph break). Display-only callers (links
+        // modal, broken-links report) should set $clampToParagraph=false
+        // to get more surrounding context for very short paragraphs
+        // (User-Smoke 2026-05-21: "mit einem gekühlten Weißwein."
+        // alone shown for an entry's link).
+        //
+        // SuggestionEngine::extractContext has its own independent
+        // paragraph-clamp (line 1069-1075) so suggestion-match paths
+        // do NOT depend on this clamp.
+        if ($clampToParagraph) {
+            $textBeforeAnchor = mb_substr($text, 0, $offset);
+            $lastNl = mb_strrpos($textBeforeAnchor, "\n");
+            if ($lastNl !== false) {
+                $start = max($start, $lastNl + 1);
+            }
+            $nextNl = mb_strpos($text, "\n", $offset + $anchorLen);
+            if ($nextNl !== false) {
+                $end = min($end, $nextNl);
+            }
         }
 
         // Snap to word boundaries

@@ -72,10 +72,17 @@ class DomainReport
                     ];
                 }
 
+                // Display-only context — relax paragraph-clamp so very
+                // short paragraphs (e.g. "mit einem gekühlten Weißwein.")
+                // don't strangle the context to just the anchor.
+                // User-Smoke 2026-05-21. ContextExtractor docblock has
+                // the full rationale.
                 $ctx = ContextExtractor::extractAtOffset(
                     $bundle['text'],
                     $link['offset'],
                     mb_strlen($link['anchor_text']),
+                    240,
+                    clampToParagraph: false,
                 );
 
                 $domains[$domain]['links'][] = [

@@ -1048,7 +1048,7 @@ class SuggestionEngine
     /**
      * @return array{text: string, truncated_start: bool, truncated_end: bool}
      */
-    protected function extractContext(string $text, int $position, int $anchorLength, int $maxChars = 160): array
+    protected function extractContext(string $text, int $position, int $anchorLength, int $maxChars = 240): array
     {
         $textLength = mb_strlen($text);
         $minWindow = $anchorLength + 60;

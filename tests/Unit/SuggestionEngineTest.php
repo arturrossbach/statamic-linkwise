@@ -312,7 +312,11 @@ class SuggestionEngineTest extends TestCase
         $suggestions = $this->engine->suggest($longText, $index);
 
         $this->assertCount(1, $suggestions);
-        $this->assertLessThan(180, mb_strlen($suggestions[0]->sentenceContext));
+        // Context-window upped 2026-05-21 (User-Smoke): old 160-char
+        // default produced too-short snippets where only the anchor
+        // showed. New default is 240; the assertion accepts up to 260
+        // (240 + word-snap slack).
+        $this->assertLessThan(260, mb_strlen($suggestions[0]->sentenceContext));
         $this->assertTrue($suggestions[0]->contextTruncatedStart, 'Context should be truncated at start');
         $this->assertTrue($suggestions[0]->contextTruncatedEnd, 'Context should be truncated at end');
         $this->assertStringNotContainsString('...', $suggestions[0]->sentenceContext, 'Clean context should not contain ...');
