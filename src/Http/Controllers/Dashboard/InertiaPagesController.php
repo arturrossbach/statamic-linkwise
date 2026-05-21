@@ -5,6 +5,7 @@ namespace Arturrossbach\Linkwise\Http\Controllers\Dashboard;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkApplier;
 use Arturrossbach\Linkwise\AutoLink\AutoLinkManager;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Keywords\ExcludedContentKeywordManager;
 use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
 use Arturrossbach\Linkwise\Links\BrokenLinkReport;
 use Arturrossbach\Linkwise\Reports\DomainReport;
@@ -50,6 +51,7 @@ class InertiaPagesController extends CpController
         protected TargetKeywordManager $keywordManager,
         protected AutoLinkManager $autoLinkManager,
         protected AutoLinkApplier $autoLinkApplier,
+        protected ExcludedContentKeywordManager $excludedKeywordManager,
     ) {}
 
     // ─── Page: Overview ────────────────────────────────────────────────
@@ -361,6 +363,7 @@ class InertiaPagesController extends CpController
         $entries = collect($report->toArray()['entries'])->keyBy('id');
 
         $customKeywords = $this->keywordManager->loadAll();
+        $excludedKeywords = $this->excludedKeywordManager->loadAll();
         $targetKeywordsData = [];
 
         foreach ($records as $entryRecord) {
@@ -371,6 +374,20 @@ class InertiaPagesController extends CpController
 
             $contentKeywords = $this->extractContentKeywords($entryRecord);
 
+            // Filter out user-excluded content keywords (block-list).
+            // Case-insensitive match: excluded list is stored lowercased.
+            // User-Smoke 2026-05-21 — noisy auto-extracted keywords
+            // (e.g. "Mehr") would otherwise keep returning after every
+            // re-index.
+            $excludedForEntry = $excludedKeywords[$entryRecord->id] ?? [];
+            if (! empty($excludedForEntry)) {
+                $excludedSet = array_flip($excludedForEntry);
+                $contentKeywords = array_values(array_filter(
+                    $contentKeywords,
+                    fn ($k) => ! isset($excludedSet[mb_strtolower($k)]),
+                ));
+            }
+
             $targetKeywordsData[] = [
                 'id' => $entryRecord->id,
                 'title' => $entry['title'],
@@ -378,6 +395,11 @@ class InertiaPagesController extends CpController
                 'edit_url' => cp_route('collections.entries.edit', [$entry['collection'], $entry['id']]),
                 'content_keywords' => $contentKeywords,
                 'custom_keywords' => $customKeywords[$entryRecord->id] ?? [],
+                // Echoed back so the frontend knows what's already on
+                // the block-list (e.g. for an "undo" / "manage excluded"
+                // sub-view; v1 only needs ✕ on visible badges, but the
+                // list is cheap to expose and avoids a future API call).
+                'excluded_content_keywords' => $excludedForEntry,
             ];
         }
 
@@ -385,6 +407,7 @@ class InertiaPagesController extends CpController
             'keywordsData' => [
                 'entries' => $targetKeywordsData,
                 'update_url' => cp_route('linkwise.target-keywords.update', '__ID__'),
+                'exclude_url' => cp_route('linkwise.excluded-content-keywords.update', '__ID__'),
                 // Single-source-of-truth for validation limits — backend
                 // class constants are the ground truth, frontend reads via
                 // prop. Eliminates the sync-risk of duplicating "50" in two
