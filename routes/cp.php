@@ -171,6 +171,10 @@ Route::middleware('can:manage linkwise')->group(function () {
     Route::post('linkwise/target-keywords/{entryId}', [TargetKeywordController::class, 'update'])
         ->name('linkwise.target-keywords.update');
 
+    // Excluded Content Keywords (per-entry block-list — User-Smoke 2026-05-21)
+    Route::post('linkwise/excluded-content-keywords/{entryId}', [\Arturrossbach\Linkwise\Http\Controllers\ExcludedContentKeywordController::class, 'update'])
+        ->name('linkwise.excluded-content-keywords.update');
+
     // Ignored Broken Links (user-marked false positives)
     Route::post('linkwise/ignored-links/ignore', [IgnoredLinkController::class, 'ignore'])
         ->name('linkwise.ignored-links.ignore');
