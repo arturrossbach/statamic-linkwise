@@ -1,6 +1,8 @@
 <template>
     <LinkwiseLayout active-tab="broken" page-title="Linkwise — Broken Links" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
-        <BrokenLinksTab :data="brokenData" :checking="checking" :check-progress="checkProgress" :initial-entry-filter="initialEntryFilter" :apply-url="applyUrl" :ignore-url="ignoreUrl" :unignore-url="unignoreUrl" :bulk-unlink-url="bulkUnlinkUrl" :bulk-unlink-status-url="bulkUnlinkStatusUrl" :bulk-unlink-cancel-url="bulkUnlinkCancelUrl" :export-url="exportUrl" :entry-hashes="entryHashes" @check-links="checkLinks" />
+        <!-- :key="renderKey" — universal post-bulk-completion remount.
+             Klasse-10 applied broadly (User-Smoke 2026-05-21). -->
+        <BrokenLinksTab :key="renderKey" :data="brokenData" :checking="checking" :check-progress="checkProgress" :initial-entry-filter="initialEntryFilter" :apply-url="applyUrl" :ignore-url="ignoreUrl" :unignore-url="unignoreUrl" :bulk-unlink-url="bulkUnlinkUrl" :bulk-unlink-status-url="bulkUnlinkStatusUrl" :bulk-unlink-cancel-url="bulkUnlinkCancelUrl" :export-url="exportUrl" :entry-hashes="entryHashes" @check-links="checkLinks" />
     </LinkwiseLayout>
 </template>
 
@@ -8,6 +10,7 @@
 import LinkwiseLayout from '../LinkwiseLayout.vue';
 import BrokenLinksTab from '../dashboard/BrokenLinksTab.vue';
 import { bulkState } from '../../services/bulkOperationService.js';
+import { router as inertiaRouter } from '@statamic/cms/inertia';
 
 export default {
     components: { LinkwiseLayout, BrokenLinksTab },
@@ -36,6 +39,9 @@ export default {
             checking: false,
             checkProgress: null, // { current, total, url } during scan
             pollTimer: null,
+            // Bumped on bulkState.lastCompletion → forces BrokenLinksTab
+            // re-mount. Klasse-10 universal pattern.
+            renderKey: 0,
         };
     },
 
@@ -44,18 +50,34 @@ export default {
         await this.pollStatusOnce();
         if (this.checking) {
             this.startPolling();
-            return;
         }
         // Overview Tab's "Run check" recommendation forwards here with ?auto_check=1 —
         // trigger the check automatically so the user doesn't need a second click.
-        if (this.autoCheckFromQuery()) {
+        if (! this.checking && this.autoCheckFromQuery()) {
             this.clearAutoCheckQuery();
             this.checkLinks();
         }
+
+        // Universal post-bulk refresh — fetch fresh props, then remount.
+        this._unwatchBulkCompletion = this.$watch(
+            () => bulkState.lastCompletion,
+            (completion) => {
+                if (! completion) return;
+                if (completion.phase !== 'done' && completion.phase !== 'cancelled') return;
+                inertiaRouter.reload({
+                    preserveScroll: true,
+                    preserveState: true,
+                    onSuccess: () => { this.renderKey++; },
+                });
+            },
+        );
     },
 
     beforeUnmount() {
         this.stopPolling();
+        if (typeof this._unwatchBulkCompletion === 'function') {
+            this._unwatchBulkCompletion();
+        }
     },
 
     methods: {

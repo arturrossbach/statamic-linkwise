@@ -8,7 +8,9 @@
         :rebuild-status-url="rebuildStatusUrl"
         :rebuild-cancel-url="rebuildCancelUrl"
     >
+        <!-- :key="renderKey" — universal post-bulk remount (Klasse-10). -->
         <OverviewTab
+            :key="renderKey"
             :summary="summary"
             :health="health"
             :broken-count="brokenCount"
@@ -23,6 +25,8 @@
 <script>
 import LinkwiseLayout from '../LinkwiseLayout.vue';
 import OverviewTab from '../dashboard/OverviewTab.vue';
+import { bulkState } from '../../services/bulkOperationService.js';
+import { router as inertiaRouter } from '@statamic/cms/inertia';
 
 export default {
     components: { LinkwiseLayout, OverviewTab },
@@ -37,6 +41,31 @@ export default {
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },
+    },
+
+    data() {
+        return { renderKey: 0 };
+    },
+
+    mounted() {
+        this._unwatchBulkCompletion = this.$watch(
+            () => bulkState.lastCompletion,
+            (completion) => {
+                if (! completion) return;
+                if (completion.phase !== 'done' && completion.phase !== 'cancelled') return;
+                inertiaRouter.reload({
+                    preserveScroll: true,
+                    preserveState: true,
+                    onSuccess: () => { this.renderKey++; },
+                });
+            },
+        );
+    },
+
+    beforeUnmount() {
+        if (typeof this._unwatchBulkCompletion === 'function') {
+            this._unwatchBulkCompletion();
+        }
     },
 
     methods: {
