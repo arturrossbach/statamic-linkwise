@@ -1,0 +1,127 @@
+<?php
+
+namespace Arturrossbach\Linkwise\Commands;
+
+use Illuminate\Console\Command;
+use Statamic\Facades\Collection;
+use Statamic\Facades\Entry;
+
+class SeedTestDataCommand extends Command
+{
+    protected $signature = 'linkwise:seed-test-data
+                            {count=30 : Number of entries to create}
+                            {--collection=articles : Collection handle to create entries in}';
+
+    protected $description = 'Generate realistic test entries for Linkwise testing';
+
+    public function handle(): int
+    {
+        $count = (int) $this->argument('count');
+        $collectionHandle = $this->option('collection');
+
+        // Ensure collection exists
+        $collection = Collection::findByHandle($collectionHandle);
+        if (! $collection) {
+            $collection = Collection::make($collectionHandle)
+                ->title(ucfirst($collectionHandle))
+                ->pastDateBehavior('public')
+                ->futureDateBehavior('private');
+            $collection->save();
+            $this->info("Created collection: {$collectionHandle}");
+        }
+
+        $articles = $this->getArticles();
+        $created = 0;
+
+        for ($i = 0; $i < $count && $i < count($articles); $i++) {
+            $article = $articles[$i];
+
+            $entry = Entry::make()
+                ->collection($collectionHandle)
+                ->slug(\Illuminate\Support\Str::slug($article['title']))
+                ->data([
+                    'title' => $article['title'],
+                    'content' => $article['content'],
+                ]);
+
+            $entry->save();
+            $created++;
+            $this->line("  Created: {$article['title']}");
+        }
+
+        $this->info("Created {$created} test entries in '{$collectionHandle}' collection.");
+        $this->info('Now run: php please linkwise:index');
+
+        return self::SUCCESS;
+    }
+
+    protected function getArticles(): array
+    {
+        return [
+            // Web Development
+            ['title' => 'Getting Started with Laravel', 'content' => "Laravel is a powerful PHP framework for building modern web applications. It provides elegant syntax, robust routing, and a powerful ORM called Eloquent. Laravel's ecosystem includes tools like Forge, Vapor, and Nova that make deployment and administration easier.\n\nThe framework follows the MVC pattern and includes built-in support for authentication, queues, caching, and testing. Many developers choose Laravel because of its excellent documentation and vibrant community.\n\nTo get started, you need PHP 8.2+ and Composer installed. Run `composer create-project laravel/laravel myapp` to create a new project. Laravel Herd is a great local development environment for Mac users."],
+
+            ['title' => 'Understanding PHP Performance Optimization', 'content' => "PHP performance optimization involves several strategies including opcode caching with OPcache, database query optimization, and efficient memory management. Understanding how PHP handles requests is crucial for building fast applications.\n\nCaching is one of the most effective optimization techniques. Redis and Memcached are popular choices for application-level caching. Laravel provides a unified API for working with various cache backends.\n\nProfiling tools like Xdebug and Blackfire help identify bottlenecks. Common issues include N+1 query problems, excessive file I/O, and unoptimized database indexes. Always measure before optimizing."],
+
+            ['title' => 'Redis Caching Strategies for Web Applications', 'content' => "Redis is an in-memory data store commonly used for caching, session management, and real-time features. It supports various data structures including strings, hashes, lists, sets, and sorted sets.\n\nCommon caching strategies include cache-aside (lazy loading), write-through, and write-behind patterns. Each has trade-offs between consistency and performance. Laravel makes Redis integration straightforward with its Cache facade.\n\nFor production deployments, consider Redis Sentinel for high availability or Redis Cluster for horizontal scaling. Monitor memory usage carefully as Redis stores everything in RAM."],
+
+            ['title' => 'Building APIs with Laravel', 'content' => "RESTful API development with Laravel leverages resource controllers, API resources, and middleware for authentication. Laravel Sanctum provides lightweight API token authentication while Passport offers full OAuth2 implementation.\n\nAPI versioning, rate limiting, and proper error handling are essential for production APIs. Use API Resources to transform your Eloquent models into JSON responses with consistent formatting.\n\nTesting APIs is crucial. Laravel provides HTTP testing helpers that make it easy to test endpoints, verify responses, and check authentication. Consider using tools like Postman or Insomnia during development."],
+
+            ['title' => 'Database Design Best Practices', 'content' => "Good database design is fundamental to application performance and maintainability. Proper normalization reduces data redundancy while denormalization can improve read performance for specific use cases.\n\nIndexing strategy significantly impacts query performance. Create indexes for columns used in WHERE clauses, JOIN conditions, and ORDER BY statements. Composite indexes should follow the leftmost prefix rule.\n\nMigrations provide version control for your database schema. Laravel migrations are PHP classes that define schema changes. Always write both up and down methods so migrations can be rolled back safely."],
+
+            ['title' => 'Vue.js Component Architecture', 'content' => "Vue.js uses a component-based architecture where each component encapsulates its template, logic, and styling. The Composition API introduced in Vue 3 provides better TypeScript support and code organization.\n\nComponent communication follows the props-down, events-up pattern. Parent components pass data via props, and children communicate back through emitted events. For complex state management, Pinia has replaced Vuex as the recommended solution.\n\nReactive data binding is Vue's core strength. Computed properties derive state efficiently, while watchers handle side effects. Understanding Vue's reactivity system helps avoid common pitfalls like missing reactivity on new properties."],
+
+            ['title' => 'Statamic CMS for Modern Websites', 'content' => "Statamic is a flat-file CMS built on Laravel that offers a powerful control panel, flexible content modeling, and developer-friendly templating with Antlers. Unlike WordPress, Statamic stores content in files rather than a database.\n\nThe Bard editor provides a block-based writing experience similar to Notion or WordPress Gutenberg. It stores content as ProseMirror JSON, enabling rich text with embedded components.\n\nStatamic's addon ecosystem is growing. Addons can extend the control panel, add fieldtypes, create custom tags, and integrate with external services. The marketplace offers both free and premium addons."],
+
+            ['title' => 'SEO Fundamentals for Content Websites', 'content' => "Search engine optimization requires a combination of technical SEO, content optimization, and link building. Technical SEO includes proper HTML structure, fast page loads, mobile responsiveness, and clean URL architecture.\n\nInternal linking is often overlooked but crucial for SEO. It helps search engines understand site structure, distributes link equity across pages, and improves user navigation. Orphaned pages with no internal links are harder for search engines to discover.\n\nContent quality and relevance are the primary ranking factors. Write for users first, then optimize for search engines. Use semantic HTML, descriptive headings, and natural keyword placement throughout your content."],
+
+            ['title' => 'Internal Linking Strategy for Better SEO', 'content' => "A strong internal linking strategy improves both SEO and user experience. Link from high-authority pages to important content pages to distribute link equity effectively. Use descriptive anchor text that tells both users and search engines what the linked page is about.\n\nAim for 3-5 internal links per blog post, depending on content length. Avoid over-linking which can dilute link value and confuse readers. Regularly audit your internal links to find broken links and orphaned content.\n\nTools like Link Whisper and Linkwise can automate internal link discovery and suggestion. They analyze your content to find linking opportunities you might miss manually. This is especially valuable for large sites with hundreds of pages."],
+
+            ['title' => 'Content Management Best Practices', 'content' => "Effective content management requires consistent workflows, clear editorial guidelines, and proper tooling. A good CMS should make it easy to create, organize, and publish content without technical expertise.\n\nContent modeling is the foundation of any CMS implementation. Define your content types, fields, and relationships before building templates. Statamic's blueprints and fieldsets provide flexible content modeling capabilities.\n\nRegular content audits help maintain quality and relevance. Check for outdated information, broken links, and opportunities to improve existing content. Many successful sites follow a publish-review-update cycle."],
+
+            // DevOps & Infrastructure
+            ['title' => 'Docker for PHP Development', 'content' => "Docker containers provide consistent development environments across teams. A typical PHP development setup includes containers for PHP-FPM, Nginx, MySQL/PostgreSQL, and Redis. Docker Compose orchestrates these services.\n\nLaravel Sail provides a Docker-based development environment specifically designed for Laravel. It includes PHP, MySQL, Redis, and other common services pre-configured. For production, consider using multi-stage builds to reduce image size.\n\nCommon Docker pitfalls include large image sizes, improper volume mounting, and network configuration issues. Use .dockerignore to exclude unnecessary files and leverage Docker layer caching for faster builds."],
+
+            ['title' => 'CI/CD Pipelines for Web Applications', 'content' => "Continuous integration and deployment pipelines automate testing and deployment. GitHub Actions, GitLab CI, and Jenkins are popular choices. A typical pipeline runs linting, unit tests, integration tests, and deploys on merge to main.\n\nFor PHP applications, the pipeline should run PHPUnit tests, PHP CS Fixer for code style, and PHPStan for static analysis. Frontend pipelines should include ESLint, Vitest or Jest for unit tests, and Playwright for end-to-end tests.\n\nBlue-green deployments and canary releases reduce deployment risk. Feature flags allow you to deploy code without immediately enabling new features. Laravel Forge and Envoyer streamline PHP application deployment."],
+
+            ['title' => 'Server Security for Web Applications', 'content' => "Web application security encompasses multiple layers including server hardening, application security, and data protection. Always keep your software updated, use HTTPS everywhere, and follow the principle of least privilege.\n\nCommon vulnerabilities include SQL injection, cross-site scripting (XSS), cross-site request forgery (CSRF), and insecure direct object references. Laravel provides built-in protection against many of these through its ORM, Blade templating, and middleware.\n\nRegular security audits and penetration testing help identify vulnerabilities before attackers do. Use tools like OWASP ZAP for automated scanning and follow the OWASP Top 10 guidelines for web application security."],
+
+            // JavaScript & Frontend
+            ['title' => 'Modern JavaScript ES2024 Features', 'content' => "JavaScript continues to evolve with new features in each ECMAScript specification. ES2024 introduces array grouping, promise.withResolvers, and improvements to regular expressions. Understanding these features helps write more expressive code.\n\nAsync/await has become the standard for handling asynchronous operations. Combined with the Fetch API, it provides a clean way to make HTTP requests. Error handling with try/catch blocks ensures robust async code.\n\nModule systems (ESM) are now the standard for organizing JavaScript code. Tree-shaking in bundlers like Vite and webpack eliminates unused code. Dynamic imports enable code splitting for better performance."],
+
+            ['title' => 'Tailwind CSS for Rapid UI Development', 'content' => "Tailwind CSS is a utility-first CSS framework that enables rapid UI development through composable utility classes. Instead of writing custom CSS, you apply pre-defined classes directly in your HTML.\n\nThe JIT (Just-In-Time) compiler generates only the CSS you actually use, resulting in tiny production bundles. Tailwind's configuration file allows customizing colors, spacing, fonts, and breakpoints to match your design system.\n\nComponent extraction prevents class duplication. Use @apply in CSS or extract Vue/React components that encapsulate common patterns. The Tailwind UI component library provides pre-built, professionally designed components."],
+
+            ['title' => 'Testing Strategies for Web Applications', 'content' => "A comprehensive testing strategy includes unit tests, integration tests, and end-to-end tests. The testing pyramid suggests many unit tests, fewer integration tests, and even fewer E2E tests. This balance provides confidence while keeping test suites fast.\n\nPHPUnit is the standard for PHP testing. Laravel's testing helpers make it easy to test HTTP endpoints, database operations, and queue jobs. Factories and seeders help create test data efficiently.\n\nFrontend testing with Vitest or Jest covers component behavior. Vue Test Utils enables testing Vue components in isolation. Playwright or Cypress handle end-to-end testing that simulates real user interactions."],
+
+            // Content & Marketing
+            ['title' => 'Keyword Research for Content Strategy', 'content' => "Keyword research is the foundation of content strategy. Understanding what your audience searches for helps create content that attracts organic traffic. Tools like Ahrefs, SEMrush, and Google Keyword Planner reveal search volume and competition.\n\nLong-tail keywords often provide better opportunities than broad terms. They have lower competition and higher conversion rates because they match specific user intent. Group related keywords into topic clusters for comprehensive content coverage.\n\nSearch intent classification (informational, navigational, transactional, commercial) guides content format. Informational queries need guides and tutorials. Transactional queries need product pages. Matching content to intent improves rankings and user satisfaction."],
+
+            ['title' => 'Content Writing for Technical Audiences', 'content' => "Writing for developers and technical audiences requires clarity, accuracy, and practical examples. Avoid unnecessary jargon while maintaining technical precision. Code examples should be complete, tested, and follow current best practices.\n\nStructure content with clear headings, short paragraphs, and scannable formatting. Developers often skim content looking for specific information. Use code blocks, bullet points, and highlighted key takeaways.\n\nDocumentation and tutorials are the most valued content types in tech. The best technical content solves a specific problem and can be followed step by step. Include prerequisite knowledge, expected outcomes, and troubleshooting tips."],
+
+            ['title' => 'Link Building Strategies That Actually Work', 'content' => "Effective link building focuses on creating valuable content that naturally attracts links. Guest posting, broken link building, and resource page outreach are proven strategies. Quality always trumps quantity — one link from an authoritative site is worth more than dozens from low-quality sites.\n\nInternal linking complements external link building. Strong internal links help distribute the authority gained from backlinks throughout your site. Pages deep in your site structure benefit most from internal links.\n\nMonitor your backlink profile with tools like Ahrefs or Moz. Disavow toxic links that could trigger penalties. Track link velocity to ensure natural growth patterns. Building relationships with other content creators leads to sustainable link acquisition."],
+
+            ['title' => 'Analytics and Measuring Content Performance', 'content' => "Content performance measurement goes beyond page views. Engagement metrics like time on page, scroll depth, and bounce rate indicate content quality. Conversion tracking shows which content drives business results.\n\nGoogle Analytics 4 provides event-based tracking with better cross-platform insights. Set up custom events for key interactions like newsletter signups, downloads, and form submissions. Use UTM parameters to track campaign effectiveness.\n\nContent attribution models help understand the customer journey. First-touch, last-touch, and multi-touch attribution each tell different stories. Combine quantitative analytics with qualitative feedback like user surveys and heatmaps."],
+
+            // More overlapping topics
+            ['title' => 'Migrating from WordPress to Statamic', 'content' => "Migrating from WordPress to Statamic involves content migration, template conversion, and plugin replacement. Statamic's flat-file architecture eliminates database management overhead while providing a more developer-friendly experience.\n\nContent migration requires converting WordPress posts and pages into Statamic's YAML-based format. Tools and scripts can automate most of the conversion. Custom fields map to Statamic blueprints, and categories become taxonomies.\n\nPlugin functionality needs replacement with Statamic addons or custom code. Popular WordPress plugins like Yoast SEO have Statamic equivalents like SEO Pro. Internal linking tools like Link Whisper can be replaced with Linkwise for Statamic."],
+
+            ['title' => 'Performance Monitoring and Observability', 'content' => "Application performance monitoring (APM) tools like New Relic, Datadog, and Laravel Telescope provide insights into application behavior. Track response times, error rates, and throughput to identify issues before they impact users.\n\nLogging strategies should balance detail with storage costs. Structured logging with JSON format enables powerful querying. Centralize logs with ELK Stack or services like Papertrail. Set up alerts for error rate spikes and slow responses.\n\nDatabase performance monitoring is especially important for content-heavy applications. Slow query logs, query analysis, and index optimization prevent database bottlenecks. Redis monitoring ensures your caching layer performs as expected."],
+
+            ['title' => 'Accessibility in Web Development', 'content' => "Web accessibility (a11y) ensures websites are usable by people with disabilities. WCAG 2.1 guidelines provide standards for accessible design. Level AA compliance is the typical target for most websites.\n\nSemantic HTML is the foundation of accessibility. Use proper heading hierarchy, form labels, alt text for images, and ARIA attributes when semantic HTML isn't sufficient. Keyboard navigation must work for all interactive elements.\n\nTesting accessibility requires both automated tools and manual testing. axe DevTools and Lighthouse catch common issues. Screen reader testing with VoiceOver or NVDA verifies the actual user experience. Involve users with disabilities in usability testing."],
+
+            ['title' => 'GraphQL vs REST API Design', 'content' => "GraphQL and REST represent different approaches to API design. REST uses resource-based URLs with HTTP methods, while GraphQL provides a single endpoint with a query language. Each has strengths depending on the use case.\n\nGraphQL excels when clients need flexible data fetching — requesting exactly the fields they need in a single request. This reduces over-fetching and under-fetching problems common with REST APIs. The type system provides excellent documentation and tooling.\n\nREST remains simpler for straightforward CRUD operations and benefits from HTTP caching. Laravel provides excellent REST API tooling. Consider GraphQL when you have multiple client types (web, mobile, third-party) with different data needs."],
+
+            ['title' => 'Headless CMS Architecture', 'content' => "Headless CMS separates content management from content presentation. The CMS provides content through APIs while the frontend can be built with any technology — React, Vue, Next.js, Nuxt, or even static site generators.\n\nStatamic supports both traditional and headless modes. Its REST API and GraphQL endpoints enable headless architectures while retaining the excellent content editing experience. This flexibility makes it suitable for both simple blogs and complex multi-channel content delivery.\n\nThe JAMstack approach combines headless CMS with static site generation for optimal performance. Content changes trigger rebuilds that deploy pre-rendered pages. This architecture provides excellent security, performance, and scalability."],
+
+            ['title' => 'Email Marketing Integration', 'content' => "Email marketing integration with your CMS enables automated newsletters, drip campaigns, and transactional emails. Services like Mailchimp, ConvertKit, and SendGrid provide APIs for list management and email delivery.\n\nSegmentation based on user behavior and content preferences improves engagement rates. Track which content topics generate the most opens and clicks. Use this data to personalize content recommendations and email frequency.\n\nDouble opt-in, easy unsubscribe, and GDPR compliance are essential. Laravel's notification system provides a clean API for sending emails through various channels. Consider using queue workers for bulk email operations to avoid blocking web requests."],
+
+            ['title' => 'Image Optimization for the Web', 'content' => "Image optimization significantly impacts page load speed and user experience. Modern formats like WebP and AVIF provide better compression than JPEG and PNG. Implement responsive images with srcset to serve appropriate sizes for different devices.\n\nLazy loading defers off-screen image loading until the user scrolls near them. The native loading='lazy' attribute provides browser-level lazy loading without JavaScript. For above-the-fold images, use fetchpriority='high' to prioritize loading.\n\nCDNs like Cloudflare, Imgix, and Cloudinary provide on-the-fly image transformation and global distribution. Statamic's asset management includes image manipulation capabilities for creating thumbnails and responsive variants."],
+
+            ['title' => 'JavaScript Build Tools Comparison', 'content' => "Modern JavaScript build tools handle bundling, transpilation, and optimization. Vite has emerged as the preferred choice for new projects, offering near-instant hot module replacement and optimized production builds using Rollup.\n\nWebpack remains widely used with extensive plugin ecosystem but has slower build times. esbuild and SWC provide extremely fast compilation for specific use cases. Turbopack aims to be the successor to Webpack in the Next.js ecosystem.\n\nStatamic 6 uses Vite for addon development. The externals plugin is crucial for Statamic addons to share the host application's Vue instance rather than bundling a separate copy. This prevents the Two-Vue problem that causes component registration failures."],
+
+            ['title' => 'Flat-File CMS vs Database CMS', 'content' => "Flat-file CMS systems like Statamic store content in files (YAML, Markdown, JSON) rather than databases. This provides advantages in version control, deployment simplicity, and performance for smaller sites. Git-based workflows enable content versioning and collaboration.\n\nDatabase CMS systems like WordPress scale better for very large content volumes and support complex querying. They require database management, backups, and optimization but handle millions of entries efficiently.\n\nThe choice depends on project requirements. Flat-file systems excel for developer-focused sites with 10-1000 pages. Database systems are better for large-scale content operations, e-commerce, and user-generated content. Statamic offers both flat-file and database storage options."],
+
+            ['title' => 'Web Typography Best Practices', 'content' => "Typography directly impacts readability, brand perception, and user engagement. Choose typefaces that complement your content — serif fonts for long-form reading, sans-serif for interfaces, and monospace for code.\n\nFont loading strategy affects both performance and visual stability. Use font-display: swap to prevent invisible text during loading. Self-host fonts instead of Google Fonts for better privacy and performance control. Variable fonts reduce file size when multiple weights are needed.\n\nLine height, measure (line length), and spacing significantly affect readability. Aim for 45-75 characters per line and 1.5-1.8x line height for body text. Consistent vertical rhythm creates visual harmony across the page."],
+        ];
+    }
+}

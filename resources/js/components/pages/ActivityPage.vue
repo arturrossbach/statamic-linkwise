@@ -1,0 +1,1239 @@
+<template>
+    <LinkwiseLayout
+        active-tab="activity"
+        page-title="Linkwise — Activity Log"
+        :is-empty="false"
+        :rebuild-url="rebuildUrl"
+        :rebuild-status-url="rebuildStatusUrl"
+        :rebuild-cancel-url="rebuildCancelUrl"
+    >
+        <Card class="mb-4">
+            <div class="flex items-start justify-between">
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Activity Log</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                        Every Linkwise bulk operation from the last 30 days, with the entries it touched and any that were skipped.
+                    </p>
+                </div>
+                <HelpIcon tooltip="Snapshots are written before each bulk runs. They contain entry IDs and content hashes (no entry contents). Older than 30 days are auto-deleted." />
+            </div>
+        </Card>
+
+        <div v-if="snapshots.length === 0" class="py-16 text-center">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="size-10 mx-auto mb-3 text-gray-300 dark:text-gray-600">
+                <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="text-gray-600 dark:text-gray-400 font-medium">No bulk operations recorded yet</p>
+            <p class="text-xs text-gray-400 mt-1">As soon as you Apply a rule, run the URL Changer, unlink in bulk, or insert links in bulk, the operations will appear here.</p>
+        </div>
+
+        <Panel v-else>
+            <div class="overflow-x-auto">
+                <table data-size="sm" class="data-table w-full text-sm">
+                    <thead>
+                        <tr>
+                            <SortableHeader label="When" :active="sortField === 'started_at'" :direction="sortDirection" @sort="toggleSort('started_at')" />
+                            <SortableHeader label="Operation" :active="sortField === 'kind'" :direction="sortDirection" @sort="toggleSort('kind')" />
+                            <SortableHeader label="Started by" :active="sortField === 'started_by'" :direction="sortDirection" @sort="toggleSort('started_by')" />
+                            <SortableHeader label="Entries affected" :active="sortField === 'entry_count_total'" :direction="sortDirection" @sort="toggleSort('entry_count_total')" />
+                            <th scope="col" class="text-left">Details</th>
+                            <th scope="col" class="text-right"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="snap in sortedSnapshots" :key="snap.id">
+                            <td class="whitespace-nowrap text-xs text-gray-600 dark:text-gray-400" v-tooltip="snap.started_at || ''">
+                                {{ formatRelative(snap.started_at) }}
+                            </td>
+                            <td class="whitespace-nowrap">
+                                <Badge :variant="kindVariant(snap.kind)" :text="kindLabel(snap)" />
+                                <Badge v-if="snap.completed_at === null" variant="warning" text="In progress" class="ml-1" v-tooltip="'This bulk is still running. The entry is shown for transparency, but Revert is disabled until the bulk completes.'" />
+                                <Badge v-if="snap.reverted_at" variant="default" text="↶ Reverted" class="ml-1" v-tooltip="'Reverted at ' + formatAbsolute(snap.reverted_at)" />
+                            </td>
+                            <td class="whitespace-nowrap text-xs">
+                                {{ snap.started_by || '—' }}
+                            </td>
+                            <td class="whitespace-nowrap text-xs">
+                                <span class="font-medium">{{ effectiveEntryCount(snap) }}</span>
+                                <span class="text-gray-400 ml-1">{{ effectiveEntryCount(snap) === 1 ? 'entry' : 'entries' }}</span>
+                                <span v-if="entrySkipDelta(snap) > 0" class="text-amber-600 dark:text-amber-400 ml-1" v-tooltip="entrySkipDelta(snap) + ' entry was modified between bulk and revert and was left untouched. See drawer for details.'">
+                                    ({{ entrySkipDelta(snap) }} skipped)
+                                </span>
+                            </td>
+                            <td class="text-xs text-gray-500 dark:text-gray-400">
+                                <span v-if="snap.summary && summaryLabel(snap)">{{ summaryLabel(snap) }}</span>
+                                <span v-else class="text-gray-400">—</span>
+                            </td>
+                            <td class="text-right whitespace-nowrap">
+                                <Button @click="openDetail(snap)" text="View entries" size="xs" />
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </Panel>
+
+        <!-- Detail Drawer -->
+        <Stack :open="detail !== null" @update:open="closeDetail" :title="detailTitle">
+            <div v-if="detail">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-relaxed">
+                    <p>
+                        Operation: <strong>{{ kindLabel(detail.snapshot) }}</strong>
+                        — started <strong>{{ formatAbsolute(detail.snapshot.started_at) }}</strong>
+                        <template v-if="detail.snapshot.started_by"> by <strong>{{ detail.snapshot.started_by }}</strong></template>
+                    </p>
+                    <p v-if="summaryLabel(detail.snapshot)" class="mt-1">{{ summaryLabel(detail.snapshot) }}</p>
+                </div>
+
+                <!-- Activity Log is view-only in V1 — Revert action removed from UI.
+                     Snapshots keep being recorded so the drawer shows full
+                     per-entry detail. No banner here: user just sees the
+                     recap below, no marketing about a future feature. -->
+                <!-- Still-running state: clear "wait" message. The v-if (not
+                     v-else-if) is intentional — there's no preceding v-if
+                     now that the Revert card is gone. -->
+                <Alert v-if="detail.snapshot.completed_at === null" variant="warning" class="mb-3">
+                    <p class="text-sm">
+                        <strong>This bulk is still running.</strong>
+                        Wait for it to complete — the entry will become revertable as soon as the run finishes.
+                        Watch the progress banner at the top of the screen, or refresh this page.
+                    </p>
+                </Alert>
+                <!-- Already-reverted state: a one-liner is enough; the recovery
+                     instructions only matter when no auto-revert is possible. -->
+                <Alert v-else-if="detail.snapshot.reverted_at" variant="default" class="mb-3">
+                    <p class="text-sm">
+                        <strong>↶ Already reverted</strong> on
+                        <span>{{ formatAbsolute(detail.snapshot.reverted_at) }}</span><template v-if="detail.reverted_by_user">
+                        by <strong>{{ detail.reverted_by_user }}</strong></template>.
+                        Look for the matching reverse-bulk further up in this list.
+                    </p>
+                </Alert>
+                <Alert v-else-if="nonReversibleReason" variant="default" class="mb-3">
+                    <p class="text-sm">
+                        <strong>Not auto-revertable:</strong> {{ nonReversibleReason }}
+                    </p>
+                </Alert>
+
+                <!-- Skipped-entries table — entries that this snapshot's bulk
+                     run touched but couldn't write (hash mismatch from user
+                     edits, deleted entry, etc.). Surfaces as a banner above
+                     the main entries table. Two render modes:
+                       - Looking at this snapshot AS THE BULK: "X entries
+                         were skipped during this run".
+                       - Looking at an ORIGINAL snapshot AFTER it was
+                         reverted: "X entries were skipped during the revert".
+                     The skipped rows are also EXCLUDED from sortedDetailEntries
+                     so the main table doesn't show them as empty rows. -->
+                <!-- Skipped during THIS bulk run — entries the bulk wanted
+                     to touch but couldn't (anchor not found, hash mismatch,
+                     missing target, unexpected error). Distinct from
+                     revert-skipped which fires during the inverse-bulk
+                     of a revert. Bug 2026-05-11: prior to this, non-revert
+                     bulks left their skipped entries invisible beyond the
+                     toast's aggregate count. -->
+                <Alert v-if="hasSkippedDuringBulk" variant="warning" class="mb-3">
+                    <p class="text-sm font-medium mb-2">
+                        ⚠ {{ skippedDuringBulk.length }} {{ skippedDuringBulk.length === 1 ? 'entry was' : 'entries were' }} skipped during this run. Their content is intact — Linkwise refused to overwrite them or couldn't locate the anchor.
+                    </p>
+                    <div class="overflow-x-auto">
+                        <table class="data-table w-full text-xs">
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="text-left">Entry</th>
+                                    <th scope="col" class="text-left">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="row in skippedDuringBulk" :key="row.entry_id">
+                                    <td>
+                                        <a v-if="row.edit_url" :href="row.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ row.entry_title || row.entry_id }}</a>
+                                        <span v-else>{{ row.entry_title || '(deleted)' }}</span>
+                                        <BardBadge v-if="row.entry_id" :entry-id="row.entry_id" class="ml-1.5" />
+                                        <span v-if="row.collection" class="ml-2 text-xs text-gray-400">{{ row.collection }}</span>
+                                    </td>
+                                    <td class="text-gray-600 dark:text-gray-400" v-html="formatSkipReason(row)"></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </Alert>
+
+                <!-- revert_skipped table renders ONLY when this snapshot has
+                     itself been reverted — then the table describes "of the
+                     items someone tried to revert, here are the M that were
+                     left untouched". For forward bulk runs, bulk_skipped above
+                     is the truth. Without the reverted_at guard the same skips
+                     were shown twice in the drawer (Bug 2026-05-11). -->
+                <Alert v-if="hasSkippedDuringRevert && detail.snapshot.reverted_at" variant="warning" class="mb-3">
+                    <p class="text-sm font-medium mb-2">
+                        ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during the revert because of changes made since the bulk ran. Their content is intact — Linkwise refused to overwrite them.
+                    </p>
+                    <div class="overflow-x-auto">
+                        <table class="data-table w-full text-xs">
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="text-left">Entry</th>
+                                    <th scope="col" class="text-left">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="row in skippedDuringRevert" :key="row.entry_id">
+                                    <td>
+                                        <a v-if="row.edit_url" :href="row.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ row.entry_title || row.entry_id }}</a>
+                                        <span v-else>{{ row.entry_title || '(deleted)' }}</span>
+                                        <BardBadge v-if="row.entry_id" :entry-id="row.entry_id" class="ml-1.5" />
+                                        <span v-if="row.collection" class="ml-2 text-xs text-gray-400">{{ row.collection }}</span>
+                                    </td>
+                                    <td class="text-gray-600 dark:text-gray-400" v-html="formatSkipReason(row)"></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </Alert>
+
+                <!-- Revert lineage banner — when this snapshot is itself the
+                     inverse of a previous bulk, surface that link upfront so
+                     users understand "this entry exists because operation X
+                     was reverted". Drives the kind-aware framing for the
+                     summary header below as well. -->
+                <div v-if="detail.reverted_from" class="mb-3 rounded-md border border-amber-200 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10 p-3 text-sm">
+                    <p class="text-amber-900 dark:text-amber-200">
+                        <strong>↶ Reverts</strong>
+                        <span v-html="revertedFromLabel"></span>
+                        from <strong>{{ formatAbsolute(detail.reverted_from.started_at) }}</strong><template v-if="detail.reverted_from.started_by">
+                        by <strong>{{ detail.reverted_from.started_by }}</strong></template>.
+                    </p>
+                </div>
+
+                <!-- Operation summary header — surfaces the uniform parts of
+                     the operation (anchor, target, search term) once at the
+                     top, so the table doesn't have to repeat them per row.
+                     Mirrors how the DetailModal / SuggestionModal show the
+                     intro paragraph above the items table — same convention. -->
+                <div class="mb-3 rounded-md bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/60 p-3 text-sm leading-relaxed">
+                    <p class="text-gray-700 dark:text-gray-300" v-html="operationSummary"></p>
+                </div>
+
+                <div class="flex items-center justify-between mb-2 gap-3">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                        <strong>{{ sortedDetailEntries.length }}</strong> {{ sortedDetailEntries.length === 1 ? 'entry' : 'entries' }} affected:
+                    </p>
+                    <a
+                        v-if="detail.deep_link_url_changer"
+                        :href="detail.deep_link_url_changer"
+                        class="text-xs text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+                        v-tooltip="'Open the URL Changer with the same search pre-filled, so you can manually unlink or replace these in bulk.'"
+                    >
+                        Find these in URL Changer ↗
+                    </a>
+                </div>
+
+                <!-- Kind-aware columns — each operation has a different
+                     "interesting middle column" the way the DetailModal /
+                     SuggestionModal pick different middle columns by mode.
+                     applyrule + bulkunlink omit it (uniform via the header);
+                     detailunlink shows the anchor+url removed; urlchanger
+                     shows the URL swap; inbound/outbound-insert show the
+                     anchor + target entry. -->
+                <Panel>
+                    <div class="overflow-x-auto">
+                        <table data-size="sm" class="data-table w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <SortableHeader :label="entryColumnLabel" :active="drawerSortField === 'title'" :direction="drawerSortDirection" @sort="toggleDrawerSort('title')">
+                                        <HelpIcon :tooltip="entryColumnTooltip" />
+                                    </SortableHeader>
+                                    <th v-if="extraColumnLabel" scope="col" class="text-left">
+                                        <div class="inline-flex items-center gap-1">
+                                            {{ extraColumnLabel }}
+                                            <HelpIcon :tooltip="extraColumnTooltip" />
+                                        </div>
+                                    </th>
+                                    <th v-if="hasContextColumn" scope="col" class="text-left">
+                                        <div class="inline-flex items-center gap-1">
+                                            Context
+                                            <HelpIcon tooltip="The sentence around the link as it was when the bulk ran — anchor text highlighted. Captures what the editor saw, not the current state of the entry." />
+                                        </div>
+                                    </th>
+                                    <SortableHeader label="Status since bulk" :active="drawerSortField === 'status'" :direction="drawerSortDirection" @sort="toggleDrawerSort('status')">
+                                        <HelpIcon tooltip="Compares the entry's current content to its state right after the bulk. 'Unchanged' means no edits since. 'Edited' means a user touched the entry — Revert would skip it. 'Deleted' means the entry no longer exists. '—' (legacy) means this snapshot was recorded before post-hash tracking shipped, so the comparison isn't possible." />
+                                    </SortableHeader>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="e in sortedDetailEntries" :key="e.id">
+                                    <td>
+                                        <a v-if="e.edit_url" :href="e.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ e.title }}</a>
+                                        <span v-else>{{ e.title }}</span>
+                                        <BardBadge v-if="e.id" :entry-id="e.id" class="ml-1.5" />
+                                        <span v-if="e.collection" class="ml-2 text-xs text-gray-400">{{ e.collection }}</span>
+                                    </td>
+                                    <td v-if="extraColumnLabel" class="text-xs text-gray-600 dark:text-gray-400">
+                                        <div v-if="entryExtraCell(e)" class="space-y-0.5" v-html="entryExtraCell(e)"></div>
+                                        <span v-else class="text-gray-400">—</span>
+                                    </td>
+                                    <td v-if="hasContextColumn" class="text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                                        <div v-if="entryContextCell(e)" class="space-y-1 leading-relaxed" v-html="entryContextCell(e)"></div>
+                                        <span v-else class="text-gray-400">—</span>
+                                    </td>
+                                    <td class="text-xs">
+                                        <span v-if="e.status === 'unknown'" class="text-gray-400" v-tooltip="'This snapshot was recorded before per-entry post-hash tracking shipped — comparison with the current state is not possible.'">—</span>
+                                        <template v-else>
+                                            <Badge :variant="statusVariant(e.status)" :text="statusLabel(e.status)" />
+                                            <!-- Per-row skip preview: when this snapshot is revertable
+                                                 and not-yet-reverted, mark every modified/deleted row
+                                                 as one that the Revert action would skip. The drawer's
+                                                 Revert card shows the aggregate count; this surfaces
+                                                 the same fact at row level so users can spot which
+                                                 specific entries are at stake. -->
+                                            <div v-if="wouldBeSkippedOnRevert(e)" class="mt-0.5 text-amber-700 dark:text-amber-400 text-xs">
+                                                → skipped on revert
+                                            </div>
+                                        </template>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </Panel>
+            </div>
+        </Stack>
+
+        <!-- Revert confirmation modal — fired from the drawer's "Revert…" button.
+             Surfaces the planned-effects preview (X will be reverted, Y were
+             modified since and will be skipped) so the user can decide. -->
+        <ConfirmationModal
+            :open="confirmRevert"
+            @update:open="val => confirmRevert = val"
+            @confirm="doRevert"
+            :title="'Revert this operation?'"
+            :body-text="confirmBodyText"
+            button-text="Revert"
+            :busy="reverting"
+        />
+    </LinkwiseLayout>
+</template>
+
+<script>
+import LinkwiseLayout from '../LinkwiseLayout.vue';
+import HelpIcon from '../shared/HelpIcon.vue';
+import SortableHeader from '../shared/SortableHeader.vue';
+import BardBadge from '../shared/BardBadge.vue';
+import { sortableMixin } from '../shared/sortable.js';
+import { Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal } from '@statamic/cms/ui';
+import { isReversible, nonReversibleReason as computeNonReversibleReason, buildRevertRequest } from '../../services/revertHelper.js';
+import { setHeavyState } from '../../services/bulkOperationService.js';
+
+export default {
+    components: { LinkwiseLayout, HelpIcon, SortableHeader, Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal, BardBadge },
+
+    mixins: [sortableMixin],
+
+    props: {
+        snapshots: { type: Array, default: () => [] },
+        detailUrl: { type: String, required: true },
+        markRevertedUrl: { type: String, default: '' },
+        revertEndpoints: { type: Object, default: () => ({}) },
+        rebuildUrl: { type: String, required: true },
+        rebuildStatusUrl: { type: String, default: '' },
+        rebuildCancelUrl: { type: String, default: '' },
+    },
+
+    data() {
+        return {
+            detail: null,
+            detailLoading: false,
+            confirmRevert: false,
+            reverting: false,
+            // Listing sort — newest first by default (matches the file-mtime
+            // order the backend ships).
+            sortField: 'started_at',
+            sortDirection: 'desc',
+            // Drawer sort — separate state so listing-sort isn't disturbed
+            // when the user re-orders rows inside an open drawer.
+            drawerSortField: 'title',
+            drawerSortDirection: 'asc',
+        };
+    },
+
+    computed: {
+        detailTitle() {
+            if (!this.detail) return '';
+            return this.kindLabel(this.detail.snapshot) + ' details';
+        },
+
+        /** Listing rows sorted by the active header. Mutates a copy so the
+         *  original snapshots prop isn't reordered (Inertia treats it as
+         *  immutable). */
+        sortedSnapshots() {
+            const f = this.sortField;
+            const dir = this.sortDirection === 'asc' ? 1 : -1;
+            return [...this.snapshots].sort((a, b) => {
+                let av, bv;
+                if (f === 'kind') { av = this.kindLabel(a); bv = this.kindLabel(b); }
+                else if (f === 'started_by') { av = a.started_by || ''; bv = b.started_by || ''; }
+                else if (f === 'entry_count_total') { av = a.entry_count_total || 0; bv = b.entry_count_total || 0; }
+                else { av = a.started_at || ''; bv = b.started_at || ''; }
+                if (av < bv) return -1 * dir;
+                if (av > bv) return 1 * dir;
+                return 0;
+            });
+        },
+
+        /** Drawer rows sorted by drawerSortField. Same shape as the original
+         *  Suggestion / Detail modals — separate state so the listing's sort
+         *  isn't clobbered.
+         *
+         *  Filters out entries listed in revert_skipped: those rendered in
+         *  the dedicated skipped-entries table above (with reason + modified-
+         *  by info), so re-listing them here as empty rows would be both
+         *  redundant and misleading ("affected" implies the entry was
+         *  written; skipped entries weren't). */
+        sortedDetailEntries() {
+            if (!this.detail?.entries) return [];
+            const skippedIds = new Set(this.skippedDuringRevert.map(r => r.entry_id));
+            const f = this.drawerSortField;
+            const dir = this.drawerSortDirection === 'asc' ? 1 : -1;
+            return [...this.detail.entries]
+                .filter(e => !skippedIds.has(e.id))
+                .sort((a, b) => {
+                    let av, bv;
+                    if (f === 'collection') { av = a.collection || ''; bv = b.collection || ''; }
+                    else if (f === 'status') { av = a.status || ''; bv = b.status || ''; }
+                    else { av = (a.title || '').toLowerCase(); bv = (b.title || '').toLowerCase(); }
+                    if (av < bv) return -1 * dir;
+                    if (av > bv) return 1 * dir;
+                    return 0;
+                });
+        },
+
+        /** Toggle for the drawer sort — the mixin's toggleSort works on
+         *  sortField, but the drawer uses drawerSortField. Inline the same
+         *  logic with the right state. */
+        toggleDrawerSort() {
+            return (field) => {
+                if (this.drawerSortField === field) {
+                    this.drawerSortDirection = this.drawerSortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.drawerSortField = field;
+                    this.drawerSortDirection = 'asc';
+                }
+            };
+        },
+
+        canRevert() {
+            return this.detail && isReversible(this.detail.snapshot);
+        },
+
+        nonReversibleReason() {
+            return this.detail ? computeNonReversibleReason(this.detail.snapshot) : null;
+        },
+
+        revertExplanation() {
+            if (!this.detail) return '';
+            const snap = this.detail.snapshot;
+            const items = snap.items || [];
+            const modifiedCount = (this.detail.entries || []).filter(e => e.status === 'modified').length;
+            const deletedCount = (this.detail.entries || []).filter(e => e.status === 'deleted').length;
+            const skippable = modifiedCount + deletedCount;
+
+            const { revertableItems, legacySkipped } = this.revertableSummary;
+            const willRevert = Math.max(0, revertableItems - skippable);
+            const verb =
+                snap.kind === 'urlchanger' ? 're-replace URLs' :
+                snap.kind === 'detailunlink' ? 're-link' :
+                'unlink the inserted links';
+
+            // Outbound bulks place N inserts on the SAME source entry — the
+            // table below lists 1 entry while willRevert lists N items, which
+            // looks like a counter contradiction. Make both visible when they
+            // diverge so the user sees "2 links across 1 entry" instead of
+            // "2 items" + only-1-row-in-the-table.
+            const affectedEntryCount = new Set(
+                items.slice(0, revertableItems).map(it => it.source_entry_id ?? it.entry_id),
+            ).size;
+            const itemLabel = `${willRevert} item${willRevert === 1 ? '' : 's'}`;
+            const itemAndEntryLabel = (affectedEntryCount > 0 && affectedEntryCount !== willRevert)
+                ? `${itemLabel} across ${affectedEntryCount} ${affectedEntryCount === 1 ? 'entry' : 'entries'}`
+                : itemLabel;
+
+            const parts = [`Linkwise will ${verb} for ${itemAndEntryLabel}. You'll see progress in the banner at the top of the screen — you can navigate away and come back, the operation continues in the background.`];
+            if (skippable > 0) {
+                parts.push(`${skippable} entr${skippable === 1 ? 'y was' : 'ies were'} edited or deleted since this bulk and will be skipped.`);
+            } else {
+                parts.push(`Any entries edited by users since this bulk will be detected via content-hash and automatically skipped — your edits are never overwritten.`);
+            }
+            if (legacySkipped > 0) {
+                parts.push(`${legacySkipped} item${legacySkipped === 1 ? ' was' : 's were'} recorded before anchor capture shipped — re-link can't reconstruct which text to wrap, so they will be skipped.`);
+            }
+            return parts.join(' ');
+        },
+
+        ageWarning() {
+            if (!this.detail) return null;
+            const startedAt = this.detail.snapshot.started_at;
+            if (!startedAt) return null;
+            const days = Math.floor((Date.now() - new Date(startedAt).getTime()) / 86400000);
+            if (days >= 7) {
+                return `Note: this operation is ${days} day${days === 1 ? '' : 's'} old. Other edits made since then may overlap with the revert.`;
+            }
+            return null;
+        },
+
+        confirmBodyText() {
+            if (!this.detail) return '';
+            return this.revertExplanation;
+        },
+
+        // ─── Kind-aware drawer chrome ─────────────────────────────────
+        // The summary block + the table columns vary by snapshot kind so
+        // the activity-log feels like the original DetailModal / Suggestion-
+        // Modal, where every mode shows the columns that matter for that op.
+
+        /** One-paragraph summary of what the operation did. Anchor + target
+         *  for uniform ops (single-rule apply), counts for non-uniform ones. */
+        operationSummary() {
+            if (!this.detail) return '';
+            const snap = this.detail.snapshot;
+            const sum = snap.summary || {};
+            const items = snap.items || [];
+            const n = (snap.entry_count_total ?? snap.entry_ids?.length ?? 0);
+            const firstItem = items[0] || {};
+
+            if (snap.kind === 'applyrule') {
+                if (sum.mode === 'multi-rule') {
+                    return `Applied <strong>${sum.total_rules || items.length}</strong> auto-link rules — <strong>${sum.total_links_added || 0}</strong> link${(sum.total_links_added || 0) === 1 ? '' : 's'} inserted across <strong>${n}</strong> entries.`;
+                }
+                const anchor = sum.rule_keyword ? `<span class="font-mono">"${this.escape(sum.rule_keyword)}"</span>` : 'rule';
+                const target = this.targetLabel(firstItem, 'url');
+                return `Linked ${anchor} with target ${target} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+            }
+            if (snap.kind === 'detailunlink') {
+                const mode = sum.source_mode || 'inbound';
+                const titleHtml = sum.entry_title ? `<strong>"${this.escape(sum.entry_title)}"</strong>` : '<em>this entry</em>';
+                if (mode === 'inbound') {
+                    return `Removed <strong>${items.length}</strong> inbound link${items.length === 1 ? '' : 's'} pointing to ${titleHtml} — across ${n} source ${n === 1 ? 'entry' : 'entries'}.`;
+                }
+                return `Removed <strong>${items.length}</strong> outbound link${items.length === 1 ? '' : 's'} from ${titleHtml}.`;
+            }
+            if (snap.kind === 'inboundinsert') {
+                // For inbound: ONE shared target — surface it as a clickable
+                // link here so user can jump to it directly. The drawer
+                // table no longer carries a per-row Target column (would
+                // repeat the same value on every line). Falls back to plain
+                // strong-text when the target_id_edit_url isn't enriched
+                // yet (older snapshots, batch with no surviving items).
+                const titleHtml = this._inboundTargetLabel(items, sum);
+                return `Inserted <strong>${items.length}</strong> inbound link${items.length === 1 ? '' : 's'} pointing to ${titleHtml} — across ${n} source ${n === 1 ? 'entry' : 'entries'}.`;
+            }
+            if (snap.kind === 'outboundinsert') {
+                const titleHtml = sum.entry_title ? `<strong>"${this.escape(sum.entry_title)}"</strong>` : '<em>the source entry</em>';
+                return `Inserted <strong>${items.length}</strong> outbound link${items.length === 1 ? '' : 's'} from ${titleHtml}.`;
+            }
+            if (snap.kind === 'urlchanger') {
+                if (sum.search) {
+                    const action = sum.action === 'unlink' ? 'Unlinked' : 'Replaced';
+                    return `${action} URLs matching <span class="font-mono">"${this.escape(sum.search)}"</span> across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'} (<strong>${items.length}</strong> URL${items.length === 1 ? '' : 's'} in total).`;
+                }
+                return `Replaced <strong>${items.length}</strong> URL${items.length === 1 ? '' : 's'} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+            }
+            if (snap.kind === 'bulkunlink') {
+                return `Removed <strong>${items.length}</strong> broken link${items.length === 1 ? '' : 's'} across <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+            }
+            if (snap.kind === 'relink') {
+                // One item per re-link snapshot. Show original→new anchor
+                // transition; href change is implicit (almost always
+                // identical, the user typically only adjusts the anchor).
+                const origAnchor = `<span class="font-mono">"${this.escape(sum.original_anchor || '')}"</span>`;
+                const newAnchor = `<span class="font-mono">"${this.escape(sum.new_anchor || '')}"</span>`;
+                const hrefChanged = sum.original_href !== sum.new_href;
+                if (hrefChanged) {
+                    return `Re-linked ${origAnchor} → ${newAnchor} (target also changed).`;
+                }
+                return `Re-anchored ${origAnchor} → ${newAnchor} (same target).`;
+            }
+            return `Operation affected <strong>${n}</strong> ${n === 1 ? 'entry' : 'entries'}.`;
+        },
+
+        /** Header for the first table column. Different ops have different
+         *  natural names for the entry being modified. */
+        entryColumnLabel() {
+            const k = this.detail?.snapshot?.kind || '';
+            if (k === 'inboundinsert' || k === 'detailunlink') {
+                const mode = this.detail?.snapshot?.summary?.source_mode || 'inbound';
+                if (mode === 'inbound') return 'Source entry';
+            }
+            return 'Affected entry';
+        },
+
+        entryColumnTooltip() {
+            const k = this.detail?.snapshot?.kind || '';
+            if (k === 'inboundinsert' || (k === 'detailunlink' && this.detail?.snapshot?.summary?.source_mode === 'inbound')) {
+                return 'The entry that contains (or contained) the link — i.e. the source side of the link relationship. Click to open in Statamic.';
+            }
+            return 'The entry where Linkwise wrote — its content received the change. Click to open in Statamic.';
+        },
+
+        /** Per-kind extra column — null means "no extra column, header carries
+         *  enough context". Returned object: { label, tooltip }. */
+        extraColumnConfig() {
+            const k = this.detail?.snapshot?.kind || '';
+            if (k === 'detailunlink') {
+                return { label: 'Removed link', tooltip: 'The link Linkwise removed from this entry — anchor text plus its destination URL.' };
+            }
+            if (k === 'urlchanger') {
+                return { label: 'URL change', tooltip: 'Old URL replaced by the new URL on this entry.' };
+            }
+            // Outbound = ONE source → MANY different targets, so target
+            // belongs per-row. Anchor stays because each row's anchor may
+            // differ.
+            if (k === 'outboundinsert') {
+                return { label: 'Anchor → Target', tooltip: 'The anchor text Linkwise inserted, plus the entry it now points at.' };
+            }
+            // Inbound = MANY sources → ONE shared target. Target gets
+            // surfaced once in the summary header above the table; per-row
+            // it would be redundant. Anchor is highlighted in the Context
+            // column already, so we drop both per-row columns.
+            // applyrule + bulkunlink + multi-rule applyrule: header carries it.
+            return null;
+        },
+
+        extraColumnLabel() { return this.extraColumnConfig?.label || null; },
+        extraColumnTooltip() { return this.extraColumnConfig?.tooltip || ''; },
+
+        /** Short kind-label for the revert lineage banner. */
+        revertedFromLabel() {
+            if (!this.detail?.reverted_from) return '';
+            const rf = this.detail.reverted_from;
+            const sum = rf.summary || {};
+            if (rf.kind === 'applyrule') {
+                if (sum.mode === 'multi-rule') return `Apply Rule (${sum.total_rules || '?'} rules)`;
+                return sum.rule_keyword
+                    ? `Apply Rule "<span class="font-mono">${this.escape(sum.rule_keyword)}</span>"`
+                    : 'Apply Rule';
+            }
+            if (rf.kind === 'inboundinsert') return sum.entry_title ? `Bulk insert inbound links to "${this.escape(sum.entry_title)}"` : 'Bulk insert inbound links';
+            if (rf.kind === 'outboundinsert') return sum.entry_title ? `Bulk insert outbound links from "${this.escape(sum.entry_title)}"` : 'Bulk insert outbound links';
+            if (rf.kind === 'detailunlink') {
+                const dir = sum.source_mode === 'outbound' ? 'outbound' : 'inbound';
+                return sum.entry_title ? `Bulk unlink ${dir} links on "${this.escape(sum.entry_title)}"` : `Bulk unlink ${dir} links`;
+            }
+            if (rf.kind === 'urlchanger') return sum.search ? `URL Changer "${this.escape(sum.search)}"` : 'URL Changer apply';
+            if (rf.kind === 'relink') {
+                const a = sum.original_anchor ? `"${this.escape(sum.original_anchor)}"` : 'anchor';
+                const b = sum.new_anchor ? `"${this.escape(sum.new_anchor)}"` : 'new anchor';
+                return `Re-link ${a} → ${b}`;
+            }
+            return rf.kind || 'previous operation';
+        },
+
+        /** Counts how many of the snapshot's items are actually revertable
+         *  (have the data we need to build the inverse payload) plus how
+         *  many were dropped due to legacy data shape. Used by both the
+         *  pre-revert preview text AND the Revert button gating — keeps
+         *  them in sync so the button doesn't claim 81 items will revert
+         *  when the preview says 0. */
+        revertableSummary() {
+            const snap = this.detail?.snapshot;
+            if (! snap) return { revertableItems: 0, legacySkipped: 0 };
+            const items = Array.isArray(snap.items) ? snap.items : [];
+            if (snap.kind === 'detailunlink') {
+                const ok = items.filter(i => i?.anchor_text && i?.matched_url).length;
+                return { revertableItems: ok, legacySkipped: items.length - ok };
+            }
+            if (snap.kind === 'urlchanger') {
+                const ok = items.filter(i => {
+                    if (i?.new_url && i.new_url !== '__LINKWISE_UNLINK__') return true; // swap path
+                    return i?.matched_url && i?.anchor_text;
+                }).length;
+                return { revertableItems: ok, legacySkipped: items.length - ok };
+            }
+            // applyrule, inboundinsert, outboundinsert: every item is
+            // structurally revertable (no per-item shape gates).
+            return { revertableItems: items.length, legacySkipped: 0 };
+        },
+
+        /** Effective count of items that will land in the revert payload
+         *  AFTER applying skippable (modified/deleted) deductions. The
+         *  Revert button is disabled when this is 0 — clicking would
+         *  ship a payload that does nothing. */
+        revertCount() {
+            const entries = this.detail?.entries || [];
+            const skippable = entries.filter(e => e.status === 'modified' || e.status === 'deleted').length;
+            return Math.max(0, this.revertableSummary.revertableItems - skippable);
+        },
+
+        /** True when this snapshot has skip records — surfaces as a
+         *  separate "skipped entries" table above the main affected list.
+         *  Two cases produce records:
+         *    - The snapshot IS a bulk run that hit conflicts (skipped its
+         *      own entries) — recordRevertSkipped on $snapshotId.
+         *    - The snapshot's bulk WAS reverted by a later run that hit
+         *      conflicts — recordRevertSkipped on $reverts.
+         *  Either way the field is non-empty here; rendering is the same. */
+        hasSkippedDuringRevert() {
+            const skipped = this.detail?.snapshot?.revert_skipped;
+            return Array.isArray(skipped) && skipped.length > 0;
+        },
+
+        /** The skip records as written by the bulk command. Each record:
+         *  {entry_id, entry_title, reason, modified_by?, modified_at?,
+         *   edit_url?, collection?}. */
+        skippedDuringRevert() {
+            return this.detail?.snapshot?.revert_skipped || [];
+        },
+
+        /** Per-entry skip records written by THIS bulk run (not a revert).
+         *  Distinct bucket from revert_skipped so the drawer can render
+         *  "this bulk wanted to touch N entries, here's the M it couldn't"
+         *  separately from "during the revert of this bulk, M entries
+         *  refused to roll back". Bug 2026-05-11. */
+        hasSkippedDuringBulk() {
+            const skipped = this.detail?.snapshot?.bulk_skipped;
+            return Array.isArray(skipped) && skipped.length > 0;
+        },
+
+        skippedDuringBulk() {
+            return this.detail?.snapshot?.bulk_skipped || [];
+        },
+
+        /** Wording for the skipped-table banner. "this run" when the
+         *  snapshot itself is the bulk that skipped (e.g. an Apply Rule
+         *  with one conflict-skipped entry, or a revert dispatch that
+         *  skipped 1 of N). "the revert" when looking at an ORIGINAL
+         *  snapshot post-revert — the skip records there describe what
+         *  the revert run hit, not the original bulk. */
+        skippedScopeLabel() {
+            return this.detail?.snapshot?.reverted_at ? 'the revert' : 'this run';
+        },
+
+        /** Drives the optional Context column. Per-kind: kinds whose items
+         *  carry context get a permanent column (consistent table structure
+         *  across snapshots) — empty cells render "—" instead of hiding the
+         *  whole column on legacy data. Kinds whose items never carry a
+         *  context (bulkunlink, multi-rule applyrule) keep the column hidden
+         *  so we don't render dead empty space. */
+        hasContextColumn() {
+            const k = this.detail?.snapshot?.kind || '';
+            // Per-kind whitelist: every kind that records sentence_context
+            // in its snapshot.items going forward. Older snapshots from
+            // before the recording shipped will have empty values — we
+            // still render the column so the table layout is stable.
+            const kindsWithContext = ['applyrule', 'inboundinsert', 'outboundinsert', 'detailunlink', 'urlchanger'];
+            if (! kindsWithContext.includes(k)) return false;
+            // Multi-rule applyrule's items list rules, not entries — no per-
+            // entry context to surface, drop the column.
+            if (k === 'applyrule' && this.detail?.snapshot?.summary?.mode === 'multi-rule') return false;
+            return true;
+        },
+    },
+
+    methods: {
+        async openDetail(snap) {
+            this.detailLoading = true;
+            const url = this.detailUrl.replace('__ID__', encodeURIComponent(snap.id));
+            try {
+                const response = await fetch(url, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Cache-Control': 'no-cache' },
+                });
+                if (!response.ok) {
+                    Statamic.$toast.error('Could not load operation details.');
+                    return;
+                }
+                this.detail = await response.json();
+            } catch {
+                Statamic.$toast.error('Could not load operation details.');
+            } finally {
+                this.detailLoading = false;
+            }
+        },
+
+        closeDetail() {
+            this.detail = null;
+        },
+
+        async doRevert() {
+            this.confirmRevert = false;
+            if (!this.detail || this.reverting) return;
+
+            const request = buildRevertRequest(this.detail.snapshot, this.revertEndpoints);
+            if (!request) {
+                Statamic.$toast.error('This operation cannot be reverted.');
+                return;
+            }
+
+            this.reverting = true;
+            const csrfToken = Statamic.$config.get('csrfToken');
+            try {
+                const response = await fetch(request.url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify(request.payload),
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    // Laravel 422 returns {message, errors:{field:[msg]}}. Extracting
+                    // the first field error is far more useful than "given data was
+                    // invalid" — surfaces the actual broken field for the user.
+                    let reason = data?.error || data?.message || `HTTP ${response.status}`;
+                    if (response.status === 422 && data?.errors && typeof data.errors === 'object') {
+                        const firstKey = Object.keys(data.errors)[0];
+                        const firstMsg = firstKey ? (Array.isArray(data.errors[firstKey]) ? data.errors[firstKey][0] : data.errors[firstKey]) : null;
+                        if (firstKey && firstMsg) reason = `${firstKey}: ${firstMsg}`;
+                    }
+                    Statamic.$toast.error(`Could not start revert: ${reason}`);
+                    this.reverting = false;
+                    return;
+                }
+                // The relink endpoint is SYNC: by the time we get a 200,
+                // the entry is already saved and the new snapshot already
+                // recorded (RelinkService::recordRelinkSnapshot calls
+                // markReverted on the upstream id, so the activity-log
+                // chain is closed server-side). No heavy banner needed.
+                // All the bulk endpoints are async dispatches — they
+                // return immediately and the heavy banner reflects
+                // server-side progress.
+                if (this.detail.snapshot.kind === 'relink') {
+                    Statamic.$toast.success('Re-link reverted.');
+                    this.detail = null;
+                    setTimeout(() => this.$inertia.reload({ only: ['snapshots'] }), 200);
+                    return;
+                }
+
+                Statamic.$toast.success('Revert started — see banner above for progress.');
+
+                // Mark the original snapshot as reverted. Best-effort — the
+                // revert bulk runs server-side regardless; this just hides
+                // the Revert button on the activity-log row.
+                if (this.markRevertedUrl) {
+                    const markUrl = this.markRevertedUrl.replace('__ID__', encodeURIComponent(this.detail.snapshot.id));
+                    fetch(markUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        body: JSON.stringify({}),
+                    }).catch(() => {});
+                }
+
+                // Banner state — heavy bulk runs detached, LinkwiseLayout's
+                // poller will refresh as the revert progresses across tabs.
+                setHeavyState({
+                    kind: request.kindLabel === 'replace' ? 'urlchanger' : 'detailunlink',
+                    label: 'reverting bulk',
+                    current: 0,
+                    total: (request.payload.replacements || []).length,
+                    canCancel: false,
+                    cancelUrl: null,
+                    heartbeat: Math.floor(Date.now() / 1000),
+                    context: { entryTitle: 'Revert', sourceMode: request.payload.source_mode || '' },
+                });
+
+                // Close drawer + reload activity-log so the new snapshot + the
+                // [Reverted] badge on the original both appear immediately.
+                this.detail = null;
+                setTimeout(() => this.$inertia.reload({ only: ['snapshots'] }), 600);
+            } catch (e) {
+                Statamic.$toast.error(`Could not start revert: ${e.message || 'network error'}`);
+            } finally {
+                this.reverting = false;
+            }
+        },
+
+        kindLabel(snapOrKind) {
+            // Accepts either a snapshot (preferred — can sharpen the label
+            // with kind-specific context like inbound vs outbound) or a raw
+            // kind string (legacy callers).
+            const snap = typeof snapOrKind === 'string' ? { kind: snapOrKind } : snapOrKind;
+            const kind = snap?.kind || '';
+            const mode = snap?.summary?.source_mode || '';
+
+            if (kind === 'detailunlink') {
+                if (mode === 'inbound') return 'Bulk unlink inbound links';
+                if (mode === 'outbound') return 'Bulk unlink outbound links';
+                return 'Bulk unlink links';
+            }
+            return ({
+                applyrule: 'Apply auto-link rule',
+                bulkunlink: 'Bulk unlink broken links',
+                inboundinsert: 'Bulk insert inbound links',
+                outboundinsert: 'Bulk insert outbound links',
+                urlchanger: 'URL Changer apply',
+                relink: 'Re-link anchor',
+            }[kind] || kind);
+        },
+
+        kindVariant(kind) {
+            // Statamic Badge variants — keep apply / insert vs unlink visually distinct
+            return ({
+                applyrule: 'success',
+                inboundinsert: 'success',
+                outboundinsert: 'success',
+                relink: 'info',
+                urlchanger: 'info',
+                bulkunlink: 'warning',
+                detailunlink: 'warning',
+            }[kind] || 'default');
+        },
+
+        /** Net entries-affected count for the listing column. The raw
+         *  entry_count_total is captured at snapshot.record() time and
+         *  counts every entry the bulk TRIED to write — it doesn't yet
+         *  know which writes will get conflict-skipped. We subtract the
+         *  skip records, but only for snapshots whose own run produced
+         *  the skips (revert snapshots and original bulks): for ORIGINAL
+         *  snapshots a later revert can also append skip records, and
+         *  those describe the revert's behavior, not this bulk's. We
+         *  proxy "skipped during this run" via completion_stats.skipped
+         *  when present — a count, not a list, so we cap at the recorded
+         *  list length. */
+        effectiveEntryCount(snap) {
+            const total = snap.entry_count_total ?? (snap.entry_ids || []).length ?? 0;
+            const skipDelta = this.entrySkipDelta(snap);
+            return Math.max(0, total - skipDelta);
+        },
+
+        /** How many of this snapshot's recorded skip records describe
+         *  THIS bulk's own conflict-skips (vs skip records appended by
+         *  a later revert run targeting an original snapshot). */
+        entrySkipDelta(snap) {
+            const recordedSkips = (snap.revert_skipped || []).length;
+            // Revert snapshots — every recorded skip is from this run.
+            if (snap.summary && snap.summary.reverts) return recordedSkips;
+            // Original snapshots — completion_stats.skipped counts items,
+            // not entries. We approximate "entries skipped during this run"
+            // by capping recorded skips at the run's skipped-count. If the
+            // snapshot has been reverted, the skips listed include the
+            // revert's skips on top — but on the original we don't know
+            // which is which. Show 0 to avoid misleading the listing.
+            if (snap.reverted_at) return 0;
+            return recordedSkips;
+        },
+
+        statusLabel(status) {
+            return ({
+                unchanged: 'Unchanged since bulk',
+                modified: 'Edited since bulk',
+                deleted: 'Deleted',
+                unknown: 'Unknown',
+            }[status] || status);
+        },
+
+        /** True when this entry row would be excluded by a Revert action.
+         *  Conditions: snapshot is revertable, not already reverted, and
+         *  the entry's hash diverges from post-bulk (status modified) or
+         *  the entry is gone (deleted). Drives the inline "→ skipped on
+         *  revert" hint under the Status badge so users see at a glance
+         *  which rows feed the aggregate "X will be skipped" count from
+         *  the Revert card above. */
+        wouldBeSkippedOnRevert(entry) {
+            if (! this.canRevert) return false;
+            if (this.detail?.snapshot?.reverted_at) return false;
+            return entry.status === 'modified' || entry.status === 'deleted';
+        },
+
+        statusVariant(status) {
+            return ({
+                unchanged: 'default',
+                modified: 'warning',
+                deleted: 'error',
+                unknown: 'default',
+            }[status] || 'default');
+        },
+
+        // Listing's "Details" column. Each kind has a primary label (rule
+        // keyword / search term / entry title) and a count fallback when
+        // the primary is missing (per-row applies, anonymous bulks, etc.).
+        // The dash-only state should NEVER happen — that means we've added
+        // a new kind without a label. The trailing fallback covers it.
+        summaryLabel(snap) {
+            const s = snap?.summary || {};
+            const itemsLen = Array.isArray(snap?.items) ? snap.items.length : 0;
+
+            if (snap?.kind === 'applyrule') {
+                if (s.rule_keyword) return `Rule: "${s.rule_keyword}"`;
+                if (s.mode === 'multi-rule') return `${s.total_rules || '?'} rules`;
+                return itemsLen > 0 ? `${itemsLen} link${itemsLen === 1 ? '' : 's'} inserted` : 'Apply rule';
+            }
+            if (snap?.kind === 'urlchanger') {
+                if (s.search) return `Search: "${s.search}" — ${s.action || 'apply'}`;
+                const n = s.replacement_count || itemsLen;
+                if (n > 0) {
+                    const verb = s.action === 'unlink' ? 'unlinked' : 'replaced';
+                    return `${n} URL${n === 1 ? '' : 's'} ${verb}`;
+                }
+                return s.action === 'unlink' ? 'URL Changer — unlink' : 'URL Changer — replace';
+            }
+            if (snap?.kind === 'detailunlink') {
+                const mode = s.source_mode || '';
+                if (s.entry_title) return `${mode} unlink on "${s.entry_title}"`;
+                return itemsLen > 0 ? `${itemsLen} ${mode} link${itemsLen === 1 ? '' : 's'} removed` : 'Detail unlink';
+            }
+            if (snap?.kind === 'inboundinsert' || snap?.kind === 'outboundinsert') {
+                const dir = snap.kind === 'inboundinsert' ? 'into' : 'from';
+                if (s.entry_title) return `${dir} "${s.entry_title}"`;
+                return itemsLen > 0 ? `${itemsLen} link${itemsLen === 1 ? '' : 's'} inserted` : `Bulk insert (${dir})`;
+            }
+            if (snap?.kind === 'bulkunlink') {
+                const n = s.replacement_count || itemsLen;
+                return n > 0 ? `${n} broken link${n === 1 ? '' : 's'} removed` : 'Bulk unlink';
+            }
+            return snap?.kind || '';
+        },
+
+        formatRelative(iso) {
+            if (!iso) return '—';
+            const now = Date.now();
+            const t = new Date(iso).getTime();
+            const diff = Math.max(0, now - t);
+            const min = Math.floor(diff / 60000);
+            if (min < 1) return 'just now';
+            if (min < 60) return `${min} min ago`;
+            const hr = Math.floor(min / 60);
+            if (hr < 24) return `${hr} h ago`;
+            const day = Math.floor(hr / 24);
+            return `${day} d ago`;
+        },
+
+        formatAbsolute(iso) {
+            if (!iso) return '—';
+            try {
+                return new Date(iso).toLocaleString();
+            } catch {
+                return iso;
+            }
+        },
+
+        // Build human-readable "what happened" lines per entry, one per item.
+        // Each kind has different shape; the column shouldn't just dump the
+        // raw anchor text or URL — that's what triggered the "Laravel" complaint.
+        entryActionLines(e) {
+            const kind = this.detail?.snapshot?.kind || '';
+            const items = e.items || [];
+            return items.map(it => {
+                const anchor = it.anchor_text ? `<span class="font-mono">"${this.escape(it.anchor_text)}"</span>` : '';
+                if (kind === 'applyrule') {
+                    return `Inserted ${anchor || 'link'} → ${this.targetLabel(it, 'url')}`;
+                }
+                if (kind === 'inboundinsert' || kind === 'outboundinsert') {
+                    const dir = kind === 'inboundinsert' ? 'inbound' : 'outbound';
+                    return `Inserted ${dir} link ${anchor || ''} → ${this.targetLabel(it, 'target_entry_id')}`;
+                }
+                if (kind === 'detailunlink') {
+                    return `Removed ${anchor || 'link'} → ${this.targetLabel(it, 'matched_url')}`;
+                }
+                if (kind === 'urlchanger') {
+                    if (this.isUnlinkSentinel(it.new_url)) {
+                        return `Unlinked ${this.targetLabel(it, 'matched_url')}`;
+                    }
+                    return `Replaced ${this.targetLabel(it, 'matched_url')} → ${this.targetLabel(it, 'new_url')}`;
+                }
+                if (kind === 'bulkunlink') {
+                    return `Removed broken link → ${this.targetLabel(it, 'matched_url')}`;
+                }
+                return '';
+            }).filter(Boolean);
+        },
+
+        // Per-row sentence context with the anchor text highlighted.
+        // Mirrors SuggestedPhrase.vue's reading: the link in its sentence,
+        // bolded, so the user can see what the editor was looking at when
+        // the bulk ran. Falls back to '' when this item didn't carry one
+        // (legacy snapshots, broken-link items where context is "the URL
+        // was 404 anyway", etc.).
+        entryContextCell(e) {
+            const items = e.items || [];
+            const lines = items.map(it => {
+                const ctx = it.sentence_context || '';
+                if (!ctx) return '';
+                const anchor = it.anchor_text || '';
+                const escaped = this.escape(ctx);
+                if (!anchor) return `<div class="text-gray-500">${escaped}</div>`;
+                // Highlight the anchor inside the (already-escaped) sentence
+                // — escape the anchor too so the regex finds the same
+                // representation. First-occurrence only (matches how the
+                // bulk targeted it: occurrence_index 0 is the typical default).
+                const anchorEsc = this.escape(anchor);
+                const idx = escaped.toLowerCase().indexOf(anchorEsc.toLowerCase());
+                if (idx === -1) return `<div class="text-gray-500">${escaped}</div>`;
+                const before = escaped.slice(0, idx);
+                const match = escaped.slice(idx, idx + anchorEsc.length);
+                const after = escaped.slice(idx + anchorEsc.length);
+                return `<div class="text-gray-500">${before}<strong class="text-blue-600 dark:text-blue-400">${match}</strong>${after}</div>`;
+            }).filter(Boolean);
+            return lines.join('');
+        },
+
+        // Per-row content for the kind-aware extra column (the middle one
+        // between Affected entry and Status). Returns HTML, rendered via
+        // v-html. Mirrors how the original DetailModal / SuggestionModal
+        // pick a different per-item summary based on mode.
+        entryExtraCell(e) {
+            const k = this.detail?.snapshot?.kind || '';
+            const items = e.items || [];
+            if (items.length === 0) return '';
+            const lines = items.map(it => {
+                const anchor = it.anchor_text ? `<span class="font-mono">"${this.escape(it.anchor_text)}"</span>` : '';
+                if (k === 'detailunlink') {
+                    return `${anchor || '<em>link</em>'} → ${this.targetLabel(it, 'matched_url')}`;
+                }
+                if (k === 'urlchanger') {
+                    if (this.isUnlinkSentinel(it.new_url)) {
+                        // No arrow — sentinel isn't a destination URL, the
+                        // arrow notation reads "URL → state" which is
+                        // misleading. State is shown as a tag-style suffix.
+                        const anchor = it.anchor_text ? `<span class="font-mono text-gray-700 dark:text-gray-300">"${this.escape(it.anchor_text)}"</span> on ` : '';
+                        return `${anchor}${this.targetLabel(it, 'matched_url')} <em class="text-gray-500">— link removed</em>`;
+                    }
+                    return `${this.targetLabel(it, 'matched_url')} <span class="text-gray-400">→</span> ${this.targetLabel(it, 'new_url')}`;
+                }
+                if (k === 'inboundinsert' || k === 'outboundinsert') {
+                    return `${anchor || '<em>link</em>'} → ${this.targetLabel(it, 'target_entry_id')}`;
+                }
+                return '';
+            }).filter(Boolean);
+            return lines.map(l => `<div class="leading-snug">${l}</div>`).join('');
+        },
+
+        // Render a target reference: prefer the resolved entry title (with
+        // an edit-link to Statamic) when the value points at a Statamic entry,
+        // otherwise fall back to the truncated raw URL/UUID. Backend fills
+        // <field>_title and <field>_edit_url whenever it could resolve them.
+        targetLabel(item, field) {
+            const titleKey = field + '_title';
+            const editKey = field + '_edit_url';
+            const raw = item[field];
+            if (!raw) return '<span class="text-gray-400">—</span>';
+            if (item[titleKey] && item[editKey]) {
+                return `<a href="${this.escape(item[editKey])}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">${this.escape(item[titleKey])}</a>`;
+            }
+            if (item[titleKey]) {
+                return `<span class="text-gray-700 dark:text-gray-300">${this.escape(item[titleKey])}</span>`;
+            }
+            return `<span class="text-gray-500">${this.escape(this.truncateUrl(raw))}</span>`;
+        },
+
+        // URL-Changer "Unlink" action stores items with new_url set to this
+        // sentinel. Detector kept in one place so renderers can swap in a
+        // human-readable label instead of leaking it as text in the table.
+        isUnlinkSentinel(v) {
+            return typeof v === 'string' && v === '__LINKWISE_UNLINK__';
+        },
+
+        // Format a skip-record's reason for the skipped-during-revert table.
+        // Backend persists modified_by + modified_at when available; falls
+        // back to a generic "modified" / "deleted" message otherwise.
+        // Example output: "Modified by <strong>Artur</strong> on 2026-05-08 at 12:31"
+        formatSkipReason(row) {
+            if (! row) return '';
+
+            // Reason-text first — same per-reason copy as before.
+            let reasonText;
+            if (row.reason === 'deleted') {
+                reasonText = 'Entry was deleted since this bulk ran';
+            } else if (row.reason === 'anchor_not_found') {
+                reasonText = 'Anchor text was not found in entry content — run a scan or edit the entry';
+            } else if (row.reason === 'missing_link_target') {
+                reasonText = 'Insertion payload was missing both target entry and href';
+            } else if (row.reason === 'error') {
+                reasonText = 'Unexpected error during write — see log for details';
+            } else {
+                // 'modified' (and unknown reason fallback): editor + when.
+                const who = row.modified_by ? `by <strong>${this.escape(row.modified_by)}</strong>` : 'by another editor';
+                if (row.modified_at) {
+                    reasonText = `Modified ${who} on ${this.escape(this.formatAbsolute(row.modified_at))}`;
+                } else {
+                    reasonText = `Modified ${who} since this bulk ran`;
+                }
+            }
+
+            // Klasse-7 follow-up (activity_log_skip_context_gap, 2026-05-17):
+            // when the skip-record carries anchor + target context, prefix
+            // the reason with "Anchor 'X' → 'Target'" so the user can see
+            // WHAT was skipped, not just WHY. Pre-fix snapshots on disk
+            // don't carry these fields → undefined → fall through to the
+            // plain reason text. Backward-compat is at the property-read
+            // layer: `row.anchor_text` is undefined for legacy rows.
+            //
+            // Three render branches:
+            //  - both anchor + target: "Anchor 'X' → 'Page': <reason>"
+            //  - anchor only (e.g. missing_link_target): "Anchor 'X': <reason>"
+            //  - neither (legacy or deleted-entry fallback): just the reason.
+            //
+            // Anchor is HTML-escaped because the parent td uses v-html.
+            const hasAnchor = row.anchor_text != null && row.anchor_text !== '';
+            // target_entry_title preferred (internal); fall back to
+            // target_href (external URL); fall back to target_entry_id
+            // (entry exists but title couldn't be resolved, e.g. test envs).
+            const targetLabel = row.target_entry_title || row.target_href || row.target_entry_id || '';
+            const hasTarget = targetLabel !== '';
+
+            if (! hasAnchor && ! hasTarget) {
+                return reasonText;
+            }
+            if (hasAnchor && hasTarget) {
+                return `Anchor "<strong>${this.escape(row.anchor_text)}</strong>" → <em>${this.escape(targetLabel)}</em>: ${reasonText}`;
+            }
+            if (hasAnchor) {
+                return `Anchor "<strong>${this.escape(row.anchor_text)}</strong>": ${reasonText}`;
+            }
+            // hasTarget && !hasAnchor — rare but possible (target id known,
+            // anchor lost). Show what we have.
+            return `Target <em>${this.escape(targetLabel)}</em>: ${reasonText}`;
+        },
+
+        // Inbound bulks share a single target entry across all items; we
+        // pull the resolved title + edit URL off the first item (backend
+        // enrichment fills target_entry_id_title / _edit_url for any
+        // statamic://entry:: ref in the items list). Falls back to the
+        // summary's entry_title (plain text) when enrichment is missing —
+        // legacy snapshots or entries that have since been deleted.
+        _inboundTargetLabel(items, sum) {
+            const first = items?.[0];
+            if (first?.target_entry_id_title && first?.target_entry_id_edit_url) {
+                return `<a href="${this.escape(first.target_entry_id_edit_url)}" target="_blank" class="font-semibold text-blue-600 dark:text-blue-400 hover:underline">"${this.escape(first.target_entry_id_title)}"</a>`;
+            }
+            if (first?.target_entry_id_title) {
+                return `<strong>"${this.escape(first.target_entry_id_title)}"</strong>`;
+            }
+            if (sum?.entry_title) {
+                return `<strong>"${this.escape(sum.entry_title)}"</strong>`;
+            }
+            return '<em>the target entry</em>';
+        },
+
+        // Tiny escape so v-html-rendered action lines can't bleed user content
+        // into HTML. Anchor text and URLs come from snapshot files which are
+        // technically trustable, but a stray < in an anchor would still mess
+        // up rendering — better safe.
+        escape(s) {
+            if (s == null) return '';
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        },
+
+        truncateUrl(url) {
+            if (!url) return '';
+            // statamic://entry::UUID is the verbose internal form — replace with
+            // a compact "→ entry" so the table doesn't get hijacked by 60-char URIs.
+            if (url.startsWith('statamic://entry::')) {
+                return 'entry: ' + url.replace('statamic://entry::', '').slice(0, 8) + '…';
+            }
+            if (url.length > 50) {
+                return url.slice(0, 47) + '…';
+            }
+            return url;
+        },
+    },
+};
+</script>

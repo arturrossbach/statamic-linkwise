@@ -1,0 +1,438 @@
+<?php
+
+namespace Arturrossbach\Linkwise\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
+use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Links\BrokenLinkReport;
+use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
+use Arturrossbach\Linkwise\Support\JobLock;
+use Arturrossbach\Linkwise\Support\UrlHelper;
+use Arturrossbach\Linkwise\UrlChanger\UrlReplacer;
+
+/**
+ * Detached artisan command for the DetailModal's "Bulk Unlink" — remove a
+ * batch of inbound or outbound links from one (outbound) or many (inbound)
+ * entries in a single heavy job.
+ *
+ * Mirrors UrlChangerApplyCommand's structure (status-cache, heartbeat, crash-
+ * guard, finalize-once-at-end). Separate kind 'detailunlink' so the banner
+ * shows "Removing links from 'Article Title'" instead of generic URL-Changer
+ * verbiage — the user clicked a per-entry detail dialog, not the URL Changer
+ * tab.
+ */
+class DetailUnlinkCommand extends Command
+{
+    protected $signature = 'linkwise:detail-unlink';
+
+    protected $description = 'Apply a queued DetailModal bulk-unlink batch (invoked by the Detail Modal UI)';
+
+    public function __construct(
+        protected UrlReplacer $replacer,
+        protected EntryIndexer $indexer,
+        protected BrokenLinkReport $brokenReport,
+    ) {
+        parent::__construct();
+    }
+
+    public function handle(): int
+    {
+        @set_time_limit(0);
+        JobLock::registerCrashGuard('linkwise:detailunlink:status', 'linkwise:detailunlink:payload');
+
+        $payload = Cache::get('linkwise:detailunlink:payload');
+        if (! is_array($payload)) {
+            Cache::put('linkwise:detailunlink:status', [
+                'phase' => 'error',
+                'message' => 'No payload found in cache.',
+            ], 120);
+
+            return self::FAILURE;
+        }
+
+        $replacements = $payload['replacements'] ?? [];
+        $entryHashes = $payload['entry_hashes'] ?? [];
+        $sourceMode = $payload['source_mode'] ?? 'inbound'; // banner verbiage
+        $entryTitle = $payload['entry_title'] ?? '';
+        $startedBy = $payload['started_by'] ?? null;
+        $startedById = $payload['started_by_id'] ?? null;
+        $reverts = $payload['reverts'] ?? null;
+
+        $total = count($replacements);
+        $succeeded = 0;
+        $skipped = 0;
+        // Per-entry skip records for the activity-log drawer of the ORIGINAL
+        // snapshot — only populated when this run is itself a revert. Empty
+        // for normal-flow detail-unlink.
+        $revertSkippedRecords = [];
+        // Per-entry skip records for the drawer's "skipped during this run"
+        // table — populated for ALL skip reasons regardless of revert mode.
+        $bulkSkippedRecords = [];
+        $errors = [];
+        // Entries whose link relationships actually changed (the entry
+        // being modified + the target, if the removed URL is internal).
+        // Without targeted refresh, suggestion counts on those entries
+        // would stay frozen at the pre-unlink values — same stale-table
+        // class as LinkInsertCommand.
+        $affectedIds = [];
+
+        // Use exact mode — DetailModal sends the full URL of each link, no
+        // domain inference / fuzzy matching wanted.
+        $this->replacer->setMode('exact');
+
+        // Group by entry — one save per entry for atomic per-entry semantics.
+        $byEntry = [];
+        foreach ($replacements as $r) {
+            $byEntry[$r['entry_id']][] = $r;
+        }
+        $entryGroups = array_values($byEntry);
+
+        // Forensic snapshot — recorded BEFORE writes for entry-id forensics
+        // (we know what the bulk INTENDED to touch even if it crashes), but
+        // items=[] starts empty and grows via appendWrittenItem on each
+        // confirmed success. Append-on-success makes "items lists what we
+        // wrote" structurally guaranteed — no more skipped-leaks-into-table.
+        $snapshotId = app(BulkSnapshotStore::class)->record(
+            kind: 'detailunlink',
+            entryIds: array_keys($byEntry),
+            preHashes: array_intersect_key($entryHashes, $byEntry),
+            summary: array_filter([
+                'source_mode' => $sourceMode,
+                'entry_title' => $entryTitle,
+                'replacement_count' => $total,
+                'reverts' => $reverts,
+            ], fn ($v) => $v !== null),
+            items: [],
+            startedBy: $startedBy,
+            startedById: $startedById,
+        );
+
+        Cache::put('linkwise:detailunlink:status', [
+            'phase' => 'running',
+            'current' => 0,
+            'total' => $total,
+            'source_mode' => $sourceMode,
+            'entry_title' => $entryTitle,
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+            'heartbeat' => time(),
+        ], 600);
+
+        $processedReplacements = 0;
+
+        foreach ($entryGroups as $entryReps) {
+            if (Cache::get('linkwise:detailunlink:cancel')) {
+                Cache::forget('linkwise:detailunlink:cancel');
+                Cache::put('linkwise:detailunlink:status', [
+                    'phase' => 'cancelled',
+                    'total' => $total,
+                    'current' => $processedReplacements,
+                    'succeeded' => $succeeded,
+                    'skipped' => $skipped,
+                    'errors' => $errors,
+                    'source_mode' => $sourceMode,
+                    'entry_title' => $entryTitle,
+                    'started_by' => $startedBy,
+                    'started_by_id' => $startedById,
+                ], 300);
+                $this->finalizeIndex(array_keys($affectedIds));
+
+                return self::SUCCESS;
+            }
+
+            $entryId = $entryReps[0]['entry_id'];
+            $entryHashesForCall = isset($entryHashes[$entryId])
+                ? [$entryId => $entryHashes[$entryId]]
+                : [];
+
+            // Pre-flight hash check: if the entry has been modified since
+            // the bulk that produced the snapshot we're reverting from
+            // (or since the request payload was built), skip with a clear
+            // "modified by editor" reason instead of letting applySelected
+            // silently overwrite the user's edits. Without this check, a
+            // user who edits an entry and leaves the link in place would
+            // see the link removed AND their text edits kept — a silent
+            // partial overwrite that the activity-log UI promised not to do.
+            if (! empty($entryHashesForCall)) {
+                $conflicts = \Arturrossbach\Linkwise\Support\SafeEntrySaver::verifyHashes($entryHashesForCall);
+                if (! empty($conflicts)) {
+                    $msg = 'Entry was modified by another editor';
+                    $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
+                    $skipped += count($entryReps);
+                    $processedReplacements += count($entryReps);
+                    // Persist a per-entry skip record so the drawer can show
+                    // "these entries were skipped because they were modified
+                    // by X on Y" — both on this snapshot AND, for revert
+                    // flows, on the ORIGINAL snapshot too (recorded after
+                    // the loop below).
+                    // Klasse-7 follow-up (activity_log_skip_context_gap,
+                    // 2026-05-17): one skip-record covers multiple $entryReps
+                    // (same entry, multiple links). Take the first replacement's
+                    // anchor + matched_url as representative — the drawer
+                    // shows "Anchor 'X' → 'target'" which is honest if
+                    // ambiguous when several anchors are skipped together
+                    // for one entry (rare in practice).
+                    $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                    $repHref = $entryReps[0]['matched_url'] ?? null;
+                    $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified', $repAnchor, null, $repHref);
+                    $revertSkippedRecords[] = $skipRec;
+                    $bulkSkippedRecords[] = $skipRec;
+                    Cache::put('linkwise:detailunlink:status', [
+                        'phase' => 'running',
+                        'current' => $processedReplacements,
+                        'total' => $total,
+                        'succeeded' => $succeeded,
+                        'skipped' => $skipped,
+                        'source_mode' => $sourceMode,
+                        'entry_title' => $entryTitle,
+                        'started_by' => $startedBy,
+                        'started_by_id' => $startedById,
+                        'heartbeat' => time(),
+                    ], 600);
+                    continue;
+                }
+            }
+
+            try {
+                // applySelected handles per-entry hash check and atomic save.
+                // Search arg is empty — we use exact match per replacement
+                // via the matched_url. Force the UNLINK sentinel as new_url
+                // so applySelected → replaceNthInBard / Markdown / Replicator
+                // fall into the "remove the link mark" branch. Detail-unlink
+                // is purely a removal — any incoming new_url would either
+                // be ignored or corrupt the result. array_merge (not the +
+                // operator) so an incoming new_url='' from a misbehaving
+                // caller doesn't slip past and produce empty-href marks
+                // that ContentSafetyValidator rejects with a confusing
+                // "introduce new corruption" error. Real bug found via
+                // roundtrip test 2026-05-09.
+                $entryRepsForCall = array_map(
+                    fn (array $r) => array_merge($r, ['new_url' => UrlHelper::UNLINK]),
+                    $entryReps,
+                );
+                $result = $this->replacer->applySelected('', $entryRepsForCall);
+
+                $entryReplacementCount = count($entryReps);
+                $actualReplacements = $result['total_replacements'] ?? 0;
+
+                if ($actualReplacements === 0) {
+                    $msg = 'Links were already gone — Run Scan Content to refresh the index';
+                    $errors[$msg] = ($errors[$msg] ?? 0) + $entryReplacementCount;
+                    $skipped += $entryReplacementCount;
+                } else {
+                    $succeeded += $actualReplacements;
+                    $missed = $entryReplacementCount - $actualReplacements;
+                    if ($missed > 0) {
+                        $msg = 'Some links were already gone';
+                        $errors[$msg] = ($errors[$msg] ?? 0) + $missed;
+                        $skipped += $missed;
+                    }
+
+                    // Append-on-success: each replacement that actually
+                    // landed gets recorded as one snapshot item. Avoids
+                    // the older "items recorded upfront, hope the writes
+                    // succeeded" pattern which leaked skipped entries
+                    // into the activity-log table claiming "link removed
+                    // here" when the entry was untouched.
+                    foreach ($entryReps as $r) {
+                        app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
+                            'entry_id' => $r['entry_id'] ?? '',
+                            'matched_url' => $r['matched_url'] ?? '',
+                            'anchor_text' => $r['anchor_text'] ?? '',
+                            'sentence_context' => $r['sentence_context'] ?? '',
+                        ]);
+                    }
+
+                    // Update broken-link report — remove old URLs.
+                    foreach ($entryReps as $r) {
+                        $this->brokenReport->removeLink($r['entry_id'], $r['matched_url']);
+                        $affectedIds[$r['entry_id']] = true;
+                        // Internal links (statamic://entry::ID) → the
+                        // target's inbound counts also shift; record it.
+                        if (preg_match('#^statamic://entry::([0-9a-f-]+)$#i', $r['matched_url'], $m)) {
+                            $affectedIds[$m[1]] = true;
+                        }
+                    }
+                }
+            } catch (EntryConflictException $e) {
+                $msg = 'Entry was modified by another editor';
+                $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
+                $skipped += count($entryReps);
+                // Same per-entry skip-record write as the pre-flight branch.
+                // Representative anchor + target from first replacement —
+                // see pre-flight comment above for the rationale.
+                $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                $repHref = $entryReps[0]['matched_url'] ?? null;
+                $skipRec = BulkSnapshotStore::buildSkipRecord($entryId, 'modified', $repAnchor, null, $repHref);
+                $revertSkippedRecords[] = $skipRec;
+                $bulkSkippedRecords[] = $skipRec;
+            } catch (\Throwable $e) {
+                $msg = mb_substr($e->getMessage(), 0, 120);
+                $errors[$msg] = ($errors[$msg] ?? 0) + count($entryReps);
+                $skipped += count($entryReps);
+                $repAnchor = $entryReps[0]['anchor_text'] ?? null;
+                $repHref = $entryReps[0]['matched_url'] ?? null;
+                $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($entryId, 'error', $repAnchor, null, $repHref);
+                Log::warning('[Linkwise] DetailUnlinkCommand entry-error: '.$e->getMessage());
+            }
+
+            $processedReplacements += count($entryReps);
+            Cache::put('linkwise:detailunlink:status', [
+                'phase' => 'running',
+                'current' => $processedReplacements,
+                'total' => $total,
+                'succeeded' => $succeeded,
+                'skipped' => $skipped,
+                'source_mode' => $sourceMode,
+                'entry_title' => $entryTitle,
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+                'heartbeat' => time(),
+            ], 600);
+        }
+
+        // Flip phase to 'indexing' BEFORE finalizeIndex so the banner
+        // shows "Finalizing index…" instead of sitting stuck at N/N for
+        // the 1-3min the rebuild can take on large sites.
+        Cache::put('linkwise:detailunlink:status', [
+            'phase' => 'indexing',
+            'current' => $total,
+            'total' => $total,
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+            'source_mode' => $sourceMode,
+            'entry_title' => $entryTitle,
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+            'heartbeat' => time(),
+        ], 600);
+
+        $this->finalizeIndex(array_keys($affectedIds));
+
+        // Record post-bulk hashes so the activity-log can detect future user
+        // edits without false-positives on the bulk's own writes.
+        app(BulkSnapshotStore::class)->recordPostHashesForEntries(
+            $snapshotId,
+            array_keys($byEntry),
+        );
+
+        // Mark as completed so the activity-log Revert button enables. A
+        // snapshot stuck on completed_at=null is shown as "may have been
+        // interrupted" — happens only when the process dies between writes
+        // and this line (covered by the crash-guard's status='error' path).
+        app(BulkSnapshotStore::class)->markCompleted($snapshotId, [
+            'phase' => 'done',
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+        ]);
+
+        // Forward-bulk skip records (= this run's own skips) for the drawer's
+        // "skipped during this run" table — distinct bucket from revert_skipped.
+        if (! empty($bulkSkippedRecords)) {
+            app(BulkSnapshotStore::class)->recordBulkSkipped($snapshotId, $bulkSkippedRecords);
+        }
+
+        // Revert flows only: write skip records onto the ORIGINAL snapshot.
+        // OWN snapshot uses bulk_skipped (populated above). Bug 2026-05-11:
+        // previously wrote to OWN too, producing duplicate skipped tables.
+        if (! empty($revertSkippedRecords) && $reverts) {
+            app(BulkSnapshotStore::class)->recordRevertSkipped($reverts, $revertSkippedRecords);
+        }
+
+        Cache::put('linkwise:detailunlink:status', [
+            'phase' => 'done',
+            'total' => $total,
+            'current' => $total,
+            'succeeded' => $succeeded,
+            'skipped' => $skipped,
+            'errors' => $errors,
+            'source_mode' => $sourceMode,
+            'entry_title' => $entryTitle,
+            'started_by' => $startedBy,
+            'started_by_id' => $startedById,
+            // Root-level heartbeat for frontend dedup uniqueness — see
+            // LinkInsertCommand for the full rationale.
+            'heartbeat' => time(),
+            // 'extra' is what LinkwiseLayout's completionLabel/completionVariant
+            // read (status.extra || {}). Without it the frontend saw empty
+            // succeeded/skipped → wrong "Could not remove any" copy + wrong
+            // variant + no heartbeat in the dedup signature → persistent
+            // success banner was unreliable. Bug 2026-05-11. Mirror LinkInsert.
+            'extra' => [
+                'succeeded' => $succeeded,
+                'skipped' => $skipped,
+                'errors' => $errors,
+                'source_mode' => $sourceMode,
+                'entry_title' => $entryTitle,
+                'started_by' => $startedBy,
+                'started_by_id' => $startedById,
+                'heartbeat' => time(),
+            ],
+        ], 300);
+        Cache::forget('linkwise:detailunlink:payload');
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * @param  list<string>  $affectedEntryIds  Entries whose link relationships
+     *   actually changed during this run. Their suggestion counts are
+     *   recomputed AFTER the index rebuild — buildIndex's default
+     *   preserveSuggestionCounts copies the OLD counts forward, so without
+     *   targeted refresh the table keeps showing pre-unlink suggestion
+     *   numbers (e.g., "80 inbound" right after the user removed those
+     *   80 inbound links).
+     */
+    protected function finalizeIndex(array $affectedEntryIds = []): void
+    {
+        try {
+            $previousCount = count($this->indexer->load());
+            $this->indexer->clearCache();
+            $records = $this->indexer->buildIndex();
+
+            if (count($records) === 0 && $previousCount > 0) {
+                Log::warning(
+                    '[Linkwise] DetailUnlinkCommand: refusing to save empty index (previous had '.$previousCount.' records)',
+                );
+
+                return;
+            }
+
+            $this->indexer->save($records);
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] DetailUnlinkCommand finalizeIndex failed: '.$e->getMessage());
+
+            return;
+        }
+
+        // Order: forget BEFORE recompute — see LinkInsertCommand for rationale.
+        if (! empty($affectedEntryIds)) {
+            try {
+                app(\Arturrossbach\Linkwise\Suggestions\InboundSuggestionCache::class)
+                    ->forgetMany(array_map('strval', $affectedEntryIds));
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] DetailUnlinkCommand cache-forget failed: '.$e->getMessage());
+            }
+        }
+
+        $cap = 20;
+        if (! empty($affectedEntryIds) && count($affectedEntryIds) <= $cap) {
+            try {
+                $this->indexer->computeSuggestionCountsForEntries($affectedEntryIds);
+            } catch (\Throwable $e) {
+                Log::warning(
+                    '[Linkwise] DetailUnlinkCommand suggestion-count refresh failed: '.$e->getMessage(),
+                );
+            }
+        } elseif (! empty($affectedEntryIds)) {
+            Log::info(
+                '[Linkwise] DetailUnlinkCommand skipped suggestion-count refresh — '
+                .count($affectedEntryIds).' affected entries exceeds cap of '.$cap
+                .'. Counts will refresh at the next Scan Content.',
+            );
+        }
+    }
+}

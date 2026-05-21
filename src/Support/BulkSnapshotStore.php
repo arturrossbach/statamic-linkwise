@@ -1,0 +1,689 @@
+<?php
+
+namespace Arturrossbach\Linkwise\Support;
+
+use Illuminate\Support\Facades\Log;
+use Statamic\Facades\Entry as EntryFacade;
+
+/**
+ * Records a forensic snapshot before each write-bulk runs.
+ *
+ * Linkwise's "ups, my colleague applied a wrong rule on 80 entries" recovery
+ * path. The snapshot is read-only metadata — entry IDs, pre-bulk SafeEntrySaver
+ * hashes, who started it, when, what kind. NOT a content backup: restore is
+ * the user's job (git / Statamic Revisions / hosting backup), Linkwise just
+ * gives them an exact list of what to restore.
+ *
+ * Driver-agnostic: stores in Linkwise's own `storage/linkwise/bulk-snapshots/`
+ * directory, talks to Statamic only through the Entry facade. Works the same
+ * with Stache (flat-file) or Eloquent (DB-backed) entries.
+ *
+ * Activity-Log UI in the CP reads from this store and renders the list +
+ * detail drawer. See DashboardController::activity for the read path.
+ */
+class BulkSnapshotStore
+{
+    protected string $storagePath;
+
+    /**
+     * Snapshots older than this are auto-cleaned on the next write. Keeps the
+     * directory bounded — typical user runs a few bulks per week, 30 days is
+     * plenty for "I did something yesterday and need to undo it" recovery.
+     */
+    protected const RETENTION_DAYS = 30;
+
+    /**
+     * Hard cap on entries listed per snapshot. A 5000-entry URL-changer batch
+     * would otherwise produce a multi-MB JSON file. The list is for forensic
+     * reference, not exhaustive — if a user hit the cap they know it was a
+     * very large operation.
+     */
+    protected const MAX_ENTRIES_PER_SNAPSHOT = 1000;
+
+    public function __construct(?string $storagePath = null)
+    {
+        $this->storagePath = $storagePath ?? storage_path('linkwise/bulk-snapshots');
+    }
+
+    /**
+     * Record a snapshot before a bulk runs.
+     *
+     * @param  string  $kind  One of the JobLock kind keys (applyrule, urlchanger,
+     *   bulkunlink, detailunlink, inboundinsert, outboundinsert).
+     * @param  list<string>  $entryIds  Entries this bulk plans to touch.
+     * @param  array<string, string>  $preHashes  [entryId => SafeEntrySaver hash before].
+     * @param  array<string, mixed>  $summary  Kind-specific metadata (rule keyword,
+     *   search term, source mode, etc.) — surfaced verbatim in the activity-log
+     *   detail view, so it should be human-readable.
+     * @param  list<array<string, mixed>>  $items  Per-item operation data so the
+     *   activity-log drawer can show "anchor 'vue.js' inserted in entry X" and
+     *   the deep-link button can route to URL Changer with the right search.
+     *   Shape varies by kind:
+     *     - applyrule:        [{entry_id, anchor_text, url}]
+     *     - inboundinsert:    [{entry_id, source_entry_id, target_entry_id, anchor_text}]
+     *     - outboundinsert:   [{entry_id, source_entry_id, target_entry_id, anchor_text}]
+     *     - detailunlink:     [{entry_id, matched_url, anchor_text}]
+     *     - bulkunlink:       [{entry_id, matched_url}]
+     *     - urlchanger:       [{entry_id, matched_url, new_url}]
+     * @return string  The snapshot id (also used as filename without .json).
+     */
+    public function record(
+        string $kind,
+        array $entryIds,
+        array $preHashes = [],
+        array $summary = [],
+        array $items = [],
+        ?string $startedBy = null,
+        ?string $startedById = null,
+    ): string {
+        $this->cleanupStale();
+        $this->ensureDirectory();
+
+        $id = $this->newId();
+        $entryIds = array_values(array_unique(array_filter(
+            $entryIds,
+            fn ($v) => is_string($v) && $v !== '',
+        )));
+
+        // Cap to keep the file size sane on huge bulks. The "trimmed" flag
+        // tells the activity-log UI to show "N of M entries listed".
+        $trimmed = false;
+        $totalCount = count($entryIds);
+        if ($totalCount > self::MAX_ENTRIES_PER_SNAPSHOT) {
+            $entryIds = array_slice($entryIds, 0, self::MAX_ENTRIES_PER_SNAPSHOT);
+            $trimmed = true;
+        }
+
+        // Cap items to the same MAX so a 5000-replacement URL changer batch
+        // doesn't blow up the file. Activity-log surfaces these for forensics
+        // — we don't need to round-trip every single one.
+        $itemsTrimmed = false;
+        $itemCountTotal = count($items);
+        if ($itemCountTotal > self::MAX_ENTRIES_PER_SNAPSHOT) {
+            $items = array_slice($items, 0, self::MAX_ENTRIES_PER_SNAPSHOT);
+            $itemsTrimmed = true;
+        }
+        // Filter out non-array items defensively (caller should send arrays).
+        $items = array_values(array_filter($items, 'is_array'));
+
+        // Detached artisan commands have no auth()->user() — they need to
+        // forward the user info from the HTTP request payload via these
+        // parameters. Sync controllers can pass null and we'll grab it
+        // from auth() ourselves.
+        $data = [
+            'id' => $id,
+            'kind' => $kind,
+            'started_by' => $startedBy ?? $this->currentUserName(),
+            'started_by_id' => $startedById ?? $this->currentUserId(),
+            'started_at' => now()->toIso8601String(),
+            // Initial state: still running. Each bulk command flips this to
+            // an ISO timestamp via markCompleted() once the run terminates
+            // (success / partial / cancelled / error). The activity-log UI
+            // hides the Revert button for snapshots without a completed_at
+            // — reverting an in-flight bulk would race against the live writes.
+            'completed_at' => null,
+            'entry_ids' => $entryIds,
+            'pre_hashes' => $preHashes,
+            'summary' => $summary,
+            'items' => $items,
+            'entry_count_total' => $totalCount,
+            'entries_trimmed' => $trimmed,
+            'item_count_total' => $itemCountTotal,
+            'items_trimmed' => $itemsTrimmed,
+        ];
+
+        try {
+            file_put_contents(
+                $this->pathFor($id),
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            // Recording is best-effort — never let a snapshot-write failure
+            // break the actual bulk the user wanted to run.
+            Log::warning('[Linkwise] BulkSnapshotStore: record failed — '.$e->getMessage());
+        }
+
+        return $id;
+    }
+
+    /**
+     * Most-recent snapshots first. Bounded by $limit (default 50, the
+     * activity-log table doesn't paginate yet).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function list(int $limit = 50): array
+    {
+        if (! is_dir($this->storagePath)) {
+            return [];
+        }
+
+        $files = glob($this->storagePath.'/*.json') ?: [];
+        // Sort by mtime desc — newest first.
+        usort($files, fn ($a, $b) => filemtime($b) <=> filemtime($a));
+        $files = array_slice($files, 0, $limit);
+
+        $records = [];
+        foreach ($files as $file) {
+            $data = $this->readFile($file);
+            if ($data === null) {
+                continue;
+            }
+            $records[] = $data;
+        }
+
+        return $records;
+    }
+
+    /**
+     * Single snapshot by id. Returns null if missing or unparseable.
+     */
+    public function get(string $id): ?array
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return null;
+        }
+
+        return $this->readFile($path);
+    }
+
+    /**
+     * Collect current SafeEntrySaver hashes for the given entry IDs and
+     * persist them as post-bulk hashes on the snapshot. Convenience wrapper
+     * so each bulk command doesn't repeat the load+hash loop.
+     *
+     * Best-effort: missing entries (deleted, unfindable) are simply omitted
+     * — compareToCurrent will then mark them 'deleted' instead of 'modified'.
+     */
+    public function recordPostHashesForEntries(string $id, array $entryIds): void
+    {
+        $hashes = [];
+        foreach ($entryIds as $entryId) {
+            if (! is_string($entryId) || $entryId === '') {
+                continue;
+            }
+            try {
+                $entry = EntryFacade::find($entryId);
+                if ($entry) {
+                    $hashes[$entryId] = SafeEntrySaver::hash($entry);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('[Linkwise] recordPostHashesForEntries: skipping '.$entryId.' — '.$e->getMessage());
+            }
+        }
+        $this->recordPostHashes($id, $hashes);
+    }
+
+    /**
+     * Record post-bulk hashes — captured by each bulk command AFTER its
+     * writes complete. This is what compareToCurrent() uses to decide
+     * whether an entry was modified BY THE USER since the bulk, vs
+     * modified by the bulk itself (which is expected).
+     *
+     * Without these, every snapshot's compareToCurrent would mark every
+     * touched entry as 'modified' — because the bulk legitimately changed
+     * their content, the pre-bulk hash never matches current. The activity
+     * log's "Edited since bulk" badge would be useless noise.
+     */
+    public function recordPostHashes(string $id, array $postHashes): void
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return;
+        }
+        $data = $this->readFile($path);
+        if ($data === null) {
+            return;
+        }
+        $data['post_hashes'] = $postHashes;
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::recordPostHashes failed — '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Replace the items array on an existing snapshot. Used by Apply-Rule
+     * after the actual write loop completes — the initial record() is filed
+     * with preview's optimistic affected_entries (everything that LOOKS
+     * insertable), but only some of those actually got a link written. The
+     * activity-log + revert flow needs items to reflect what was actually
+     * written, otherwise revert tries to unlink links that were never there
+     * and reports false-positive "Links were already gone" skips.
+     */
+    public function replaceItems(string $id, array $items, ?array $entryIds = null): void
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return;
+        }
+        $data = $this->readFile($path);
+        if ($data === null) {
+            return;
+        }
+        $items = array_values(array_filter($items, 'is_array'));
+        if (count($items) > self::MAX_ENTRIES_PER_SNAPSHOT) {
+            $items = array_slice($items, 0, self::MAX_ENTRIES_PER_SNAPSHOT);
+            $data['items_trimmed'] = true;
+        }
+        $data['items'] = $items;
+        $data['item_count_total'] = count($items);
+        if ($entryIds !== null) {
+            $entryIds = array_values(array_unique(array_filter(
+                $entryIds,
+                fn ($v) => is_string($v) && $v !== '',
+            )));
+            $data['entry_ids'] = array_slice($entryIds, 0, self::MAX_ENTRIES_PER_SNAPSHOT);
+            $data['entry_count_total'] = count($entryIds);
+        }
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::replaceItems failed — '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Mark a snapshot as completed (the bulk run reached a terminal phase —
+     * done, partial, cancelled, or error). The activity-log UI uses this to
+     * gate the Revert button: an in-flight bulk's snapshot stays "in progress"
+     * and reverting is disabled so the user can't race against live writes.
+     *
+     * Idempotent — calling twice is harmless. The fields are best-effort, never
+     * throw upward; bulk completion shouldn't fail because logging did.
+     */
+    public function markCompleted(string $id, array $stats = []): void
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return;
+        }
+        $data = $this->readFile($path);
+        if ($data === null) {
+            return;
+        }
+        $data['completed_at'] = now()->toIso8601String();
+        if (! empty($stats)) {
+            $data['completion_stats'] = $stats;
+        }
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::markCompleted failed — '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Append per-entry skip records to a snapshot's revert_skipped list.
+     * Called by the inverse-bulk command when a hash-mismatch (or other
+     * skip reason) prevents reverting a specific entry — the activity-log
+     * drawer surfaces these so the user sees "of N items I tried to
+     * revert, here's the M that were skipped + WHY (modified by X on Y)".
+     *
+     * Best-effort, never throws upward — same shape as markCompleted.
+     *
+     * @param  array  $skipped  list of records, each {entry_id, entry_title, reason, modified_by?, modified_at?}
+     */
+    /**
+     * Build a skip record for one entry that was bypassed during a revert
+     * (or during the forward bulk run, when the per-item write was refused).
+     *
+     * Resolves entry-title + last-modified-by + last-modified-at via Statamic
+     * so the activity-log drawer can show "modified by Artur on 2026-05-08
+     * at 12:31". Falls back gracefully when the entry was deleted between
+     * the original bulk and the revert (lookup returns null → reason
+     * defaults to 'deleted').
+     *
+     * 2026-05-17 extension (Klasse-7 follow-up, activity_log_skip_context_gap):
+     * carries `anchor_text` + `target_entry_id` + `target_entry_title` +
+     * `target_href` so the Activity-Log drawer can render WHICH anchor +
+     * WHICH target was skipped. Without these the user saw "anchor text
+     * not found in entry content" with no clue which anchor. Args are
+     * optional + default null so legacy 2-arg callers stay green.
+     * `target_entry_title` is resolved from `target_entry_id` via Entry::find
+     * (same defensive try/catch pattern as the source-entry resolution).
+     *
+     * @return array{entry_id: string, entry_title: ?string, reason: string, modified_by: ?string, modified_at: ?string, anchor_text: ?string, target_entry_id: ?string, target_entry_title: ?string, target_href: ?string}
+     */
+    public static function buildSkipRecord(
+        string $entryId,
+        string $reason,
+        ?string $anchorText = null,
+        ?string $targetEntryId = null,
+        ?string $targetHref = null,
+    ): array {
+        // Resolve target title best-effort. Internal targets carry an
+        // entry_id; external targets carry only the URL (handled below).
+        // try/catch mirrors the source-entry resolution so a deleted
+        // target doesn't crash the snapshot record.
+        $targetEntryTitle = null;
+        if ($targetEntryId !== null && $targetEntryId !== '') {
+            try {
+                $targetEntry = \Statamic\Facades\Entry::find($targetEntryId);
+                if ($targetEntry) {
+                    $targetEntryTitle = $targetEntry->get('title') ?? $targetEntryId;
+                }
+            } catch (\Throwable) {
+                // Statamic test envs without Entry facade resolver — leave null.
+            }
+        }
+
+        $entry = \Statamic\Facades\Entry::find($entryId);
+        if (! $entry) {
+            return [
+                'entry_id' => $entryId,
+                'entry_title' => null,
+                'reason' => 'deleted',
+                'modified_by' => null,
+                'modified_at' => null,
+                'anchor_text' => $anchorText,
+                'target_entry_id' => $targetEntryId,
+                'target_entry_title' => $targetEntryTitle,
+                'target_href' => $targetHref,
+            ];
+        }
+        $modifiedBy = null;
+        try {
+            $user = $entry->lastModifiedBy();
+            if ($user) {
+                $modifiedBy = $user->name() ?? $user->email() ?? null;
+            }
+        } catch (\Throwable) {
+            // Statamic flat-file sites without user-tracking on entries
+            // raise on lastModifiedBy() — treat as unknown editor.
+        }
+        $modifiedAt = null;
+        try {
+            $lm = $entry->lastModified();
+            if ($lm) $modifiedAt = $lm->toIso8601String();
+        } catch (\Throwable) {
+        }
+
+        return [
+            'entry_id' => $entryId,
+            'entry_title' => $entry->get('title') ?? $entryId,
+            'reason' => $reason,
+            'modified_by' => $modifiedBy,
+            'modified_at' => $modifiedAt,
+            'anchor_text' => $anchorText,
+            'target_entry_id' => $targetEntryId,
+            'target_entry_title' => $targetEntryTitle,
+            'target_href' => $targetHref,
+        ];
+    }
+
+    /**
+     * Append a single per-item record to a snapshot's items list — the
+     * append-on-success pattern that replaces the older "record items
+     * upfront, hope the bulk succeeded" model.
+     *
+     * The activity-log promise is "this snapshot lists what we WROTE".
+     * If items are recorded before a write runs (the old pattern), every
+     * skipped / conflicted / failed entry leaks into the table claiming
+     * "we wrote here" — confuses users, lies on revert. Instead we start
+     * each snapshot with items=[] and grow only on confirmed success.
+     *
+     * Uses file-lock so concurrent appends from different bulk runs
+     * (rare but possible) don't clobber each other; cap enforced so
+     * a 5000-write batch can't blow up the file.
+     *
+     * Best-effort, never throws upward. Bulk completion shouldn't fail
+     * because forensic logging did.
+     */
+    public function appendWrittenItem(string $snapshotId, array $item): void
+    {
+        $path = $this->pathFor($snapshotId);
+        if (! file_exists($path)) return;
+
+        $fp = fopen($path, 'c+');
+        if ($fp === false) return;
+
+        try {
+            if (! flock($fp, LOCK_EX)) return;
+            rewind($fp);
+            $contents = stream_get_contents($fp);
+            $data = $contents ? json_decode($contents, true) : null;
+            if (! is_array($data)) {
+                flock($fp, LOCK_UN);
+                return;
+            }
+            $items = $data['items'] ?? [];
+            if (! is_array($items)) $items = [];
+
+            // Keep capping in line with the upfront-trim logic — same MAX
+            // applies whether items were pre-loaded or appended one by one.
+            if (count($items) >= self::MAX_ENTRIES_PER_SNAPSHOT) {
+                $data['items_trimmed'] = true;
+            } else {
+                $items[] = $item;
+                $data['items'] = $items;
+            }
+            $data['item_count_total'] = ($data['item_count_total'] ?? 0) + 1;
+
+            ftruncate($fp, 0);
+            rewind($fp);
+            fwrite($fp, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            fflush($fp);
+            flock($fp, LOCK_UN);
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::appendWrittenItem failed — '.$e->getMessage());
+        } finally {
+            fclose($fp);
+        }
+    }
+
+    public function recordRevertSkipped(string $originalId, array $skipped): void
+    {
+        if (empty($skipped)) return;
+        $path = $this->pathFor($originalId);
+        if (! file_exists($path)) return;
+        $data = $this->readFile($path);
+        if ($data === null) return;
+        $existing = $data['revert_skipped'] ?? [];
+        if (! is_array($existing)) $existing = [];
+        $data['revert_skipped'] = array_values(array_merge($existing, array_values($skipped)));
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::recordRevertSkipped failed — '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Append per-entry skip records to a snapshot's bulk_skipped list. Called
+     * by bulk commands when an entry was in the planned set but ultimately
+     * NOT written (anchor not found, hash mismatch from a parallel edit,
+     * missing payload field, unexpected throwable). Parallel to
+     * recordRevertSkipped but for forward/initial bulks rather than reverts.
+     *
+     * The activity-log drawer surfaces these in a "X entries were skipped
+     * during this run" table above the main affected-entries list — gives
+     * the user honest visibility into "of N planned, here's the M that
+     * didn't land + why" instead of just an aggregate count.
+     *
+     * Best-effort: never throws upward. Each skipped item has the shape
+     * built by buildSkipRecord(): {entry_id, entry_title, reason,
+     * modified_by?, modified_at?}.
+     */
+    public function recordBulkSkipped(string $snapshotId, array $skipped): void
+    {
+        if (empty($skipped)) return;
+        $path = $this->pathFor($snapshotId);
+        if (! file_exists($path)) return;
+        $data = $this->readFile($path);
+        if ($data === null) return;
+        $existing = $data['bulk_skipped'] ?? [];
+        if (! is_array($existing)) $existing = [];
+        $data['bulk_skipped'] = array_values(array_merge($existing, array_values($skipped)));
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::recordBulkSkipped failed — '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Mark a snapshot as reverted. Called by the activity-log Revert flow
+     * once the inverse bulk has finished. The activity-log UI uses these
+     * fields to show a "[Reverted]" badge and to disable the Revert button
+     * (avoids double-revert which would re-apply the original op).
+     */
+    public function markReverted(string $id, ?string $revertedBy = null): void
+    {
+        $path = $this->pathFor($id);
+        if (! file_exists($path)) {
+            return;
+        }
+        $data = $this->readFile($path);
+        if ($data === null) {
+            return;
+        }
+        $data['reverted_at'] = now()->toIso8601String();
+        if ($revertedBy !== null) {
+            $data['reverted_by'] = $revertedBy;
+        }
+        try {
+            file_put_contents(
+                $path,
+                json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[Linkwise] BulkSnapshotStore::markReverted failed — '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Compare a snapshot's pre-hashes with current entry hashes. Returns a
+     * map of entry-id → status for every entry the bulk touched:
+     *
+     *   'unchanged'  — entry hash still matches pre-bulk (the bulk's effects
+     *                  are still in place, restore is meaningful)
+     *   'modified'   — entry was edited after the bulk (restore would also
+     *                  wipe those edits)
+     *   'deleted'    — entry no longer exists (was deleted post-bulk)
+     *   'unknown'    — pre-hash wasn't recorded (nothing to compare against)
+     *
+     * @return array<string, string>
+     */
+    public function compareToCurrent(array $snapshot): array
+    {
+        $statuses = [];
+        // Post-bulk hashes (recorded after the bulk's writes finished) are
+        // the source of truth for "did the user touch this entry SINCE the
+        // bulk". Pre-bulk hashes are only useful as a fallback for legacy
+        // snapshots written before this addition — for those we report
+        // 'unknown' to be honest about the limitation.
+        $postHashes = $snapshot['post_hashes'] ?? null;
+
+        foreach ($snapshot['entry_ids'] ?? [] as $entryId) {
+            $entry = EntryFacade::find($entryId);
+            if (! $entry) {
+                $statuses[$entryId] = 'deleted';
+                continue;
+            }
+            if (! is_array($postHashes) || ! isset($postHashes[$entryId])) {
+                // Legacy snapshot or partial-failure bulk that didn't reach
+                // the post-hash recording step — we can't tell if the entry
+                // was touched since.
+                $statuses[$entryId] = 'unknown';
+                continue;
+            }
+            $current = SafeEntrySaver::hash($entry);
+            $statuses[$entryId] = ($current === $postHashes[$entryId]) ? 'unchanged' : 'modified';
+        }
+
+        return $statuses;
+    }
+
+    /**
+     * Delete snapshots older than RETENTION_DAYS. Called on every record()
+     * — cheap (one filemtime check per file).
+     */
+    protected function cleanupStale(): void
+    {
+        if (! is_dir($this->storagePath)) {
+            return;
+        }
+
+        $cutoff = time() - (self::RETENTION_DAYS * 86400);
+        foreach (glob($this->storagePath.'/*.json') ?: [] as $file) {
+            if (filemtime($file) < $cutoff) {
+                @unlink($file);
+            }
+        }
+    }
+
+    protected function ensureDirectory(): void
+    {
+        if (! is_dir($this->storagePath)) {
+            @mkdir($this->storagePath, 0755, true);
+        }
+    }
+
+    protected function pathFor(string $id): string
+    {
+        return $this->storagePath.'/'.$id.'.json';
+    }
+
+    protected function newId(): string
+    {
+        // Sortable + unique — date prefix means glob() + filemtime sorting
+        // matches the lexicographic id ordering, useful for debugging.
+        return date('Ymd-His').'-'.bin2hex(random_bytes(4));
+    }
+
+    protected function readFile(string $path): ?array
+    {
+        $raw = @file_get_contents($path);
+        if ($raw === false) {
+            return null;
+        }
+        $data = json_decode($raw, true);
+
+        return is_array($data) ? $data : null;
+    }
+
+    protected function currentUserId(): ?string
+    {
+        try {
+            return auth()->user()?->id();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    protected function currentUserName(): ?string
+    {
+        try {
+            $user = auth()->user();
+            if (! $user) {
+                return null;
+            }
+            // Statamic users have name() / email() helpers
+            if (method_exists($user, 'name')) {
+                return $user->name();
+            }
+
+            return $user->email() ?? null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+}

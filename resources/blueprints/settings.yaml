@@ -1,0 +1,206 @@
+sections:
+  general:
+    display: General
+    fields:
+      - handle: language
+        field:
+          type: select
+          display: 'Content language'
+          instructions: |
+            Drives stop-word filtering, stemming, and keyword extraction.
+            Confident (Snowball stemmer + curated stop-words — inflection-aware): English, German, French, Spanish, Italian, Dutch, Portuguese, Swedish, Danish, Norwegian, Finnish, Romanian, Russian, Catalan.
+            Limited (stop-words only — exact-match for plurals): Hungarian, Polish, Czech, Slovak, Slovenian, Croatian, Bulgarian, Ukrainian, Latvian, Lithuanian, Estonian, Irish, Greek, Turkish.
+            Leave empty to auto-detect from Statamic's site locale.
+            Not sure your language fits? Linkwise is free in dev environments under Statamic's licensing — install locally, run a scan on your real content, then license per-site for production.
+          options:
+            en: 'English (Confident)'
+            de: 'German (Confident)'
+            fr: 'French (Confident)'
+            es: 'Spanish (Confident)'
+            it: 'Italian (Confident)'
+            nl: 'Dutch (Confident)'
+            pt: 'Portuguese (Confident)'
+            sv: 'Swedish (Confident)'
+            da: 'Danish (Confident)'
+            'no': 'Norwegian (Confident)'
+            fi: 'Finnish (Confident)'
+            ro: 'Romanian (Confident)'
+            ru: 'Russian (Confident)'
+            ca: 'Catalan (Confident)'
+            hu: 'Hungarian (Limited — exact-match only)'
+            pl: 'Polish (Limited — exact-match only)'
+            cs: 'Czech (Limited — exact-match only)'
+            sk: 'Slovak (Limited — exact-match only)'
+            sl: 'Slovenian (Limited — exact-match only)'
+            hr: 'Croatian (Limited — exact-match only)'
+            bg: 'Bulgarian (Limited — exact-match only)'
+            uk: 'Ukrainian (Limited — exact-match only)'
+            lv: 'Latvian (Limited — exact-match only)'
+            lt: 'Lithuanian (Limited — exact-match only)'
+            et: 'Estonian (Limited — exact-match only)'
+            ga: 'Irish (Limited — exact-match only)'
+            el: 'Greek (Limited — sentence-boundary edge case)'
+            tr: 'Turkish (Limited — case-sensitivity edge case)'
+          width: 50
+
+      - handle: collections
+        field:
+          type: collections
+          display: Collections to Index
+          instructions: "Which collections should Linkwise index for suggestions? Leave empty to index all collections. Takes effect after re-scanning content."
+          mode: select
+          max_items: null
+          width: 50
+
+      - handle: target_collections
+        field:
+          type: collections
+          display: Target Collections
+          instructions: "Which collections should suggestions point TO? Leave empty for same as indexed collections."
+          mode: select
+          max_items: null
+          width: 50
+
+      - handle: entry_status
+        field:
+          type: select
+          display: Entry Status
+          instructions: "Which entries to include in the index. Takes effect after re-scanning content."
+          options:
+            published: "Published only"
+            all: "All entries (including drafts)"
+          default: published
+          width: 50
+
+      - handle: max_suggestions
+        field:
+          type: integer
+          display: Max Suggestions
+          instructions: "Maximum number of suggestions to display in the sidebar panel."
+          default: 10
+          width: 50
+
+      - handle: open_in_new_tab
+        field:
+          type: toggle
+          display: Open Links in New Tab
+          instructions: "Add target=\"_blank\" to inserted links."
+          default: false
+          width: 50
+
+  matching:
+    display: Matching
+    fields:
+      - handle: min_phrase_words
+        field:
+          type: integer
+          display: Minimum Phrase Words
+          instructions: "Minimum number of words a title phrase must have to be considered a match."
+          default: 2
+          width: 50
+
+      - handle: min_score
+        field:
+          type: text
+          display: Minimum Title Match Score
+          instructions: "Minimum relevance score (0-1) for title-based suggestions. Higher = fewer but better matches."
+          default: "0.4"
+          input_type: number
+          width: 50
+
+      - handle: max_keywords_per_entry
+        field:
+          type: integer
+          display: Max Keywords per Entry
+          instructions: "Maximum TF-IDF keywords to extract per entry."
+          default: 20
+          width: 50
+
+      - handle: min_keyword_score
+        field:
+          type: text
+          display: Minimum Keyword Score
+          instructions: "Minimum keyword overlap score (0-1) for keyword-based suggestions. Lower = more suggestions but more noise."
+          default: "0.15"
+          input_type: number
+          width: 50
+
+      - handle: prevent_two_way
+        field:
+          type: toggle
+          display: Prevent Two-Way Linking
+          instructions: "If entry A links to entry B, don't suggest linking B to A."
+          default: false
+          width: 50
+
+  exclusions:
+    display: Exclusions
+    fields:
+      - handle: excluded_entries
+        field:
+          type: entries
+          display: Exclude Entries
+          instructions: "These entries will be excluded from all suggestions (neither suggested nor suggesting)."
+          mode: select
+          max_items: null
+          create: false
+
+      - handle: excluded_collections
+        field:
+          type: collections
+          display: Exclude Collections
+          instructions: "Entries in these collections will be completely excluded from suggestions. Takes effect after re-scanning content."
+          mode: select
+          max_items: null
+
+      - handle: title_blacklist
+        field:
+          type: textarea
+          display: Title Blacklist
+          instructions: "Titles to ignore for matching (one per line). Short or generic titles like 'Home' or 'Blog' cause false positives."
+          placeholder: |
+            Home
+            Blog
+            Getting Started
+            Contact
+
+      - handle: orphaned_ignore
+        field:
+          type: entries
+          display: Ignore from Orphaned Report
+          instructions: "These entries won't be flagged as orphaned (e.g. Home, 404 page)."
+          mode: select
+          max_items: null
+          create: false
+
+      - handle: ignored_links
+        field:
+          type: textarea
+          display: Links to Ignore
+          instructions: "URL patterns to ignore (one per line). Supports wildcards. These links won't be counted in reports."
+          placeholder: |
+            example.com/*
+            /wp-admin/*
+
+  stopwords:
+    display: Stopwords
+    fields:
+      - handle: custom_stopwords
+        field:
+          type: textarea
+          display: Custom Stopwords
+          instructions: "Additional stopwords to filter out (one per line). These are added to the language defaults."
+          placeholder: |
+            yourcompany
+            brandname
+
+  auto_linking:
+    display: Auto-Linking
+    fields:
+      - handle: auto_apply_on_save_enabled
+        field:
+          type: toggle
+          display: Auto-Apply Rules on Entry Save
+          instructions: "When enabled, every active auto-link rule fires automatically each time an entry is saved or created. You can opt-out specific rules in the Auto-Linking tab (per-rule 'Disable auto-apply' checkbox). Off by default."
+          default: false
+

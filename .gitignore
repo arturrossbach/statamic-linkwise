@@ -1,0 +1,15 @@
+/node_modules
+/vendor
+composer.lock
+package-lock.json
+.phpunit.result.cache
+/resources/dist
+/docs/.vitepress/dist
+/docs/.vitepress/cache
+.claude/
+CLAUDE.md
+docs/ARCHITECTURE_REVIEW.md
+docs/SISTER_AUDIT_2026_05_17.md
+*.iml
+.idea/
+/test-results
