@@ -38,13 +38,26 @@ class InboundEngine
             return [];
         }
 
+        // 2026-05-22: post-Indexer-filter-removal, excluded entries are
+        // present in the index but must not surface as Suggestion source
+        // or target. Blueprint copy: "neither suggested nor suggesting".
+        $excludedFilter = new ExcludedEntryFilter;
         $targetRecord = $records[$targetEntryId];
+        if ($excludedFilter->isExcludedRecord($targetRecord)) {
+            return [];
+        }
+
         $singleIndex = [$targetEntryId => $targetRecord];
         $results = [];
 
         foreach ($records as $sourceRecord) {
             // Skip self
             if ($sourceRecord->id === $targetEntryId) {
+                continue;
+            }
+
+            // Skip excluded sources — they shouldn't suggest anything either.
+            if ($excludedFilter->isExcludedRecord($sourceRecord)) {
                 continue;
             }
 
