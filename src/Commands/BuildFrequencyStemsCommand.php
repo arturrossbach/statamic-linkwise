@@ -21,40 +21,36 @@ use Illuminate\Console\Command;
  * forms via inflection (vernachlässigt + vernachlässigte + vernachlässigen
  * → one stem). Surface-form matching would miss those.
  *
- * Why Top-10000 (user-decided 2026-05-22 after smoke + data analysis):
+ * Why Top-50000 (user-decided 2026-05-22 round 2 after Top-10k smoke):
  *
- * Empirical run against the user's 39 reported junk words ("richtige",
- * "funktioniert", "vernachlässigten", ...) at different thresholds:
+ * Top-10000 was a compromise to avoid `mikrofon` (rank 11167) being
+ * a false-positive. The smoke run revealed it was too sanft — words
+ * like `geröstet` (rank 30367), `vernachlässigt` (12568) rutsch
+ * durch and surface as auto-detected keywords for non-cooking and
+ * non-care-related entries (e.g. "Foundry Hex-Multitool", "Apex
+ * Bergsteiger-Klettergurt"). Empirically this is the dominant junk
+ * the user wants gone.
  *
- *     Top-3000  ->  27/39 (69%) caught, no domain false-positives
- *     Top-10000 ->  33/39 (85%) caught, no domain false-positives
- *     Top-15000 ->  36/39 (92%) caught, first false-positive: `mikrofon`
- *     Top-50000 ->  37/39 (97%) caught, false-positives: `mikrofon`,
- *                   `suchmaschine`, `notebook`
+ * The middle-band concern (`mikrofon`, `suchmaschine`, `notebook`
+ * being legitimate domain words at low-frequency rank) is solved by
+ * Title-Protect in the KeywordExtractor: a stem in the entry's title
+ * bypasses the filter. So a "Mikrofon-Test" post still gets `mikrofon`
+ * as a keyword; a non-audio post that mentions `mikrofon` in passing
+ * does not.
  *
- * Top-10000 is the empirical sweet spot — first threshold where
- * common-language coverage stops climbing as fast as middle-band
- * domain vocabulary starts getting hit. Words like `mikrofon`
- * (rank 11167), `suchmaschine` (47934), `notebook` (49078) survive,
- * so an editor's audio / SEO / hardware blog still gets meaningful
- * keywords from those tokens.
+ * 50k surface forms collapse via stemming to ~22-40k unique stems
+ * per language (~300-600 KB JSON). Loaded lazy per active language.
  *
- * Title-Protect on top of this catches the cases where a Top-10000
- * word IS a legitimate keyword for a specific entry (`Rezept` in a
- * cooking post's title bypasses the filter). For body-only domain
- * words that happen to be mid-frequency without title support, the
- * user has Custom Stopwords (additive removal — wait, no, additive
- * means they extend filtering, not protect words) → use Custom
- * Target Keywords per entry to whitelist them. The residual 6 junk
- * words (vernachlässigten, konkreter, reduziert, ...) can be added
- * via Custom Stopwords, which after the 2026-05-22 stem-first
- * rewrite catch all inflected forms automatically.
+ * Residual escape valves the user has if a legitimate body-only
+ * mid-frequency word gets filtered without title-protect:
+ *   - Custom Target Keywords per entry (whitelist)
+ *   - Ignored Suggestions (pair-specific kill)
  */
 class BuildFrequencyStemsCommand extends Command
 {
     protected $signature = 'linkwise:build-frequency-stems
         {language : ISO code (e.g. de, en)}
-        {--top=10000 : How many top-frequency surface forms to include before stemming-dedup}
+        {--top=50000 : How many top-frequency surface forms to include before stemming-dedup}
         {--input= : Path to raw FrequencyWords .txt (defaults to resources/data/_raw_{lang}_50k.txt)}';
 
     protected $description = 'Generate frequency-stems-{lang}.json from a FrequencyWords raw .txt file';
