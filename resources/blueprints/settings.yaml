@@ -176,23 +176,6 @@ sections:
             - 'max:1'
           width: 50
 
-      - handle: enable_keyword_matches
-        field:
-          type: toggle
-          display: 'Enable Keyword-Overlap Suggestions (Experimental)'
-          instructions: |
-            **Experimental — produces noisy anchor suggestions.** Off by default. Linkwise's primary match modes are **Title matches** (entry title or substring found in another post's body) and **Custom Target Keywords** (per-entry whitelist). Those produce clean, editorially-meaningful anchors.
-
-            Turning this ON additionally surfaces suggestions based on **TF-IDF content-keyword overlap**. The match-finding part works fine — but the anchor-extraction strategy picks a keyword plus a neighbour word from the source text. This frequently produces semantically incoherent anchors like "Schreiben sauber" or "Code lebt". The mid-frequency frequency filter (since 2026-05-22) helps but doesn't eliminate the problem.
-
-            **When to consider turning ON:** your content uses very short or generic titles (e.g. all posts titled "Untitled Draft") so Title-match has no surface area, AND you've already populated **Custom Target Keywords** on the entries that matter.
-
-            **Strongly recommended alternative:** Leave OFF and use **Custom Target Keywords** for thematic links that don't go through titles. That gives the same coverage with clean editorially-controlled anchors.
-
-            **After toggling, run Scan Content (header button)** so the Outbound count badges in Links Report reflect the new behavior. The Suggestion Modal itself updates live without a rescan.
-          default: false
-          width: 50
-
       - handle: prevent_two_way
         field:
           type: toggle
