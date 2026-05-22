@@ -10,7 +10,9 @@ class SeedTestDataCommand extends Command
 {
     protected $signature = 'linkwise:seed-test-data
                             {count=30 : Number of entries to create}
-                            {--collection=articles : Collection handle to create entries in}';
+                            {--collection=articles : Collection handle for the article entries}
+                            {--with-home : Also create a Home page entry with multi-link Markdown content (reproduces the Cloudways multi-URL replace bug locally)}
+                            {--pages-collection=pages : Collection handle for the Home page entry}';
 
     protected $description = 'Generate realistic test entries for Linkwise testing';
 
@@ -50,9 +52,85 @@ class SeedTestDataCommand extends Command
         }
 
         $this->info("Created {$created} test entries in '{$collectionHandle}' collection.");
+
+        if ($this->option('with-home')) {
+            $this->seedHomePage();
+        }
+
         $this->info('Now run: php please linkwise:index');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Seeds a Home page in a separate `pages` collection with a Markdown
+     * content field that contains MULTIPLE external links sharing one
+     * domain — the canonical repro for the 2026-05-22 multi-URL replace
+     * bug (URL-Changer "Links were already gone" past the first link).
+     *
+     * Idempotent: if a Home entry already exists at the expected slug it
+     * is updated in place, not duplicated.
+     */
+    protected function seedHomePage(): void
+    {
+        $pagesHandle = $this->option('pages-collection');
+
+        $pages = Collection::findByHandle($pagesHandle);
+        if (! $pages) {
+            $pages = Collection::make($pagesHandle)
+                ->title(ucfirst($pagesHandle))
+                ->pastDateBehavior('public')
+                ->futureDateBehavior('private');
+            $pages->save();
+            $this->info("Created collection: {$pagesHandle}");
+        }
+
+        // Markdown content mirrors the Cloudways production smoke: multiple
+        // distinct URLs sharing one domain (github.com → /arturrossbach and
+        // /arturrossbach/statamic-linkwise) plus other external links to
+        // trigger the multi-URL-domain-search drift in URL-Changer.
+        $content = <<<'MD'
+Welcome to the Linkwise local smoke environment.
+
+This page deliberately contains multiple external Markdown links across
+different paths and domains so you can reproduce the multi-link
+URL-Changer behaviour locally:
+
+- Personal GitHub: [arturrossbach on GitHub](https://github.com/arturrossbach)
+- This addon: [statamic-linkwise repo](https://github.com/arturrossbach/statamic-linkwise)
+- Statamic core docs: [Statamic Dev](https://statamic.dev)
+- A YouTube reference: [Watch the talk](https://youtube.com/watch?v=demo)
+
+To reproduce the bug fixed by PR #86, search for "github.com" in the URL
+Changer, then try to replace the SECOND github.com link (the linkwise
+repo one). On the broken code path this would skip with "Links were
+already gone — Run Scan Content to refresh the index". On the fixed
+path the second link replaces cleanly.
+MD;
+
+        $slug = 'home';
+        $existing = Entry::query()
+            ->where('collection', $pagesHandle)
+            ->where('slug', $slug)
+            ->first();
+
+        if ($existing) {
+            $existing->data(array_merge($existing->data()->all(), [
+                'title' => 'Home',
+                'content' => $content,
+            ]));
+            $existing->save();
+            $this->info("Updated existing Home page in '{$pagesHandle}'.");
+            return;
+        }
+
+        Entry::make()
+            ->collection($pagesHandle)
+            ->slug($slug)
+            ->data(['title' => 'Home', 'content' => $content])
+            ->save();
+
+        $this->info("Created Home page in '{$pagesHandle}' with 4 external Markdown links.");
     }
 
     protected function getArticles(): array
