@@ -156,31 +156,51 @@ class LanguageRegistry
      */
     public static function resolve(): string
     {
-        // Wrapped in try/catch end-to-end because every call site here can
-        // fail in a unit-test context where the Laravel container isn't
-        // booted (config() throws BindingResolutionException, Statamic
-        // facade is unbound, etc.). Same defensive pattern as the legacy
-        // Stemmer code — pipeline must be usable without a live app.
+        return self::resolveWithSource()['code'];
+    }
+
+    /**
+     * Same resolution chain as {@see resolve()} but returns both the
+     * resolved code AND the resolution source so the Overview tab can
+     * tell the user "auto-detected from Statamic site locale" instead
+     * of silently picking a language.
+     *
+     * @return array{code: string, source: string, source_detail: ?string}
+     */
+    public static function resolveWithSource(): array
+    {
         try {
             $configured = config('linkwise.language');
             if (is_string($configured) && isset(self::LANGUAGES[$configured])) {
-                return $configured;
+                return [
+                    'code' => $configured,
+                    'source' => 'explicit',
+                    'source_detail' => null,
+                ];
             }
         } catch (\Throwable) {
-            // No container — skip to next fallback step.
+            // No container — fall through.
         }
-        // Try Statamic site locale (e.g. 'de_DE' → 'de')
         try {
             $site = \Statamic\Sites\Site::current() ?? null;
             if ($site) {
-                $shortLocale = mb_substr((string) ($site->shortLocale() ?? $site->locale() ?? ''), 0, 2);
+                $rawLocale = (string) ($site->shortLocale() ?? $site->locale() ?? '');
+                $shortLocale = mb_substr($rawLocale, 0, 2);
                 if ($shortLocale && isset(self::LANGUAGES[$shortLocale])) {
-                    return $shortLocale;
+                    return [
+                        'code' => $shortLocale,
+                        'source' => 'auto-detected',
+                        'source_detail' => "Statamic site locale: {$rawLocale}",
+                    ];
                 }
             }
         } catch (\Throwable) {
-            // Statamic not booted (CLI scripts / unit tests) — ignore.
+            // Statamic not booted — fall through.
         }
-        return self::DEFAULT_LANG;
+        return [
+            'code' => self::DEFAULT_LANG,
+            'source' => 'fallback',
+            'source_detail' => 'No Linkwise language configured and Statamic site locale not in the supported list',
+        ];
     }
 }

@@ -86,6 +86,8 @@ class InertiaPagesController extends CpController
             }
         }
 
+        $resolvedLanguage = \Arturrossbach\Linkwise\NLP\LanguageRegistry::resolveWithSource();
+
         return Inertia::render('linkwise::Overview', [
             'summary' => $data['summary'],
             'health' => $report->health(),
@@ -93,6 +95,12 @@ class InertiaPagesController extends CpController
             'brokenLastChecked' => $brokenData['metadata']['last_checked'] ?? null,
             'indexLastBuiltAt' => $this->indexer->getIndexLastBuiltAt(),
             'domainsCount' => count($domainReport->toArray()),
+            'resolvedLanguage' => [
+                'code' => $resolvedLanguage['code'],
+                'name' => \Arturrossbach\Linkwise\NLP\LanguageRegistry::name($resolvedLanguage['code']),
+                'source' => $resolvedLanguage['source'],
+                'source_detail' => $resolvedLanguage['source_detail'],
+            ],
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
