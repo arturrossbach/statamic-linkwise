@@ -114,7 +114,6 @@
                                     <td>
                                         <a v-if="row.edit_url" :href="row.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ row.entry_title || row.entry_id }}</a>
                                         <span v-else>{{ row.entry_title || '(deleted)' }}</span>
-                                        <BardBadge v-if="row.entry_id" :entry-id="row.entry_id" class="ml-1.5" />
                                         <span v-if="row.collection" class="ml-2 text-xs text-gray-400">{{ row.collection }}</span>
                                     </td>
                                     <td class="text-gray-600 dark:text-gray-400" v-html="formatSkipReason(row)"></td>
@@ -184,7 +183,6 @@
                                     <td>
                                         <a v-if="e.edit_url" :href="e.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ e.title }}</a>
                                         <span v-else>{{ e.title }}</span>
-                                        <BardBadge v-if="e.id" :entry-id="e.id" class="ml-1.5" />
                                         <span v-if="e.collection" class="ml-2 text-xs text-gray-400">{{ e.collection }}</span>
                                     </td>
                                     <td v-if="extraColumnLabel" class="text-xs text-gray-600 dark:text-gray-400">
@@ -216,14 +214,13 @@
 import LinkwiseLayout from '../LinkwiseLayout.vue';
 import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
-import BardBadge from '../shared/BardBadge.vue';
 import { sortableMixin } from '../shared/sortable.js';
 import { Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal } from '@statamic/cms/ui';
 import { isReversible, nonReversibleReason as computeNonReversibleReason, buildRevertRequest } from '../../services/revertHelper.js';
 import { setHeavyState } from '../../services/bulkOperationService.js';
 
 export default {
-    components: { LinkwiseLayout, HelpIcon, SortableHeader, Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal, BardBadge },
+    components: { LinkwiseLayout, HelpIcon, SortableHeader, Card, Panel, Button, Badge, Stack, Alert, ConfirmationModal },
 
     mixins: [sortableMixin],
 

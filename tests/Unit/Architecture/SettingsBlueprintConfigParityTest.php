@@ -77,15 +77,22 @@ class SettingsBlueprintConfigParityTest extends TestCase
         // Extract the configMap block. Loose match — looks for
         // 'handle' => 'configKey' entries inside the
         // mergeAddonSettingsIntoConfig method. We scope to "between
-        // the method's opening brace and the next method declaration"
-        // by finding the next `protected|public|private function`
-        // (anonymous closures use bare `function (` and don't trip this).
-        $startMarker = strpos($providerSrc, 'mergeAddonSettingsIntoConfig');
-        $this->assertNotFalse($startMarker, 'mergeAddonSettingsIntoConfig method not found in ServiceProvider');
+        // the method's opening brace and the next method declaration
+        // OR the class-closing brace at the file end" — the latter
+        // matters when mergeAddonSettingsIntoConfig is the LAST method
+        // in the class, which it currently is after the bard-badge
+        // cleanup (2026-05-22). Locking on the method DECLARATION
+        // (not any `mergeAddonSettingsIntoConfig` substring) so the
+        // start is unambiguous even if the method is also called
+        // earlier in the file.
+        $startMarker = strpos($providerSrc, 'protected function mergeAddonSettingsIntoConfig');
+        $this->assertNotFalse($startMarker, 'mergeAddonSettingsIntoConfig method declaration not found in ServiceProvider');
         $tail = substr($providerSrc, $startMarker);
         if (preg_match('/^(.*?)\n\s+(?:protected|public|private)\s+function\s+\w+/sU', $tail, $m)) {
             $methodBody = $m[1];
         } else {
+            // Last method in the class — body is everything up to the
+            // class-closing brace. Match the trailing `}` of the class.
             $methodBody = $tail;
         }
 
