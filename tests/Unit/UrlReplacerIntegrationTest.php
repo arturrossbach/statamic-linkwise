@@ -168,8 +168,8 @@ class UrlReplacerIntegrationTest extends TestCase
     {
         $md = "Read [intro](https://old.com/intro) and [guide](https://old.com/guide) for more. Also see [other](https://other.com).";
 
-        // Replace only idx:1 (guide)
-        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com/guide', 'https://new.com/guide', 0);
+        // Replace only idx:1 (guide). $search === $oldUrl (exact-mode style).
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com/guide', 'https://old.com/guide', 'https://new.com/guide', 0);
 
         $this->assertTrue($replaced);
         $this->assertStringContainsString('[intro](https://old.com/intro)', $result); // untouched
@@ -183,7 +183,7 @@ class UrlReplacerIntegrationTest extends TestCase
     {
         $md = "Before the link [click here](https://old.com) and after the link.\n\nAnother paragraph.";
 
-        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', 'https://new.com', 0);
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', 'https://old.com', 'https://new.com', 0);
 
         $this->assertTrue($replaced);
         $this->assertStringStartsWith('Before the link', $result);
@@ -338,7 +338,7 @@ class UrlReplacerIntegrationTest extends TestCase
     {
         $md = 'See [click here](https://old.com) for more.';
 
-        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', \Arturrossbach\Linkwise\Support\UrlHelper::UNLINK, 0);
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', 'https://old.com', \Arturrossbach\Linkwise\Support\UrlHelper::UNLINK, 0);
 
         $this->assertTrue($replaced);
         $this->assertSame('See click here for more.', $result);

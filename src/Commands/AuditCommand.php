@@ -1793,7 +1793,7 @@ class AuditCommand extends Command
             $replicator = $this->parityBuildReplicator($anchorInDoc, $oldUrl);
 
             [$bardOut, $bardReplaced] = $replacer->replaceNthInBard($bard, 'example.com', $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
-            [$mdOut, $mdReplaced] = $replacer->replaceNthInMarkdown($md, $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
+            [$mdOut, $mdReplaced] = $replacer->replaceNthInMarkdown($md, 'example.com', $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
             [$repOut, $repReplaced] = $replacer->replaceNthInReplicator($replicator, 'example.com', $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
 
             $bardChanged = $bard !== $bardOut;
