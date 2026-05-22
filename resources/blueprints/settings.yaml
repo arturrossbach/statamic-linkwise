@@ -146,36 +146,6 @@ sections:
             - 'max:100'
           width: 50
 
-      - handle: min_keyword_score
-        field:
-          type: float
-          display: Minimum Keyword Score
-          instructions: |
-            How much overlap in top content keywords two entries need to share before Linkwise suggests a link between them (0.0–1.0). Higher = stricter, fewer but cleaner suggestions; lower = more suggestions including borderline matches.
-
-            **Reference values:**
-            - `0.05` — very permissive, expect lots of weak suggestions
-            - `0.15` — default, balanced signal-to-noise
-            - `0.50` — strict, only entries clearly sharing the same topic
-            - `0.80+` — usually too strict, often zero suggestions
-
-            **Example:** at `0.15`, two entries must share ~15 % of their weighted top-keywords (e.g. both score high on "database", "index", "postgres") to suggest a link.
-
-            **Heads-up — when changes take effect:**
-            - **Suggestion Modal** (click the count badge) — filtered live with the current threshold, no rescan needed.
-            - **Outbound count badge** in the Links Report table — cached in the index, only updates after **Scan Content**.
-
-            Requires **Enable Keyword-Overlap Suggestions** below to be ON — otherwise this threshold has no effect.
-          default: 0.15
-          min: 0
-          max: 1
-          step: 0.05
-          validate:
-            - 'numeric'
-            - 'min:0'
-            - 'max:1'
-          width: 50
-
       - handle: prevent_two_way
         field:
           type: toggle
