@@ -1,5 +1,5 @@
 <template>
-    <LinkwiseLayout active-tab="keywords" page-title="Linkwise — Target Keywords" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
+    <LinkwiseLayout active-tab="keywords" page-title="Linkwise — Custom Keywords" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
         <!-- :key="renderKey" — universal post-bulk remount (Klasse-10). -->
         <TargetKeywordsTab :key="renderKey" :data="keywordsData" />
     </LinkwiseLayout>

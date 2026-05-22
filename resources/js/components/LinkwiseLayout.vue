@@ -151,7 +151,7 @@
                     Your PHP installation has disabled <code class="text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30">{{ execWarningDisabledList }}</code> via the <code class="text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30">disable_functions</code> ini directive. Linkwise needs these to dispatch background jobs for <strong>Scan Content, Check Links, Bulk Unlink, Apply Rule</strong>, the <strong>URL Changer</strong>, and <strong>Inbound/Outbound Insert</strong>. Those features will not work until your hosting provider enables them — typically by upgrading from shared to managed or VPS hosting.
                 </p>
                 <p class="text-xs text-red-700 dark:text-red-400 mt-2">
-                    Single-entry actions (creating individual links from the entry editor, custom target keywords) continue to work normally.
+                    Single-entry actions (creating individual links from the entry editor, custom keywords) continue to work normally.
                 </p>
                 <div class="mt-3 flex gap-2">
                     <Button text="Dismiss for this session" size="sm" @click="execWarningDismissed = true" />
@@ -162,7 +162,7 @@
                  7 tabs never wrap into a multi-row stack (which fights the
                  border-bottom indicator) and never trigger page-level
                  horizontal scroll. Each tab label is whitespace-nowrap so
-                 multi-word labels (Auto-Linking, Target Keywords, URL Changer)
+                 multi-word labels (Auto-Linking, Custom Keywords, URL Changer)
                  stay on a single line. -->
             <nav class="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-4 overflow-x-auto" aria-label="Linkwise tabs">
                 <Link
@@ -540,7 +540,7 @@ export default {
                 { name: 'broken', label: 'Broken Links', url: this.route('linkwise.broken') },
                 { name: 'domains', label: 'Domains', url: this.route('linkwise.domains') },
                 { name: 'autolink', label: 'Auto-Linking', url: this.route('linkwise.autolink') },
-                { name: 'keywords', label: 'Target Keywords', url: this.route('linkwise.keywords') },
+                { name: 'keywords', label: 'Custom Keywords', url: this.route('linkwise.keywords') },
                 { name: 'urlchanger', label: 'URL Changer', url: this.route('linkwise.urlchanger') },
                 // Hard-coded URL — `this.route('linkwise.activity')` returned
                 // an empty/dashboard fallback when the named route wasn't yet
