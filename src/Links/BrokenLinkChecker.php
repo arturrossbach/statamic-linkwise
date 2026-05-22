@@ -107,10 +107,11 @@ class BrokenLinkChecker
         $totalUrls = $this->countTotalExternalUrls($records);
         $progress = 0;
 
-        $excludedEntries = config('linkwise.excluded_entries', []);
-        $excludedEntries = is_array($excludedEntries) ? $excludedEntries : [];
-        $excludedCollections = config('linkwise.excluded_collections', []);
-        $excludedCollections = is_array($excludedCollections) ? $excludedCollections : [];
+        // 2026-05-22: excluded_entries / excluded_collections used to skip
+        // entries here on top of the Indexer's own filter. Both are now gone
+        // — Broken-Links is a real-link report, not a Suggestion path. User-
+        // bug: putting `Home` in excluded_entries silently hid broken links
+        // there. Sister-fix to DomainReport.
         $ignoredLinks = config('linkwise.ignored_links', '');
         $ignoredPatterns = is_string($ignoredLinks) ? array_filter(array_map('trim', explode("\n", $ignoredLinks))) : [];
 
@@ -120,13 +121,6 @@ class BrokenLinkChecker
         $seenEntryIds = [];
 
         foreach ($records as $record) {
-            if (in_array($record->id, $excludedEntries, true)) {
-                continue;
-            }
-            if (! empty($excludedCollections) && in_array($record->collection, $excludedCollections, true)) {
-                continue;
-            }
-
             $seenEntryIds[$record->id] = true;
 
             $entry = Entry::find($record->id);
