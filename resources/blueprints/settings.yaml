@@ -9,6 +9,8 @@ sections:
           clearable: true
           instructions: |
             Drives stop-word filtering, stemming, and keyword extraction. Leave empty to auto-detect from Statamic's site locale. "Confident" languages support inflected matching (plurals, conjugations); "Limited" languages match exact word forms only.
+
+            _Affects the NLP pipeline — run **Scan Content** (header button) after changing this for the new language to take effect._
           options:
             en: 'English (Confident)'
             de: 'German (Confident)'
@@ -53,7 +55,7 @@ sections:
         field:
           type: collections
           display: Target Collections
-          instructions: "Which collections should suggestions point TO? Leave empty for same as indexed collections."
+          instructions: "Which collections should suggestions point TO? Leave empty for same as indexed collections. _Run **Scan Content** after changing this so the Links Report counts reflect the new target scope._"
           mode: select
           max_items: null
           width: 50
@@ -79,6 +81,8 @@ sections:
             Does **not** affect inbound suggestion counts (those are computed unlimited so the inbound-badge in the Links Report shows true totals).
 
             **Default 10** is a sane editorial limit — bump to 50–100 if you want every borderline match visible. Higher values mean slightly slower modal loads but more thorough suggestion lists.
+
+            _Run **Scan Content** after changing this so the Outbound count badges in Links Report match the new cap. Suggestion modals update live._
           default: 10
           min: 1
           max: 200
@@ -103,7 +107,7 @@ sections:
         field:
           type: integer
           display: Minimum Phrase Words
-          instructions: "Minimum number of words a title phrase must have to be considered a match."
+          instructions: "Minimum number of words a title phrase must have to be considered a match. _Run **Scan Content** after changing this so the Links Report counts reflect the new threshold._"
           default: 2
           min: 1
           max: 10
@@ -117,7 +121,7 @@ sections:
         field:
           type: float
           display: Minimum Title Match Score
-          instructions: "Minimum relevance score (0.0 – 1.0) for title-based suggestions. Higher = fewer but better matches."
+          instructions: "Minimum relevance score (0.0 – 1.0) for title-based suggestions. Higher = fewer but better matches. _Run **Scan Content** after changing this so the Links Report counts reflect the new threshold. Suggestion modals update live._"
           default: 0.4
           min: 0
           max: 1
@@ -132,7 +136,7 @@ sections:
         field:
           type: integer
           display: Max Keywords per Entry
-          instructions: "Maximum TF-IDF keywords to extract per entry."
+          instructions: "Maximum TF-IDF keywords to extract per entry. _Affects what's extracted at scan-time — run **Scan Content** after changing this for the new cap to take effect._"
           default: 20
           min: 1
           max: 100
@@ -189,7 +193,7 @@ sections:
         field:
           type: toggle
           display: Prevent Two-Way Linking
-          instructions: "If entry A links to entry B, don't suggest linking B to A."
+          instructions: "If entry A links to entry B, don't suggest linking B to A. _Run **Scan Content** after changing this so the Links Report counts reflect the new filter._"
           default: false
           width: 50
 
@@ -200,7 +204,7 @@ sections:
         field:
           type: entries
           display: Exclude Entries
-          instructions: "These entries will be excluded from all suggestions (neither suggested nor suggesting)."
+          instructions: "These entries will be excluded from all suggestions (neither suggested nor suggesting). _Run **Scan Content** after changing this so the Links Report counts reflect the exclusions._"
           mode: select
           max_items: null
           create: false
@@ -217,7 +221,7 @@ sections:
         field:
           type: textarea
           display: Title Blacklist
-          instructions: "Titles to ignore for matching (one per line). Short or generic titles like 'Home' or 'Blog' cause false positives."
+          instructions: "Titles to ignore for matching (one per line). Short or generic titles like 'Home' or 'Blog' cause false positives. _Run **Scan Content** after changing this so the Links Report counts reflect the blacklist._"
           placeholder: |
             Home
             Blog
@@ -237,7 +241,7 @@ sections:
         field:
           type: textarea
           display: Links to Ignore
-          instructions: "URL patterns to ignore (one per line). Supports wildcards. These links won't be counted in reports."
+          instructions: "URL patterns to ignore (one per line). Supports wildcards. These links won't be counted in reports. _Affects the broken-link report — run **Check Links** (in the Broken Links tab) after changing this for the new filter to take effect._"
           placeholder: |
             example.com/*
             /wp-admin/*
@@ -249,7 +253,7 @@ sections:
         field:
           type: textarea
           display: Custom Stopwords
-          instructions: "Additional stopwords to filter out (one per line). These are added to the language defaults."
+          instructions: "Additional stopwords to filter out (one per line). These are added to the language defaults. _Affects keyword extraction at index-time — run **Scan Content** after changing this for the new stopwords to take effect._"
           placeholder: |
             yourcompany
             brandname
