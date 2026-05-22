@@ -186,6 +186,30 @@ class StaleCheckPropsTest extends TestCase
         $this->assertIsString($props['staleCheck']['check_status_url']);
     }
 
+    public function test_props_carry_exec_availability_payload(): void
+    {
+        // The CP banner reads $page.props.execAvailability to warn
+        // shared-hosting users that bulk-job dispatch will fail when
+        // exec()/proc_open() are disabled via ini directives. Pin the
+        // payload shape so it can never silently drop. Distribution
+        // across all 8 renderers is covered in the Feature test sibling.
+        $this->bindIndexerWithLastBuiltAt(null);
+
+        $props = $this->invoke();
+
+        $this->assertArrayHasKey('execAvailability', $props);
+        $this->assertSame([
+            'available',
+            'exec_available',
+            'proc_open_available',
+            'disabled_functions',
+        ], array_keys($props['execAvailability']));
+        $this->assertIsBool($props['execAvailability']['available']);
+        $this->assertIsBool($props['execAvailability']['exec_available']);
+        $this->assertIsBool($props['execAvailability']['proc_open_available']);
+        $this->assertIsArray($props['execAvailability']['disabled_functions']);
+    }
+
     // ── helpers ────────────────────────────────────────────────────────
 
     /**

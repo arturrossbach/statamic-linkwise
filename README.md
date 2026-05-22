@@ -33,7 +33,34 @@ Auto-registers via `AddonServiceProvider`. Open Control Panel → **Linkwise** i
 - Statamic 6.x
 - Laravel 12+
 - PHP 8.2+
-- `exec()` enabled (for detached background jobs)
+- `exec()` **and** `proc_open()` enabled (see hosting notes below)
+
+### Hosting notes
+
+Linkwise dispatches long-running operations (Scan Content, Check Links,
+Bulk Unlink, Apply Rule, URL Changer Apply, Inbound/Outbound Insert) as
+detached background processes via `exec()`. If your hosting provider
+has blacklisted `exec` or `proc_open` via the PHP `disable_functions`
+ini directive, those features will silently no-op — the buttons reach
+the server but the dispatched job never starts.
+
+The Linkwise CP detects this on every page load and shows a visible
+red banner when the primitives are missing, so you'll know up front
+instead of debugging a hanging "Scan Content" button. Single-entry
+actions (creating individual links from the entry editor, custom
+target keywords) continue to work even without `exec()`.
+
+**Verified working:**
+- Managed Statamic-friendly hosts: Cloudways, Laravel Forge,
+  Ploi, RunCloud, Server Pilot
+- Self-managed VPS / cloud servers: DigitalOcean, Hetzner, AWS,
+  IONOS Cloud Compute
+- German shared hosts that enable `exec`: All-Inkl, HostEurope,
+  Strato (Hosting Pro)
+
+**Known restricted (Linkwise CP banner will appear):**
+- IONOS / 1&1 Basic Webhosting tariffs
+- Bluehost and most US-budget shared hosts with default PHP hardening
 
 ---
 
