@@ -3,6 +3,7 @@
 namespace Arturrossbach\Linkwise\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\File;
 use Statamic\Facades\Collection;
 use Statamic\Facades\Entry;
 
@@ -12,7 +13,7 @@ class SeedTestDataCommand extends Command
                             {count=30 : Number of entries to create}
                             {--collection=articles : Collection handle for the article entries}
                             {--with-home : Also create a Home page entry with multi-link Markdown content (reproduces the Cloudways multi-URL replace bug locally)}
-                            {--pages-collection=pages : Collection handle for the Home page entry}';
+                            {--pages-collection=linkwise_smoke_pages : Collection handle for the Home page entry}';
 
     protected $description = 'Generate realistic test entries for Linkwise testing';
 
@@ -75,10 +76,42 @@ class SeedTestDataCommand extends Command
     {
         $pagesHandle = $this->option('pages-collection');
 
+        // Write a dedicated blueprint with a simple Markdown `content` field
+        // BEFORE the collection so Statamic picks it up on first save. Without
+        // this, sites that already use the `pages` collection handle with a
+        // page-builder blueprint (e.g. Statamic Peak) would discard our
+        // `content` data because the field doesn't exist in their schema.
+        $blueprintPath = resource_path("blueprints/collections/{$pagesHandle}/page.yaml");
+        if (! File::exists($blueprintPath)) {
+            File::ensureDirectoryExists(dirname($blueprintPath));
+            File::put($blueprintPath, <<<'YAML'
+title: Page
+tabs:
+  main:
+    sections:
+      -
+        fields:
+          -
+            handle: title
+            field:
+              type: text
+              required: true
+              display: Title
+          -
+            handle: content
+            field:
+              type: markdown
+              display: Content
+              container: assets
+              save_html: false
+YAML);
+            $this->info("Created blueprint: {$blueprintPath}");
+        }
+
         $pages = Collection::findByHandle($pagesHandle);
         if (! $pages) {
             $pages = Collection::make($pagesHandle)
-                ->title(ucfirst($pagesHandle))
+                ->title('Linkwise Smoke Pages')
                 ->pastDateBehavior('public')
                 ->futureDateBehavior('private');
             $pages->save();
