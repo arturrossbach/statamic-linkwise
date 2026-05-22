@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Suggestions\IgnoredSuggestionStore;
 use Arturrossbach\Linkwise\Suggestions\InboundEngine;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
@@ -18,6 +19,7 @@ class InboundController extends CpController
     public function __construct(
         protected InboundEngine $inboundEngine,
         protected EntryIndexer $indexer,
+        protected IgnoredSuggestionStore $ignoredStore,
     ) {}
 
     /**
@@ -49,15 +51,31 @@ class InboundController extends CpController
             }
         }
 
+        // Decorate each suggestion with an `is_ignored` flag so the
+        // frontend can default-hide ignored pairs but reveal them via
+        // the "Show ignored (N)" toggle. Pair is undirected — the
+        // store does not care which side initiated the ignore.
+        $ignoredCount = 0;
+        $decorated = array_map(function ($s) use ($entryId, &$ignoredCount) {
+            $isIgnored = $this->ignoredStore->isIgnored($entryId, $s->sourceEntryId);
+            if ($isIgnored) {
+                $ignoredCount++;
+            }
+
+            return array_merge($s->toArray(), [
+                'source_edit_url' => cp_route('collections.entries.edit', [$s->sourceCollection, $s->sourceEntryId]),
+                'is_ignored' => $isIgnored,
+            ]);
+        }, $suggestions);
+
         return response()->json([
             'entry_id' => $entryId,
             'entry_title' => $record->title,
             'entry_hashes' => $entryHashes,
             'suggestion_count' => $suggestionCount,
+            'ignored_count' => $ignoredCount,
             'total_available' => $this->inboundEngine->getLastTotalCount(),
-            'suggestions' => array_map(fn ($s) => array_merge($s->toArray(), [
-                'source_edit_url' => cp_route('collections.entries.edit', [$s->sourceCollection, $s->sourceEntryId]),
-            ]), $suggestions),
+            'suggestions' => $decorated,
         ]);
     }
 

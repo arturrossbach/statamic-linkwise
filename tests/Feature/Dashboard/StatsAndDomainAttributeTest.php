@@ -54,7 +54,7 @@ class StatsAndDomainAttributeTest extends TestCase
         if (! is_dir($this->storageDir)) {
             mkdir($this->storageDir, 0755, true);
         }
-        foreach (['broken-links.json', 'domain-attributes.json'] as $f) {
+        foreach (['broken-links.json', 'domain-attributes.json', 'ignored-suggestions.json'] as $f) {
             $p = $this->storageDir.'/'.$f;
             if (file_exists($p)) {
                 unlink($p);
@@ -64,7 +64,7 @@ class StatsAndDomainAttributeTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (['broken-links.json', 'domain-attributes.json'] as $f) {
+        foreach (['broken-links.json', 'domain-attributes.json', 'ignored-suggestions.json'] as $f) {
             $p = $this->storageDir.'/'.$f;
             if (file_exists($p)) {
                 unlink($p);
@@ -125,6 +125,87 @@ class StatsAndDomainAttributeTest extends TestCase
         $response = $this->getJson(route('linkwise.suggestion-counts'));
 
         $response->assertJson(['p' => ['inbound' => 42, 'outbound' => 99]]);
+    }
+
+    // ── suggestionCounts × ignored subtraction (Klasse-10 pin) ────────
+
+    public function test_suggestion_counts_subtracts_ignored_pairs_from_inbound(): void
+    {
+        // 2 inbound suggestions cached on entry-A; user ignored 1 pair
+        // involving A → exposed inbound count must be 1 (not 2).
+        // This is the SoT for the Klasse-10 guarantee — the badge
+        // number shown in Links Report after the user clicks ✕ on a
+        // single suggestion.
+        $this->bindIndexer([
+            'entry-a' => $this->record('entry-a', inbound: 2, outbound: 0),
+            'entry-b' => $this->record('entry-b', inbound: 0, outbound: 0),
+        ]);
+        $this->seedIgnoredPairs([['entry-a', 'entry-b']]);
+
+        $response = $this->getJson(route('linkwise.suggestion-counts'));
+
+        $response->assertStatus(200);
+        $this->assertSame(1, $response->json('entry-a.inbound'),
+            'inbound badge must subtract the single ignored pair (2 - 1)');
+        // entry-b participates in the same pair → its inbound also drops
+        // by 1 (was 0 → max(0, -1) = 0).
+        $this->assertSame(0, $response->json('entry-b.inbound'));
+    }
+
+    public function test_suggestion_counts_subtracts_ignored_pairs_from_outbound(): void
+    {
+        $this->bindIndexer([
+            'entry-a' => $this->record('entry-a', inbound: 0, outbound: 5),
+        ]);
+        $this->seedIgnoredPairs([
+            ['entry-a', 'entry-b'],
+            ['entry-a', 'entry-c'],
+        ]);
+
+        $response = $this->getJson(route('linkwise.suggestion-counts'));
+
+        $response->assertStatus(200);
+        $this->assertSame(3, $response->json('entry-a.outbound'),
+            'outbound badge must subtract all ignored pairs entry-a participates in (5 - 2)');
+    }
+
+    public function test_suggestion_counts_never_returns_negative_after_subtraction(): void
+    {
+        // Direction-agnostic subtraction can over-shoot when a pair was
+        // only suggested in one direction (e.g. A→B was suggested but
+        // B→A wasn't, yet ignoring it subtracts from both sides). The
+        // max(0, …) clamp is the guard. Pin so a refactor doesn't drop
+        // it and surface "-1" in the UI.
+        $this->bindIndexer([
+            'entry-a' => $this->record('entry-a', inbound: 0, outbound: 0),
+            'entry-b' => $this->record('entry-b', inbound: 0, outbound: 0),
+        ]);
+        $this->seedIgnoredPairs([['entry-a', 'entry-b']]);
+
+        $response = $this->getJson(route('linkwise.suggestion-counts'));
+
+        $response->assertStatus(200);
+        $this->assertSame(0, $response->json('entry-a.inbound'));
+        $this->assertSame(0, $response->json('entry-a.outbound'));
+        $this->assertSame(0, $response->json('entry-b.inbound'));
+        $this->assertSame(0, $response->json('entry-b.outbound'));
+    }
+
+    public function test_suggestion_counts_returns_cached_totals_when_no_ignores(): void
+    {
+        // No ignored file → subtraction is a no-op → cached totals
+        // surface unchanged. Pins that the new subtraction layer is
+        // additive: existing users with no ignores see ZERO change.
+        $this->bindIndexer([
+            'entry-a' => $this->record('entry-a', inbound: 7, outbound: 11),
+        ]);
+        // Note: NO seedIgnoredPairs call.
+
+        $response = $this->getJson(route('linkwise.suggestion-counts'));
+
+        $response->assertExactJson([
+            'entry-a' => ['inbound' => 7, 'outbound' => 11],
+        ]);
     }
 
     // ── entryStats ─────────────────────────────────────────────────────
@@ -430,6 +511,29 @@ class StatsAndDomainAttributeTest extends TestCase
         $spy = Mockery::mock(SuggestionEngine::class);
         $spy->shouldReceive('suggest')->andReturn($result);
         $this->app->instance(SuggestionEngine::class, $spy);
+    }
+
+    /**
+     * Write a real ignored-suggestions.json. The controller's
+     * IgnoredSuggestionStore reads from storage_path('linkwise');
+     * we seed the disk shape so the subtraction path activates.
+     *
+     * @param  list<array{0: string, 1: string}>  $pairs  Each pair must
+     *   already be sorted ASCII-ascending; the store does not re-sort
+     *   on read.
+     */
+    private function seedIgnoredPairs(array $pairs): void
+    {
+        // The store accepts unsorted pairs on write — but our seed
+        // bypasses the write path, so sort here to match storage shape.
+        $normalised = array_map(
+            fn ($p) => strcmp($p[0], $p[1]) <= 0 ? [$p[0], $p[1]] : [$p[1], $p[0]],
+            $pairs,
+        );
+        file_put_contents(
+            $this->storageDir.'/ignored-suggestions.json',
+            json_encode($normalised),
+        );
     }
 
     /**

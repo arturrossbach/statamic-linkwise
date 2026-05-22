@@ -541,11 +541,12 @@ export default {
                         return { success: false, error: 'invalid server response' };
                     }
                     if (data.ok !== true) {
-                        // Atomic refusal — message carries the German
-                        // action-oriented copy from RelinkService.
+                        // Atomic refusal — RelinkService returns an
+                        // action-oriented message; only fall back if
+                        // neither message nor reason is set.
                         return {
                             success: false,
-                            error: data.message || data.reason || 'Re-Link konnte nicht ausgeführt werden',
+                            error: data.message || data.reason || 'Re-link could not be performed',
                         };
                     }
 

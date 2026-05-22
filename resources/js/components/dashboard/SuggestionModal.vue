@@ -122,12 +122,36 @@
                             Adding {{ insertProgress }}...
                         </span>
                     </div>
-                    <div v-if="availableMatchOptions.length >= 2" class="flex items-center gap-2">
-                        <label class="text-xs text-gray-500 dark:text-gray-400">Match type:</label>
-                        <select v-model="matchFilter" class="text-xs border border-gray-300 dark:border-gray-700 dark:bg-gray-800 rounded-lg px-2 py-1">
-                            <option value="">All types</option>
-                            <option v-for="opt in availableMatchOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                        </select>
+                    <div class="flex items-center gap-3">
+                        <!--
+                            Show-ignored toggle. Only rendered when at least one
+                            row has been ignored — otherwise there's nothing to
+                            reveal and the chip would be noise. Default OFF so
+                            the modal opens "actionable items only" (this is
+                            what the Links Report badge count subtracts to —
+                            counts stay in sync visually).
+                        -->
+                        <button
+                            v-if="ignoredCount > 0"
+                            type="button"
+                            class="text-xs px-2 py-1 rounded-lg border inline-flex items-center gap-1.5"
+                            :class="showIgnored
+                                ? 'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-700'
+                                : 'bg-gray-50 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'"
+                            @click="showIgnored = !showIgnored"
+                            v-tooltip="showIgnored ? 'Hide ignored suggestions' : 'Reveal ignored suggestions (to un-ignore)'"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="size-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                            {{ showIgnored ? 'Hide ignored' : 'Show ignored' }} ({{ ignoredCount }})
+                        </button>
+
+                        <div v-if="availableMatchOptions.length >= 2" class="flex items-center gap-2">
+                            <label class="text-xs text-gray-500 dark:text-gray-400">Match type:</label>
+                            <select v-model="matchFilter" class="text-xs border border-gray-300 dark:border-gray-700 dark:bg-gray-800 rounded-lg px-2 py-1">
+                                <option value="">All types</option>
+                                <option v-for="opt in availableMatchOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -170,10 +194,12 @@
                                 :class="{
                                     'bg-green-50 dark:bg-green-900/10 opacity-60': s._status === 'inserted',
                                     'bg-red-50 dark:bg-red-900/10': s._status === 'failed',
+                                    'opacity-60': s.is_ignored && s._status === 'pending',
                                 }"
                             >
                                 <td>
-                                    <input v-if="s._status === 'pending'" type="checkbox" class="rounded" :checked="selected.includes(s)" @change="toggleSelect(s)" />
+                                    <input v-if="s._status === 'pending' && !s.is_ignored" type="checkbox" class="rounded" :checked="selected.includes(s)" @change="toggleSelect(s)" />
+                                    <span v-else-if="s._status === 'pending' && s.is_ignored" class="text-xs text-gray-400" v-tooltip="'Un-ignore this suggestion before you can add it'">—</span>
                                     <Icon v-else-if="s._status === 'inserting'" name="loading" class="size-4 text-blue-500" />
                                     <span v-else-if="s._status === 'inserted'" class="text-xs text-green-500" aria-label="Inserted">&#10003;</span>
                                     <span v-else-if="s._status === 'failed'" class="text-xs text-red-500" aria-label="Failed">✕</span>
@@ -190,7 +216,7 @@
                                         :sentence-context="s.sentence_context"
                                         :anchor="s._anchor"
                                         :original-anchor="s._originalAnchor"
-                                        :disabled="s._status !== 'pending'"
+                                        :disabled="s._status !== 'pending' || s.is_ignored"
                                         :truncated-before="s.context_truncated_start || false"
                                         :truncated-after="s.context_truncated_end || false"
                                         @update:anchor="s._anchor = $event"
@@ -207,11 +233,40 @@
                                     <span class="text-xs text-gray-400 ml-1">{{ Math.round(s.score * 100) }}%</span>
                                 </td>
                                 <td class="text-right whitespace-nowrap">
-                                    <Button v-if="autolinkStoreUrl && !s._promotedToRule" size="xs" variant="default" icon="plus" :loading="s._promoting" @click="promoteSuggestionToRule(s)" v-tooltip="`Always auto-link &quot;${s._anchor}&quot; → this entry, in any future content`" />
-                                    <span v-else-if="s._promotedToRule" class="text-xs text-green-500 inline-flex items-center gap-1" v-tooltip="'Rule created — open Auto-Linking tab to manage'">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                                        Rule
-                                    </span>
+                                    <div class="inline-flex items-center gap-1">
+                                        <Button v-if="autolinkStoreUrl && !s._promotedToRule && !s.is_ignored" size="xs" variant="default" icon="plus" :loading="s._promoting" @click="promoteSuggestionToRule(s)" v-tooltip="`Always auto-link &quot;${s._anchor}&quot; → this entry, in any future content`" />
+                                        <span v-else-if="s._promotedToRule" class="text-xs text-green-500 inline-flex items-center gap-1" v-tooltip="'Rule created — open Auto-Linking tab to manage'">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                            Rule
+                                        </span>
+                                        <!--
+                                            Ignore / Un-ignore button. Direction:
+                                            current modal entry is the "source" of the
+                                            pair, s.source_entry_id (the entry that
+                                            would link IN) is the "target" in the
+                                            ignored-pair tuple. The store normalises
+                                            either way — direction is irrelevant for
+                                            persistence.
+                                        -->
+                                        <Button
+                                            v-if="s._status === 'pending' && !s.is_ignored && ignoreSuggestionUrl"
+                                            size="xs"
+                                            variant="default"
+                                            icon="trash"
+                                            :loading="!!ignoreBusy[ignoreKey(s, false)]"
+                                            @click="ignoreItem(s, false)"
+                                            v-tooltip="'Ignore this suggestion (hides the pair until you un-ignore it)'"
+                                        />
+                                        <Button
+                                            v-else-if="s._status === 'pending' && s.is_ignored && unignoreSuggestionUrl"
+                                            size="xs"
+                                            variant="default"
+                                            icon="history"
+                                            :loading="!!ignoreBusy[ignoreKey(s, false)]"
+                                            @click="unignoreItem(s, false)"
+                                            v-tooltip="'Un-ignore — bring this suggestion back into normal view'"
+                                        />
+                                    </div>
                                 </td>
                             </tr>
                         </tbody>
@@ -243,9 +298,11 @@
                                 <tr :class="{
                                     'bg-green-50 dark:bg-green-900/10': group._status === 'inserted',
                                     'bg-red-50 dark:bg-red-900/10': group._status === 'failed',
+                                    'opacity-60': group._status === 'pending' && (selectedTarget(group)?.is_ignored),
                                 }">
                                     <td>
-                                        <input v-if="group._status === 'pending'" type="checkbox" :checked="selected.includes(group.key)" @change="toggleSelect(group.key)" class="rounded" />
+                                        <input v-if="group._status === 'pending' && !selectedTarget(group)?.is_ignored" type="checkbox" :checked="selected.includes(group.key)" @change="toggleSelect(group.key)" class="rounded" />
+                                        <span v-else-if="group._status === 'pending' && selectedTarget(group)?.is_ignored" class="text-xs text-gray-400" v-tooltip="'Un-ignore this suggestion before you can add it'">—</span>
                                         <Icon v-else-if="group._status === 'inserting'" name="loading" class="size-4 text-blue-500" />
                                         <span v-else-if="group._status === 'inserted'" class="text-xs text-green-500" aria-label="Inserted">&#10003;</span>
                                         <span v-else-if="group._status === 'failed'" class="text-xs text-red-500" aria-label="Failed">✕</span>
@@ -255,7 +312,7 @@
                                             :sentence-context="group.sentence_context"
                                             :anchor="group._anchor"
                                             :original-anchor="group._originalAnchor"
-                                            :disabled="group._status !== 'pending'"
+                                            :disabled="group._status !== 'pending' || selectedTarget(group)?.is_ignored"
                                             :truncated-before="group._truncatedStart || false"
                                             :truncated-after="group._truncatedEnd || false"
                                             @update:anchor="group._anchor = $event"
@@ -287,11 +344,41 @@
                                         <span class="text-xs text-gray-400 ml-1">{{ Math.round((group.targets[0]?.score || 0) * 100) }}%</span>
                                     </td>
                                     <td class="text-right whitespace-nowrap">
-                                        <Button v-if="autolinkStoreUrl && !group._promotedToRule && group._status === 'pending'" size="xs" variant="default" icon="plus" :loading="group._promoting" @click="promoteGroupToRule(group)" v-tooltip="`Always auto-link &quot;${group._anchor}&quot; → &quot;${selectedTarget(group)?.target_title}&quot;, in any future content`" />
-                                        <span v-else-if="group._promotedToRule" class="text-xs text-green-500 inline-flex items-center gap-1" v-tooltip="'Rule created — open Auto-Linking tab to manage'">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                                            Rule
-                                        </span>
+                                        <div class="inline-flex items-center gap-1">
+                                            <Button v-if="autolinkStoreUrl && !group._promotedToRule && group._status === 'pending' && !selectedTarget(group)?.is_ignored" size="xs" variant="default" icon="plus" :loading="group._promoting" @click="promoteGroupToRule(group)" v-tooltip="`Always auto-link &quot;${group._anchor}&quot; → &quot;${selectedTarget(group)?.target_title}&quot;, in any future content`" />
+                                            <span v-else-if="group._promotedToRule" class="text-xs text-green-500 inline-flex items-center gap-1" v-tooltip="'Rule created — open Auto-Linking tab to manage'">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                                                Rule
+                                            </span>
+                                            <!--
+                                                Outbound: ignore acts on the currently-
+                                                selected target inside the group (radio
+                                                button in the accordion picks it). Ignoring
+                                                one target out of N hides only that pair;
+                                                the group itself stays visible as long as
+                                                at least one target remains actionable —
+                                                this matches sortedOutbound's "some
+                                                non-ignored" hide-rule.
+                                            -->
+                                            <Button
+                                                v-if="group._status === 'pending' && selectedTarget(group) && !selectedTarget(group).is_ignored && ignoreSuggestionUrl"
+                                                size="xs"
+                                                variant="default"
+                                                icon="trash"
+                                                :loading="!!ignoreBusy[ignoreKey(selectedTarget(group), true)]"
+                                                @click="ignoreItem(selectedTarget(group), true)"
+                                                v-tooltip="'Ignore this suggestion (hides the pair until you un-ignore it)'"
+                                            />
+                                            <Button
+                                                v-else-if="group._status === 'pending' && selectedTarget(group) && selectedTarget(group).is_ignored && unignoreSuggestionUrl"
+                                                size="xs"
+                                                variant="default"
+                                                icon="history"
+                                                :loading="!!ignoreBusy[ignoreKey(selectedTarget(group), true)]"
+                                                @click="unignoreItem(selectedTarget(group), true)"
+                                                v-tooltip="'Un-ignore — bring this suggestion back into normal view'"
+                                            />
+                                        </div>
                                     </td>
                                 </tr>
                                 <!-- Accordion -->
@@ -342,9 +429,15 @@ export default {
         insertProgress: { type: String, default: '' },
         rebuildUrl: { type: String, default: '' },
         autolinkStoreUrl: { type: String, default: '' },
+        // Klasse-10 guarantee-stack 2026-05-22 — per-pair ignored
+        // suggestions. POST = ignore, DELETE = un-ignore. Pair is
+        // undirected; backend normalises the (entryA, entryB) tuple
+        // by sorting ASCII-ascending before persisting.
+        ignoreSuggestionUrl: { type: String, default: '' },
+        unignoreSuggestionUrl: { type: String, default: '' },
     },
 
-    emits: ['close', 'insert'],
+    emits: ['close', 'insert', 'ignored'],
 
     data() {
         return {
@@ -353,6 +446,15 @@ export default {
             sortDir: 'asc',
             matchFilter: '',
             rescanning: false,
+            // Show-ignored toggle: default OFF so the modal opens with
+            // only actionable suggestions visible. Header chip shows
+            // "Show ignored (N)"; clicking flips this — ignored rows
+            // reveal greyed out with an undo ↩ button.
+            showIgnored: false,
+            // Per-item in-flight flag for the ignore/un-ignore POST/
+            // DELETE round-trip; prevents double-click double-fires.
+            // Keyed by inbound source_entry_id OR outbound group.key.
+            ignoreBusy: {},
         };
     },
 
@@ -363,6 +465,8 @@ export default {
                 this.sortField = '';
                 this.sortDir = 'asc';
                 this.matchFilter = '';
+                this.showIgnored = false;
+                this.ignoreBusy = {};
             }
         },
     },
@@ -416,6 +520,32 @@ export default {
             return pending.length > 0 && pending.every(s => this.selected.includes(s));
         },
 
+        /**
+         * How many ignored rows the current modal carries. Drives the
+         * header chip "Show ignored (N)" — when 0, the chip is hidden
+         * because there's nothing to toggle.
+         *
+         * Inbound: count is_ignored=true suggestions.
+         * Outbound: count groups where EVERY target is ignored (matches
+         * the hide-rule in sortedOutbound).
+         */
+        ignoredCount() {
+            if (!this.modal) return 0;
+            if (this.modal.mode === 'outbound') {
+                // Bug A 2026-05-22 fix: count individual ignored
+                // targets, NOT only fully-ignored groups. Previous
+                // logic (`every(t => t.is_ignored)`) returned 0 when
+                // a group had 2+ targets and only one was ignored →
+                // "Show ignored (N)" chip was hidden → user couldn't
+                // navigate back to the ignored row.
+                return (this.modal.groups || []).reduce(
+                    (acc, g) => acc + (g.targets || []).filter(t => t.is_ignored).length,
+                    0,
+                );
+            }
+            return (this.modal.suggestions || []).filter(s => s.is_ignored).length;
+        },
+
         errors() {
             if (!this.modal) return [];
             if (this.modal.mode === 'outbound') {
@@ -431,6 +561,11 @@ export default {
         sortedInbound() {
             if (!this.modal || this.modal.mode !== 'inbound') return [];
             let items = [...(this.modal.suggestions || [])];
+            // Hide ignored rows when the toggle is off — that's the
+            // default, "show me actionable items" view.
+            if (!this.showIgnored) {
+                items = items.filter(s => !s.is_ignored);
+            }
             if (this.matchFilter) {
                 if (this.matchFilter === 'title_all') {
                     items = items.filter(s => s.match_type === 'title' || s.match_type === 'stem');
@@ -451,6 +586,20 @@ export default {
         sortedOutbound() {
             if (!this.modal || this.modal.mode !== 'outbound') return [];
             let items = [...(this.modal.groups || [])];
+            // Bug B 2026-05-22 fix: hide a group when its CURRENTLY-
+            // selected target is ignored. The accordion lets the user
+            // pick which target they meant — if that pick is ignored,
+            // hide the row (the user can still see it via "Show
+            // ignored"). Previous logic only hid groups where EVERY
+            // target was ignored — which meant 2-target groups stayed
+            // partially-visible with a stale top-row even after the
+            // user explicitly ignored the picked target.
+            if (!this.showIgnored) {
+                items = items.filter(g => {
+                    const sel = (g.targets || []).find(t => t.target_entry_id === g._selectedTarget) || (g.targets || [])[0];
+                    return ! (sel && sel.is_ignored);
+                });
+            }
             if (this.matchFilter) {
                 if (this.matchFilter === 'title_all') {
                     items = items.filter(g => g.targets[0]?.match_type === 'title' || g.targets[0]?.match_type === 'stem');
@@ -625,6 +774,167 @@ export default {
                 keyword: 'Both entries share similar topics based on keyword analysis. Weaker match.',
                 custom: 'A manually set target keyword was found in the text.',
             }[type] || 'Match type unknown';
+        },
+
+        /**
+         * Toggle a (source, target) pair's ignored state. Inbound mode
+         * uses (modal.entryId, s.source_entry_id); outbound mode uses
+         * (modal.entryId, target.target_entry_id). The store normalises
+         * the tuple direction-agnostic, so the same call works for
+         * either side.
+         *
+         * Klasse-10 count guarantee:
+         *   1. Optimistic local mutation flips is_ignored + recomputes
+         *      sortedInbound/sortedOutbound + the in-modal header
+         *      count.
+         *   2. inertiaRouter.reload({only:['entries']}) fetches fresh
+         *      entries[] from server → InertiaPagesController::links
+         *      re-reads the index AND StatsApiController subtraction
+         *      → Links Report table badges stay in sync with what the
+         *      modal shows.
+         *   3. If the server POST/DELETE fails we revert the optimistic
+         *      flag so visible state doesn't lie about persistence.
+         */
+        async ignoreItem(item, isOutboundTarget = false) {
+            if (!this.modal) return;
+            if (!this.ignoreSuggestionUrl) return;
+            const key = this.ignoreKey(item, isOutboundTarget);
+            if (this.ignoreBusy[key]) return;
+            this.ignoreBusy = { ...this.ignoreBusy, [key]: true };
+
+            const sourceId = this.modal.entryId;
+            const otherId = isOutboundTarget ? item.target_entry_id : item.source_entry_id;
+
+            // Optimistic flip
+            item.is_ignored = true;
+            // If the user had ticked the checkbox before ignoring,
+            // drop it from `selected` so the "Add N links" counter
+            // doesn't keep an ignored row's vote. Inbound stores the
+            // suggestion object itself; outbound stores group.key —
+            // we know the row identity from `item` for inbound, but
+            // outbound calls `ignoreItem(target, true)` where `item`
+            // is the target, not the group. The corresponding group's
+            // key needs an extra lookup. Both paths handled below.
+            const inboundIdx = this.selected.indexOf(item);
+            if (inboundIdx > -1) this.selected.splice(inboundIdx, 1);
+            if (isOutboundTarget && this.modal.groups) {
+                for (const g of this.modal.groups) {
+                    const isMatch = (g.targets || []).some(t => t.target_entry_id === item.target_entry_id);
+                    if (isMatch) {
+                        const groupIdx = this.selected.indexOf(g.key);
+                        if (groupIdx > -1) this.selected.splice(groupIdx, 1);
+                    }
+                }
+            }
+            // Bug B 2026-05-22: auto-reveal ignored rows after the
+            // user explicitly ignores one. Without this the row
+            // vanishes (sortedInbound/sortedOutbound filter is_ignored
+            // out when showIgnored=false) and the ↩ un-ignore button
+            // is never rendered in the same frame — user has to find
+            // the "Show ignored" chip to recover. Flipping the toggle
+            // here keeps the row visible (greyed + ↩) so the action
+            // is immediately reversible.
+            this.showIgnored = true;
+
+            try {
+                const response = await window.fetch(this.ignoreSuggestionUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': Statamic.$config.get('csrfToken'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify({ source_entry_id: sourceId, target_entry_id: otherId }),
+                });
+                if (!response.ok) {
+                    item.is_ignored = false;
+                    const data = await response.json().catch(() => ({}));
+                    Statamic.$toast.error(data?.message || 'Could not ignore suggestion.');
+                    return;
+                }
+                // Refresh entries[] so the Links Report badge counts
+                // re-render with the subtracted total. preserveScroll
+                // keeps the user in place; preserveState keeps the
+                // modal open with its own decorated state intact (we
+                // already flipped is_ignored locally above).
+                // **Klasse-10 count guarantee (CORRECTED 2026-05-22):**
+                // The Links Report badge count is rendered from
+                // LinksReportTab.suggestionCounts (filled by
+                // StatsApiController::suggestionCounts → already
+                // applies the ignored subtraction). The badge is
+                // NOT rendered from entries[], so an Inertia
+                // partial-reload of entries[] would not move the
+                // visible count. Instead emit an 'ignored' event
+                // so the parent component re-runs
+                // loadSuggestionCounts() — the single source of
+                // truth for badge numbers.
+                this.$emit('ignored');
+            } catch (e) {
+                item.is_ignored = false;
+                Statamic.$toast.error('Network error while ignoring suggestion.');
+                console.error('[Linkwise]', e);
+            } finally {
+                const next = { ...this.ignoreBusy };
+                delete next[key];
+                this.ignoreBusy = next;
+            }
+        },
+
+        async unignoreItem(item, isOutboundTarget = false) {
+            if (!this.modal) return;
+            if (!this.unignoreSuggestionUrl) return;
+            const key = this.ignoreKey(item, isOutboundTarget);
+            if (this.ignoreBusy[key]) return;
+            this.ignoreBusy = { ...this.ignoreBusy, [key]: true };
+
+            const sourceId = this.modal.entryId;
+            const otherId = isOutboundTarget ? item.target_entry_id : item.source_entry_id;
+
+            item.is_ignored = false;
+
+            try {
+                const response = await window.fetch(this.unignoreSuggestionUrl, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': Statamic.$config.get('csrfToken'),
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify({ source_entry_id: sourceId, target_entry_id: otherId }),
+                });
+                if (!response.ok) {
+                    item.is_ignored = true;
+                    const data = await response.json().catch(() => ({}));
+                    Statamic.$toast.error(data?.message || 'Could not un-ignore suggestion.');
+                    return;
+                }
+                // **Klasse-10 count guarantee (CORRECTED 2026-05-22):**
+                // The Links Report badge count is rendered from
+                // LinksReportTab.suggestionCounts (filled by
+                // StatsApiController::suggestionCounts → already
+                // applies the ignored subtraction). The badge is
+                // NOT rendered from entries[], so an Inertia
+                // partial-reload of entries[] would not move the
+                // visible count. Instead emit an 'ignored' event
+                // so the parent component re-runs
+                // loadSuggestionCounts() — the single source of
+                // truth for badge numbers.
+                this.$emit('ignored');
+            } catch (e) {
+                item.is_ignored = true;
+                Statamic.$toast.error('Network error while un-ignoring suggestion.');
+                console.error('[Linkwise]', e);
+            } finally {
+                const next = { ...this.ignoreBusy };
+                delete next[key];
+                this.ignoreBusy = next;
+            }
+        },
+
+        ignoreKey(item, isOutboundTarget) {
+            return isOutboundTarget
+                ? `out:${item.target_entry_id}`
+                : `in:${item.source_entry_id}`;
         },
 
         matchBadgeClass(type) {
