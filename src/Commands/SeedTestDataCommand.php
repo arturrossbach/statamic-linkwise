@@ -34,22 +34,31 @@ class SeedTestDataCommand extends Command
         }
 
         $articles = $this->getArticles();
+        $poolSize = count($articles);
         $created = 0;
 
-        for ($i = 0; $i < $count && $i < count($articles); $i++) {
-            $article = $articles[$i];
+        // Cycle through the pool when count > poolSize so the same seed
+        // command can populate large test sites (130+ entries) without us
+        // hand-writing more article stubs. Each cycle past the first gets
+        // a "(Part N)" suffix on the title + slug so Statamic won't reject
+        // duplicates and so the editor can still tell variants apart.
+        for ($i = 0; $i < $count; $i++) {
+            $idx = $i % $poolSize;
+            $cycle = intdiv($i, $poolSize);
+            $article = $articles[$idx];
+            $title = $cycle === 0 ? $article['title'] : "{$article['title']} (Part ".($cycle + 1).')';
 
             $entry = Entry::make()
                 ->collection($collectionHandle)
-                ->slug(\Illuminate\Support\Str::slug($article['title']))
+                ->slug(\Illuminate\Support\Str::slug($title))
                 ->data([
-                    'title' => $article['title'],
+                    'title' => $title,
                     'content' => $article['content'],
                 ]);
 
             $entry->save();
             $created++;
-            $this->line("  Created: {$article['title']}");
+            $this->line("  Created: {$title}");
         }
 
         $this->info("Created {$created} test entries in '{$collectionHandle}' collection.");
