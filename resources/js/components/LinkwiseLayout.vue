@@ -64,6 +64,38 @@
 
         <!-- Tab Navigation + Content -->
         <div v-else>
+            <!--
+                Exec-availability warning. Renders above the tab nav on every
+                page when the server's PHP has disabled `exec()` and/or
+                `proc_open()` via `disable_functions`. Without these, all
+                bulk-job operations (Scan Content, Check Links, Bulk
+                Unlink, Apply Rule, URL Changer Apply, Inbound/Outbound
+                Insert) silently no-op — the button click reaches the
+                server, BulkJobDispatcher's exec() call returns false,
+                JobLock writes a 'starting' status that never advances,
+                and the user sees a Scan Content button that does nothing.
+
+                Session-dismissable (NOT persisted): the underlying
+                hosting restriction doesn't go away on its own; we want
+                to remind the editor every fresh session.
+            -->
+            <Alert
+                v-if="showExecWarning"
+                variant="error"
+                heading="Linkwise can't run background jobs on this server"
+                class="mb-4"
+            >
+                <p class="text-sm">
+                    Your PHP installation has disabled <code class="text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30">{{ execWarningDisabledList }}</code> via the <code class="text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30">disable_functions</code> ini directive. Linkwise needs these to dispatch background jobs for <strong>Scan Content, Check Links, Bulk Unlink, Apply Rule</strong>, the <strong>URL Changer</strong>, and <strong>Inbound/Outbound Insert</strong>. Those features will not work until your hosting provider enables them — typically by upgrading from shared to managed or VPS hosting.
+                </p>
+                <p class="text-xs text-red-700 dark:text-red-400 mt-2">
+                    Single-entry actions (creating individual links from the entry editor, custom target keywords) continue to work normally.
+                </p>
+                <div class="mt-3 flex gap-2">
+                    <Button text="Dismiss for this session" size="sm" @click="execWarningDismissed = true" />
+                </div>
+            </Alert>
+
             <!-- Tab nav: horizontally scrollable on narrow viewports so the
                  7 tabs never wrap into a multi-row stack (which fights the
                  border-bottom indicator) and never trigger page-level
@@ -265,6 +297,40 @@ export default {
             return this.$page?.props?.staleCheck || null;
         },
 
+        /**
+         * Exec-availability payload distributed by StaleCheckPresenter
+         * alongside the stale-check signal. Reads `available` + the
+         * individual primitive booleans + the disable_functions list
+         * so the banner can render a specific remediation message.
+         *
+         * Linkwise's bulk-job pipeline (Scan Content, Check Links,
+         * Bulk Unlink, Apply Rule, URL Changer Apply, Inbound/Outbound
+         * Insert) dispatches via `exec("$php $artisan ... &")`. Shared
+         * hosts that disable `exec()` / `proc_open()` via ini
+         * `disable_functions` make those buttons silently no-op:
+         * the dispatch returns false, the JobLock writes "starting"
+         * status, the frontend polls forever. The banner makes the
+         * constraint visible up-front instead.
+         */
+        execAvailability() {
+            return this.$page?.props?.execAvailability || null;
+        },
+
+        showExecWarning() {
+            if (this.execWarningDismissed) return false;
+
+            return this.execAvailability !== null && this.execAvailability.available === false;
+        },
+
+        execWarningDisabledList() {
+            const fns = this.execAvailability?.disabled_functions || [];
+            if (fns.length === 0) {
+                return 'exec, proc_open';
+            }
+
+            return fns.join(', ');
+        },
+
         showStaleCheck() {
             // Never stack on top of an active bulk — keeps visual hierarchy.
             if (this.activeBulk) return false;
@@ -385,6 +451,13 @@ export default {
             // sticks until the next scan changes the index timestamp.
             checkingFromBanner: false,
             staleCheckDismissedFor: null,
+            // Exec-availability warning dismiss state — session-scoped
+            // (NOT persistent like staleCheck). Reason: the underlying
+            // hosting restriction doesn't go away on its own; if a user
+            // dismisses it once we still want to remind them next session
+            // because the consequence (broken Scan Content button) is
+            // far worse than re-displaying the warning.
+            execWarningDismissed: false,
             // Persists collapsed/expanded state of the persistent-notifications
             // accordion across reloads + tab navigations. Default false (open
             // on first load) so users see new notifications without searching;

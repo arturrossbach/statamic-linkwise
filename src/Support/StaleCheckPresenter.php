@@ -48,6 +48,18 @@ class StaleCheckPresenter
             }
         }
 
+        // Exec-availability check distributed alongside the stale-banner
+        // payload — both are cross-cutting "show on every Linkwise page"
+        // signals, so they share the distribution mechanism.
+        //
+        // Why this lives here: LinkwiseLayout renders the warning banner
+        // when exec() / proc_open() are disabled (typical shared-hosting
+        // restriction). Without the check, a user clicks Scan Content,
+        // BulkJobDispatcher's exec() silently returns false, and the job
+        // sits in "starting" forever. The banner makes the constraint
+        // visible up-front instead of letting users hit the dead end.
+        $execCheck = ExecAvailability::check();
+
         return [
             'staleCheck' => [
                 'is_stale' => $isStale,
@@ -55,6 +67,17 @@ class StaleCheckPresenter
                 'broken_last_checked' => $brokenLastChecked,
                 'check_url' => cp_route('linkwise.check-links'),
                 'check_status_url' => cp_route('linkwise.check-links.status'),
+            ],
+            'execAvailability' => [
+                'available' => $execCheck['exec_available'] && $execCheck['proc_open_available'],
+                'exec_available' => $execCheck['exec_available'],
+                'proc_open_available' => $execCheck['proc_open_available'],
+                // Echo the disable_functions list so the banner can name
+                // the specific restriction in its hosting-support copy.
+                'disabled_functions' => array_values(array_filter(
+                    $execCheck['disabled_functions'],
+                    fn ($f) => in_array(strtolower((string) $f), ['exec', 'proc_open', 'shell_exec', 'popen', 'system', 'passthru'], true),
+                )),
             ],
         ];
     }
