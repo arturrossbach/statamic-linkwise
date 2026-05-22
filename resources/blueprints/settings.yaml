@@ -72,8 +72,13 @@ sections:
       - handle: max_suggestions
         field:
           type: integer
-          display: Max Suggestions
-          instructions: "Maximum number of suggestions to display in the sidebar panel."
+          display: Max Outbound Suggestions per Entry
+          instructions: |
+            Caps how many outbound suggestions the engine returns per entry. Affects the **Outbound Suggestion Modal**, the **outbound count badge** in the Links Report table, and the **sidebar suggestion panel** in the entry editor.
+
+            Does **not** affect inbound suggestion counts (those are computed unlimited so the inbound-badge in the Links Report shows true totals).
+
+            **Default 10** is a sane editorial limit — bump to 50–100 if you want every borderline match visible. Higher values mean slightly slower modal loads but more thorough suggestion lists.
           default: 10
           min: 1
           max: 200
@@ -141,7 +146,22 @@ sections:
         field:
           type: float
           display: Minimum Keyword Score
-          instructions: "Minimum keyword overlap score (0.0 – 1.0) for keyword-based suggestions. Lower = more suggestions but more noise."
+          instructions: |
+            How much overlap in top content keywords two entries need to share before Linkwise suggests a link between them (0.0–1.0). Higher = stricter, fewer but cleaner suggestions; lower = more suggestions including borderline matches.
+
+            **Reference values:**
+            - `0.05` — very permissive, expect lots of weak suggestions
+            - `0.15` — default, balanced signal-to-noise
+            - `0.50` — strict, only entries clearly sharing the same topic
+            - `0.80+` — usually too strict, often zero suggestions
+
+            **Example:** at `0.15`, two entries must share ~15 % of their weighted top-keywords (e.g. both score high on "database", "index", "postgres") to suggest a link.
+
+            **Heads-up — when changes take effect:**
+            - **Suggestion Modal** (click the count badge) — filtered live with the current threshold, no rescan needed.
+            - **Outbound count badge** in the Links Report table — cached in the index, only updates after **Scan Content**.
+
+            Requires **Enable Keyword-Overlap Suggestions** below to be ON — otherwise this threshold has no effect.
           default: 0.15
           min: 0
           max: 1
@@ -150,6 +170,19 @@ sections:
             - 'numeric'
             - 'min:0'
             - 'max:1'
+          width: 50
+
+      - handle: enable_keyword_matches
+        field:
+          type: toggle
+          display: Enable Keyword-Overlap Suggestions
+          instructions: |
+            Off by default — Linkwise only suggests links where titles or custom keywords match. Turn ON to also surface suggestions based on TF-IDF content-keyword overlap (controlled by **Minimum Keyword Score** above).
+
+            **Trade-off:** more suggestions (often the ones you wanted), but also more borderline matches. Turn this on if you're seeing very few suggestions and your content is thematically diverse.
+
+            **After toggling, run Scan Content (header button)** so the Outbound count badges in Links Report reflect the new behavior. The Suggestion Modal itself updates live without a rescan.
+          default: false
           width: 50
 
       - handle: prevent_two_way
