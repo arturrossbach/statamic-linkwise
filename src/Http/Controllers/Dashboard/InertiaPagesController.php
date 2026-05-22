@@ -217,6 +217,11 @@ class InertiaPagesController extends CpController
             'outboundInsertUrl' => cp_route('linkwise.outbound.insert'),
             'relinkUrl' => cp_route('linkwise.relink'),
             'autolinkStoreUrl' => cp_route('linkwise.autolink.store'),
+            // Per-pair ignored-suggestion endpoints (Klasse-10 guarantee-stack 2026-05-22).
+            // Both routes are CSRF-protected; modal hits them with the
+            // standard X-CSRF-TOKEN header. POST = ignore, DELETE = unignore.
+            'ignoreSuggestionUrl' => cp_route('linkwise.ignored-suggestions.ignore'),
+            'unignoreSuggestionUrl' => cp_route('linkwise.ignored-suggestions.unignore'),
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),

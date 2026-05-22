@@ -7,6 +7,7 @@ use Arturrossbach\Linkwise\Links\BrokenLinkReport;
 use Arturrossbach\Linkwise\Links\LinkwiseLinkMark;
 use Arturrossbach\Linkwise\Reports\DomainReport;
 use Arturrossbach\Linkwise\Reports\LinkReport;
+use Arturrossbach\Linkwise\Suggestions\IgnoredSuggestionStore;
 use Arturrossbach\Linkwise\Suggestions\InboundEngine;
 use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use Illuminate\Http\JsonResponse;
@@ -27,6 +28,7 @@ class StatsApiController extends CpController
     public function __construct(
         protected EntryIndexer $indexer,
         protected InboundEngine $inboundEngine,
+        protected IgnoredSuggestionStore $ignoredStore,
     ) {}
 
     public function suggestionCounts(): JsonResponse
@@ -34,10 +36,35 @@ class StatsApiController extends CpController
         $records = $this->indexer->load();
         $counts = [];
 
+        // Subtract per-entry ignored pairs from the cached totals so
+        // the Links Report badges show the actual actionable
+        // suggestion count (what the modal would display by default).
+        //
+        // **Approximation note (Klasse-10 guarantee-stack 2026-05-22):**
+        // `ignoredCountFor($id)` is direction-agnostic — counts pairs
+        // the entry participates in, regardless of whether the engine
+        // suggested A→B, B→A, or both. We subtract from BOTH inbound
+        // and outbound; in the worst case this slightly over-subtracts
+        // when a pair was only suggested in one direction. Bounded by
+        // `max(0, …)` so badges never go negative.
+        //
+        // The Modal counts (OutboundController + InboundController)
+        // are exact — they decorate each engine suggestion with
+        // `is_ignored` and the frontend computes visible = total - sum.
+        // Badges in Links Report align with Modal counts exactly after
+        // the next Scan Content (cached totals get refreshed from the
+        // engine, then this subtraction is over the same baseline).
         foreach ($records as $record) {
+            $ignoredHere = $this->ignoredStore->ignoredCountFor($record->id);
+            // Shape pinned by StatsAndDomainAttributeTest — only
+            // 'inbound' + 'outbound' keys leave this method. Extra
+            // metadata (totals, ignored count) is not consumed by
+            // the frontend (LinksReportTab reads c.inbound / c.outbound
+            // only) and would force the entire downstream test stack
+            // to budge — YAGNI, drop them.
             $counts[$record->id] = [
-                'inbound' => $record->inboundSuggestionCount,
-                'outbound' => $record->outboundSuggestionCount,
+                'inbound' => max(0, $record->inboundSuggestionCount - $ignoredHere),
+                'outbound' => max(0, $record->outboundSuggestionCount - $ignoredHere),
             ];
         }
 

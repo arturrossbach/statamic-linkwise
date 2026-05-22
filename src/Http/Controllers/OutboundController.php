@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Arturrossbach\Linkwise\Exceptions\EntryConflictException;
 use Arturrossbach\Linkwise\Indexer\EntryIndexer;
+use Arturrossbach\Linkwise\Suggestions\IgnoredSuggestionStore;
 use Arturrossbach\Linkwise\Suggestions\OutboundSuggestionGrouper;
 use Arturrossbach\Linkwise\Suggestions\SuggestionEngine;
 use Arturrossbach\Linkwise\Support\BardLinkInserter;
@@ -18,6 +19,7 @@ class OutboundController extends CpController
     public function __construct(
         protected EntryIndexer $indexer,
         protected SuggestionEngine $engine,
+        protected IgnoredSuggestionStore $ignoredStore,
     ) {}
 
     /**
@@ -40,11 +42,43 @@ class OutboundController extends CpController
         // Group + filter via single source of truth
         $result = OutboundSuggestionGrouper::groupAndFilter($suggestions, $entryId);
 
-        // Persist count to index so table matches on next page load
+        // Persist TOTAL count to index (pre-ignored-filter) so the
+        // badge subtraction in InertiaPagesController::links can compute
+        // the displayed count as `total - ignoredCountFor(entryId)`.
+        // This keeps the cache stable across ignore/un-ignore actions —
+        // only the runtime subtraction layer changes when pairs get
+        // ignored/un-ignored. See Klasse-10 guarantee-stack
+        // (2026-05-22 launch session).
         if ($record->outboundSuggestionCount !== $result['count']) {
             $records[$entryId] = $record->withOutboundSuggestionCount($result['count']);
             $this->indexer->save($records);
         }
+
+        // Decorate each target with an `is_ignored` flag so the
+        // frontend can default-hide ignored pairs but reveal them
+        // via the "Show ignored (N)" toggle. The pair is undirected
+        // — `isIgnored(source, target)` matches regardless of which
+        // side was the original ignore-initiator.
+        //
+        // We do NOT filter server-side: the modal needs both states
+        // (visible + ignored) in one response so the toggle works
+        // without a roundtrip. The default count subtraction happens
+        // on the client side via a Vue computed.
+        $ignoredCount = 0;
+        foreach ($result['groups'] as &$group) {
+            foreach ($group['targets'] as &$target) {
+                $target['is_ignored'] = $this->ignoredStore->isIgnored(
+                    $entryId, (string) ($target['target_entry_id'] ?? '')
+                );
+                if ($target['is_ignored']) {
+                    $ignoredCount++;
+                }
+            }
+        }
+        unset($group, $target);
+        $result['ignored_count'] = $ignoredCount;
+        // result['count'] stays the TOTAL — frontend computes
+        // visible = total - ignored_count for the header badge.
 
         // Add edit URLs to each target
         foreach ($result['groups'] as &$group) {
@@ -64,6 +98,13 @@ class OutboundController extends CpController
             'content_hash' => $entry ? SafeEntrySaver::hash($entry) : '',
             'groups' => $result['groups'],
             'group_count' => $result['count'],
+            // Bug A 2026-05-22: was set on $result but dropped from
+            // the response. Frontend ignoredCount-Computed derives
+            // it from the groups[].targets[].is_ignored flags, so
+            // not strictly needed — but persisting the server-side
+            // total in the response keeps the API symmetric with
+            // InboundController and makes future debugging easier.
+            'ignored_count' => $result['ignored_count'] ?? 0,
         ]);
     }
 

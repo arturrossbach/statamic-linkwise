@@ -175,6 +175,12 @@ Route::middleware('can:manage linkwise')->group(function () {
     Route::post('linkwise/excluded-content-keywords/{entryId}', [\Arturrossbach\Linkwise\Http\Controllers\ExcludedContentKeywordController::class, 'update'])
         ->name('linkwise.excluded-content-keywords.update');
 
+    // Ignored Suggestion Pairs (per-(source,target) block-list — User-Smoke 2026-05-22)
+    Route::post('linkwise/ignored-suggestions', [\Arturrossbach\Linkwise\Http\Controllers\IgnoredSuggestionController::class, 'ignore'])
+        ->name('linkwise.ignored-suggestions.ignore');
+    Route::delete('linkwise/ignored-suggestions', [\Arturrossbach\Linkwise\Http\Controllers\IgnoredSuggestionController::class, 'unignore'])
+        ->name('linkwise.ignored-suggestions.unignore');
+
     // Ignored Broken Links (user-marked false positives)
     Route::post('linkwise/ignored-links/ignore', [IgnoredLinkController::class, 'ignore'])
         ->name('linkwise.ignored-links.ignore');

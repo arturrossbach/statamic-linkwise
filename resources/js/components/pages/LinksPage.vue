@@ -23,6 +23,8 @@
             :outbound-insert-url="outboundInsertUrl"
             :relink-url="relinkUrl"
             :autolink-store-url="autolinkStoreUrl"
+            :ignore-suggestion-url="ignoreSuggestionUrl"
+            :unignore-suggestion-url="unignoreSuggestionUrl"
             :rebuild-url="rebuildUrl"
             :index-last-built-at="indexLastBuiltAt"
             :initial-orphaned="initialOrphaned"
@@ -50,6 +52,8 @@ export default {
         outboundInsertUrl: { type: String, default: '' },
         relinkUrl: { type: String, default: '' },
         autolinkStoreUrl: { type: String, default: '' },
+        ignoreSuggestionUrl: { type: String, default: '' },
+        unignoreSuggestionUrl: { type: String, default: '' },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },
