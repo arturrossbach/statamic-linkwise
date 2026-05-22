@@ -13,3 +13,4 @@ docs/SISTER_AUDIT_2026_05_17.md
 *.iml
 .idea/
 /test-results
+docs/internal/

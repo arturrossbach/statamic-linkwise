@@ -6,12 +6,9 @@ sections:
         field:
           type: select
           display: 'Content language'
+          clearable: true
           instructions: |
-            Drives stop-word filtering, stemming, and keyword extraction.
-            Confident (Snowball stemmer + curated stop-words — inflection-aware): English, German, French, Spanish, Italian, Dutch, Portuguese, Swedish, Danish, Norwegian, Finnish, Romanian, Russian, Catalan.
-            Limited (stop-words only — exact-match for plurals): Hungarian, Polish, Czech, Slovak, Slovenian, Croatian, Bulgarian, Ukrainian, Latvian, Lithuanian, Estonian, Irish, Greek, Turkish.
-            Leave empty to auto-detect from Statamic's site locale.
-            Not sure your language fits? Linkwise is free in dev environments under Statamic's licensing — install locally, run a scan on your real content, then license per-site for production.
+            Drives stop-word filtering, stemming, and keyword extraction. Leave empty to auto-detect from Statamic's site locale. "Confident" languages support inflected matching (plurals, conjugations); "Limited" languages match exact word forms only.
           options:
             en: 'English (Confident)'
             de: 'German (Confident)'

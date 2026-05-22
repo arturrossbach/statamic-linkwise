@@ -47,8 +47,7 @@
                             </td>
                             <td class="whitespace-nowrap">
                                 <Badge :variant="kindVariant(snap.kind)" :text="kindLabel(snap)" />
-                                <Badge v-if="snap.completed_at === null" variant="warning" text="In progress" class="ml-1" v-tooltip="'This bulk is still running. The entry is shown for transparency, but Revert is disabled until the bulk completes.'" />
-                                <Badge v-if="snap.reverted_at" variant="default" text="↶ Reverted" class="ml-1" v-tooltip="'Reverted at ' + formatAbsolute(snap.reverted_at)" />
+                                <Badge v-if="snap.completed_at === null" variant="warning" text="In progress" class="ml-1" v-tooltip="'This bulk is still running. Entries appear here for transparency.'" />
                             </td>
                             <td class="whitespace-nowrap text-xs">
                                 {{ snap.started_by || '—' }}
@@ -56,7 +55,7 @@
                             <td class="whitespace-nowrap text-xs">
                                 <span class="font-medium">{{ effectiveEntryCount(snap) }}</span>
                                 <span class="text-gray-400 ml-1">{{ effectiveEntryCount(snap) === 1 ? 'entry' : 'entries' }}</span>
-                                <span v-if="entrySkipDelta(snap) > 0" class="text-amber-600 dark:text-amber-400 ml-1" v-tooltip="entrySkipDelta(snap) + ' entry was modified between bulk and revert and was left untouched. See drawer for details.'">
+                                <span v-if="entrySkipDelta(snap) > 0" class="text-amber-600 dark:text-amber-400 ml-1" v-tooltip="entrySkipDelta(snap) + ' entry was modified during the bulk and was left untouched. See drawer for details.'">
                                     ({{ entrySkipDelta(snap) }} skipped)
                                 </span>
                             </td>
@@ -85,53 +84,19 @@
                     <p v-if="summaryLabel(detail.snapshot)" class="mt-1">{{ summaryLabel(detail.snapshot) }}</p>
                 </div>
 
-                <!-- Activity Log is view-only in V1 — Revert action removed from UI.
-                     Snapshots keep being recorded so the drawer shows full
-                     per-entry detail. No banner here: user just sees the
-                     recap below, no marketing about a future feature. -->
-                <!-- Still-running state: clear "wait" message. The v-if (not
-                     v-else-if) is intentional — there's no preceding v-if
-                     now that the Revert card is gone. -->
                 <Alert v-if="detail.snapshot.completed_at === null" variant="warning" class="mb-3">
                     <p class="text-sm">
                         <strong>This bulk is still running.</strong>
-                        Wait for it to complete — the entry will become revertable as soon as the run finishes.
                         Watch the progress banner at the top of the screen, or refresh this page.
                     </p>
                 </Alert>
-                <!-- Already-reverted state: a one-liner is enough; the recovery
-                     instructions only matter when no auto-revert is possible. -->
-                <Alert v-else-if="detail.snapshot.reverted_at" variant="default" class="mb-3">
-                    <p class="text-sm">
-                        <strong>↶ Already reverted</strong> on
-                        <span>{{ formatAbsolute(detail.snapshot.reverted_at) }}</span><template v-if="detail.reverted_by_user">
-                        by <strong>{{ detail.reverted_by_user }}</strong></template>.
-                        Look for the matching reverse-bulk further up in this list.
-                    </p>
-                </Alert>
-                <Alert v-else-if="nonReversibleReason" variant="default" class="mb-3">
-                    <p class="text-sm">
-                        <strong>Not auto-revertable:</strong> {{ nonReversibleReason }}
-                    </p>
-                </Alert>
 
-                <!-- Skipped-entries table — entries that this snapshot's bulk
-                     run touched but couldn't write (hash mismatch from user
-                     edits, deleted entry, etc.). Surfaces as a banner above
-                     the main entries table. Two render modes:
-                       - Looking at this snapshot AS THE BULK: "X entries
-                         were skipped during this run".
-                       - Looking at an ORIGINAL snapshot AFTER it was
-                         reverted: "X entries were skipped during the revert".
-                     The skipped rows are also EXCLUDED from sortedDetailEntries
-                     so the main table doesn't show them as empty rows. -->
-                <!-- Skipped during THIS bulk run — entries the bulk wanted
-                     to touch but couldn't (anchor not found, hash mismatch,
-                     missing target, unexpected error). Distinct from
-                     revert-skipped which fires during the inverse-bulk
-                     of a revert. Bug 2026-05-11: prior to this, non-revert
-                     bulks left their skipped entries invisible beyond the
-                     toast's aggregate count. -->
+                <!-- Skipped-entries table — entries the bulk touched but
+                     couldn't write (anchor not found, hash mismatch from
+                     concurrent edits, deleted entry, unexpected error).
+                     Surfaces above the main affected-entries table; the
+                     skipped rows are EXCLUDED from sortedDetailEntries
+                     so the table doesn't double-list them. -->
                 <Alert v-if="hasSkippedDuringBulk" variant="warning" class="mb-3">
                     <p class="text-sm font-medium mb-2">
                         ⚠ {{ skippedDuringBulk.length }} {{ skippedDuringBulk.length === 1 ? 'entry was' : 'entries were' }} skipped during this run. Their content is intact — Linkwise refused to overwrite them or couldn't locate the anchor.
@@ -158,53 +123,6 @@
                         </table>
                     </div>
                 </Alert>
-
-                <!-- revert_skipped table renders ONLY when this snapshot has
-                     itself been reverted — then the table describes "of the
-                     items someone tried to revert, here are the M that were
-                     left untouched". For forward bulk runs, bulk_skipped above
-                     is the truth. Without the reverted_at guard the same skips
-                     were shown twice in the drawer (Bug 2026-05-11). -->
-                <Alert v-if="hasSkippedDuringRevert && detail.snapshot.reverted_at" variant="warning" class="mb-3">
-                    <p class="text-sm font-medium mb-2">
-                        ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during the revert because of changes made since the bulk ran. Their content is intact — Linkwise refused to overwrite them.
-                    </p>
-                    <div class="overflow-x-auto">
-                        <table class="data-table w-full text-xs">
-                            <thead>
-                                <tr>
-                                    <th scope="col" class="text-left">Entry</th>
-                                    <th scope="col" class="text-left">Reason</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="row in skippedDuringRevert" :key="row.entry_id">
-                                    <td>
-                                        <a v-if="row.edit_url" :href="row.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ row.entry_title || row.entry_id }}</a>
-                                        <span v-else>{{ row.entry_title || '(deleted)' }}</span>
-                                        <BardBadge v-if="row.entry_id" :entry-id="row.entry_id" class="ml-1.5" />
-                                        <span v-if="row.collection" class="ml-2 text-xs text-gray-400">{{ row.collection }}</span>
-                                    </td>
-                                    <td class="text-gray-600 dark:text-gray-400" v-html="formatSkipReason(row)"></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </Alert>
-
-                <!-- Revert lineage banner — when this snapshot is itself the
-                     inverse of a previous bulk, surface that link upfront so
-                     users understand "this entry exists because operation X
-                     was reverted". Drives the kind-aware framing for the
-                     summary header below as well. -->
-                <div v-if="detail.reverted_from" class="mb-3 rounded-md border border-amber-200 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10 p-3 text-sm">
-                    <p class="text-amber-900 dark:text-amber-200">
-                        <strong>↶ Reverts</strong>
-                        <span v-html="revertedFromLabel"></span>
-                        from <strong>{{ formatAbsolute(detail.reverted_from.started_at) }}</strong><template v-if="detail.reverted_from.started_by">
-                        by <strong>{{ detail.reverted_from.started_by }}</strong></template>.
-                    </p>
-                </div>
 
                 <!-- Operation summary header — surfaces the uniform parts of
                      the operation (anchor, target, search term) once at the
@@ -257,7 +175,7 @@
                                         </div>
                                     </th>
                                     <SortableHeader label="Status since bulk" :active="drawerSortField === 'status'" :direction="drawerSortDirection" @sort="toggleDrawerSort('status')">
-                                        <HelpIcon tooltip="Compares the entry's current content to its state right after the bulk. 'Unchanged' means no edits since. 'Edited' means a user touched the entry — Revert would skip it. 'Deleted' means the entry no longer exists. '—' (legacy) means this snapshot was recorded before post-hash tracking shipped, so the comparison isn't possible." />
+                                        <HelpIcon tooltip="Compares the entry's current content to its state right after the bulk. 'Unchanged' means no edits since. 'Edited' means a user touched the entry. 'Deleted' means the entry no longer exists. '—' (legacy) means this snapshot was recorded before post-hash tracking shipped, so the comparison isn't possible." />
                                     </SortableHeader>
                                 </tr>
                             </thead>
@@ -281,15 +199,6 @@
                                         <span v-if="e.status === 'unknown'" class="text-gray-400" v-tooltip="'This snapshot was recorded before per-entry post-hash tracking shipped — comparison with the current state is not possible.'">—</span>
                                         <template v-else>
                                             <Badge :variant="statusVariant(e.status)" :text="statusLabel(e.status)" />
-                                            <!-- Per-row skip preview: when this snapshot is revertable
-                                                 and not-yet-reverted, mark every modified/deleted row
-                                                 as one that the Revert action would skip. The drawer's
-                                                 Revert card shows the aggregate count; this surfaces
-                                                 the same fact at row level so users can spot which
-                                                 specific entries are at stake. -->
-                                            <div v-if="wouldBeSkippedOnRevert(e)" class="mt-0.5 text-amber-700 dark:text-amber-400 text-xs">
-                                                → skipped on revert
-                                            </div>
                                         </template>
                                     </td>
                                 </tr>
@@ -300,18 +209,6 @@
             </div>
         </Stack>
 
-        <!-- Revert confirmation modal — fired from the drawer's "Revert…" button.
-             Surfaces the planned-effects preview (X will be reverted, Y were
-             modified since and will be skipped) so the user can decide. -->
-        <ConfirmationModal
-            :open="confirmRevert"
-            @update:open="val => confirmRevert = val"
-            @confirm="doRevert"
-            :title="'Revert this operation?'"
-            :body-text="confirmBodyText"
-            button-text="Revert"
-            :busy="reverting"
-        />
     </LinkwiseLayout>
 </template>
 
