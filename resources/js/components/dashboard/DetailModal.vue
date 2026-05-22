@@ -95,7 +95,6 @@
                                         <template v-else>
                                             <a v-if="item.edit_url" :href="item.edit_url" target="_blank" class="hover:text-blue-600 dark:hover:text-blue-400">{{ item.title }}</a>
                                             <span v-else class="text-gray-500">{{ item.title }}</span>
-                                            <BardBadge v-if="item.id" :entry-id="item.id" class="ml-1.5" />
                                         </template>
                                     </td>
                                     <td class="text-center whitespace-nowrap">
@@ -107,7 +106,6 @@
                                     <td>
                                         <a v-if="item.edit_url" :href="item.edit_url" target="_blank" class="hover:text-blue-600 dark:hover:text-blue-400">{{ item.title }}</a>
                                         <span v-else>{{ item.title }}</span>
-                                        <BardBadge v-if="item.id" :entry-id="item.id" class="ml-1.5" />
                                         <div class="text-xs text-gray-400">{{ item.collection }}</div>
                                     </td>
                                     <td>
@@ -152,12 +150,11 @@ import { Panel, Button, Stack, Icon, ConfirmationModal } from '@statamic/cms/ui'
 import HelpIcon from '../shared/HelpIcon.vue';
 import SortableHeader from '../shared/SortableHeader.vue';
 import SuggestedPhrase from '../shared/SuggestedPhrase.vue';
-import BardBadge from '../shared/BardBadge.vue';
 import { bulkState, setHeavyState, runBulkOperation, recordCompletion } from '../../services/bulkOperationService.js';
 import { errorToast } from '../../utils/toast.js';
 
 export default {
-    components: { Panel, Button, Stack, Icon, ConfirmationModal, HelpIcon, SortableHeader, SuggestedPhrase, BardBadge },
+    components: { Panel, Button, Stack, Icon, ConfirmationModal, HelpIcon, SortableHeader, SuggestedPhrase },
 
     props: {
         modal: { type: Object, default: null },

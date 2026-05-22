@@ -75,18 +75,6 @@ class ServiceProvider extends AddonServiceProvider
         // when testing field-type-specific code paths. Production users
         // never see this — branch is gated on app()->environment('local').
         // Computed once per request via Inertia::share so the 8 endpoint
-        // controllers don't need to thread the prop individually.
-        \Inertia\Inertia::share('linkwise', function () {
-            // Opt-in via LINKWISE_DEV=true (NOT app()->environment('local')) —
-            // a customer site running locally during their dev cycle MUST NOT
-            // see the BARD badge. Only the addon developer sets the env var.
-            $devMode = (bool) config('linkwise.dev_mode', false);
-            return [
-                'dev_mode' => $devMode,
-                'bard_entry_ids' => $devMode ? $this->detectBardEntryIds() : [],
-            ];
-        });
-
         // Merge addon settings (from CP UI) into the config, so all
         // existing config() calls automatically respect user settings.
         $this->app->booted(function () {
@@ -229,66 +217,5 @@ class ServiceProvider extends AddonServiceProvider
         } catch (\Throwable) {
             // Settings not available yet (e.g. during install) — use defaults
         }
-    }
-
-    /**
-     * Dev-mode helper for the BARD badge in CP tables. Returns the entry IDs
-     * whose blueprint contains a Bard or Replicator field — i.e. the entries
-     * where Linkwise's Bard / nested-Bard write paths get exercised.
-     *
-     * Computed on the fly per request. Acceptable cost: dev-mode-only,
-     * Statamic's blueprint cache makes the per-entry check cheap. NOT
-     * cached across requests because adding/removing collections shouldn't
-     * require a cache flush during local dev.
-     *
-     * @return list<string>
-     */
-    protected function detectBardEntryIds(): array
-    {
-        $ids = [];
-        try {
-            foreach (\Statamic\Facades\Entry::all() as $entry) {
-                if ($this->entryHasActualBardContent($entry)) {
-                    $ids[] = $entry->id();
-                }
-            }
-        } catch (\Throwable) {
-            return [];
-        }
-        return $ids;
-    }
-
-    /**
-     * True if the entry actually carries Bard data — either a top-level
-     * Bard field with content, or a Replicator field whose nested sets
-     * contain a Bard fragment. Blueprint-only check (just looking at
-     * field types) over-counts in setups like Peak where every entry has
-     * a Replicator regardless of whether any set actually uses Bard.
-     */
-    protected function entryHasActualBardContent($entry): bool
-    {
-        try {
-            $fields = $entry->blueprint()->fields()->all();
-        } catch (\Throwable) {
-            return false;
-        }
-        foreach ($fields as $handle => $field) {
-            $type = $field->type();
-            $value = $entry->get($handle);
-            if ($type === 'bard' && is_array($value) && ! empty($value)) {
-                return true;
-            }
-            if ($type === 'replicator' && is_array($value) && ! empty($value)) {
-                $found = false;
-                \Arturrossbach\Linkwise\Support\EntryFieldWalker::walkReplicator(
-                    $value,
-                    function () use (&$found) { $found = true; },
-                );
-                if ($found) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 }
