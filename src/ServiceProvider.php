@@ -37,6 +37,7 @@ class ServiceProvider extends AddonServiceProvider
         SeedTestDataCommand::class,
         AuditCommand::class,
         NormalizeBardCommand::class,
+        \Arturrossbach\Linkwise\Commands\BuildFrequencyStemsCommand::class,
     ];
 
     protected $routes = [
