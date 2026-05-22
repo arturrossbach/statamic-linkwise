@@ -39,25 +39,87 @@
         </Header>
 
         <!-- Empty State: auto-scan on first visit -->
-        <div v-if="isEmpty" class="py-12 text-center">
-            <Card class="max-w-md mx-auto">
-                <div class="py-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="size-12 mx-auto mb-4 text-gray-300 dark:text-gray-600">
-                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke-linecap="round" stroke-linejoin="round" />
-                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                    <h3 v-if="!rebuilding" class="text-lg font-medium text-gray-700 dark:text-gray-300">Welcome to Linkwise</h3>
-                    <h3 v-else class="text-lg font-medium text-gray-700 dark:text-gray-300">Scanning your content...</h3>
-                    <p v-if="!rebuilding" class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-4">
-                        Scanning your content to discover link opportunities.
-                    </p>
-                    <p v-else class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-4">
-                        Analyzing entries, extracting keywords, and mapping links. This may take a moment.
-                    </p>
-                    <p v-if="rebuilding && activeBulk && activeBulk.total > 0" class="text-xs font-mono text-gray-500 dark:text-gray-400 mb-4">
-                        {{ activeBulk.current }} / {{ activeBulk.total }}
-                    </p>
-                    <Button v-if="!rebuilding" @click="rebuildIndex" variant="primary" text="Scan Now" />
+        <div v-if="isEmpty" class="py-12">
+            <Card class="max-w-2xl mx-auto">
+                <div class="py-4 px-2">
+                    <div class="text-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="size-12 mx-auto mb-4 text-gray-300 dark:text-gray-600">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke-linecap="round" stroke-linejoin="round" />
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <h3 v-if="!rebuilding" class="text-lg font-medium text-gray-700 dark:text-gray-300">Welcome to Linkwise</h3>
+                        <h3 v-else class="text-lg font-medium text-gray-700 dark:text-gray-300">Scanning your content...</h3>
+                        <p v-if="!rebuilding" class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-4 max-w-md mx-auto">
+                            Linkwise analyses your entries to discover internal-link opportunities. Here are the next steps to get the most out of it:
+                        </p>
+                        <p v-else class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-4">
+                            Analysing entries, extracting keywords, and mapping links. This may take a moment.
+                        </p>
+                        <p v-if="rebuilding && activeBulk && activeBulk.total > 0" class="text-xs font-mono text-gray-500 dark:text-gray-400 mb-4">
+                            {{ activeBulk.current }} / {{ activeBulk.total }}
+                        </p>
+                    </div>
+
+                    <!--
+                        First-run onboarding checklist. Replaces the
+                        previous one-line welcome message — too many
+                        editors didn't know which knob to turn first.
+                        Linked to docs.linkwise (planned) + the Settings
+                        page anchors so each step is a single click.
+                    -->
+                    <ol v-if="!rebuilding" class="text-sm text-gray-600 dark:text-gray-400 max-w-lg mx-auto space-y-3 my-6 list-decimal list-inside">
+                        <li>
+                            <strong class="text-gray-700 dark:text-gray-300">Pick your Content Language.</strong>
+                            <span class="block ml-5 text-xs">
+                                Drives stemming + stopword filtering. Visit
+                                <a href="/cp/utilities/addon-settings/arturrossbach.statamic-linkwise" class="text-blue-600 dark:text-blue-400 hover:underline">Settings → Content Language</a>
+                                if Linkwise hasn't auto-detected it correctly.
+                            </span>
+                        </li>
+                        <li>
+                            <strong class="text-gray-700 dark:text-gray-300">Choose which Collections to index.</strong>
+                            <span class="block ml-5 text-xs">
+                                Leave empty to index all. If you have draft-collections that shouldn't appear in suggestions, exclude them in
+                                <a href="/cp/utilities/addon-settings/arturrossbach.statamic-linkwise" class="text-blue-600 dark:text-blue-400 hover:underline">Settings → Collections</a>.
+                            </span>
+                        </li>
+                        <li>
+                            <strong class="text-gray-700 dark:text-gray-300">Run your first Scan Content.</strong>
+                            <span class="block ml-5 text-xs">
+                                One-click below. Takes ~5–60 seconds depending on entry count.
+                            </span>
+                        </li>
+                        <li>
+                            <strong class="text-gray-700 dark:text-gray-300">Browse the Links Report.</strong>
+                            <span class="block ml-5 text-xs">
+                                See per-entry inbound/outbound link counts and click the Suggestion badges to add internal links.
+                            </span>
+                        </li>
+                    </ol>
+
+                    <div class="text-center">
+                        <Button v-if="!rebuilding" @click="rebuildIndex" variant="primary" text="Scan Now" />
+                    </div>
+
+                    <!--
+                        Docs + support pointer. Most editors will return
+                        to this page on their first uncertain moment — a
+                        single visible link to the documentation site
+                        keeps the question funnel out of the support
+                        inbox. Once the docs subdomain is live, swap
+                        the GitHub README link below for the canonical
+                        docs URL.
+                    -->
+                    <div v-if="!rebuilding" class="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700/50 text-center">
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
+                            Need help getting set up?
+                            <a href="https://github.com/arturrossbach/statamic-linkwise#readme" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Read the docs</a>
+                            ·
+                            <a href="https://github.com/arturrossbach/statamic-linkwise/issues/new?template=question.yml" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Ask on GitHub</a>
+                            ·
+                            <a href="mailto:linkwise.support@gmail.com?subject=Linkwise%20setup%20question" class="text-blue-600 dark:text-blue-400 hover:underline">Email support</a>
+                        </p>
+                    </div>
                 </div>
             </Card>
         </div>
