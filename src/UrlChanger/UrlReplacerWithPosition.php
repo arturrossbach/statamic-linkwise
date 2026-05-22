@@ -253,39 +253,67 @@ class UrlReplacerWithPosition
     }
 
     /**
-     * Replace the Nth Markdown link matching oldUrl.
+     * Replace the Nth Markdown link matching the user's search (smart/exact).
+     *
+     * Counter semantic: $targetIndex counts hrefMatches-positives across the
+     * full Markdown string — same global semantic as findInMarkdown and as
+     * replaceNthInBard. User-bug 2026-05-22: the pre-fix implementation used
+     * a preg_quote($oldUrl)-restricted regex, which counted ONLY within
+     * matches of that exact URL. When findInMarkdown returned occurrence_index
+     * N because N matched links shared a domain, this method silently returned
+     * "Links were already gone" for every non-first match — multi-link
+     * Markdown fields were effectively un-replaceable past the first row.
      *
      * @return array{0: string, 1: bool, 2: ?array{char_start: int, char_end: int}}
      */
-    public function replaceNthInMarkdown(string $markdown, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
+    public function replaceNthInMarkdown(string $markdown, string $search, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
     {
-        $escaped = preg_quote($oldUrl, '#');
-
-        if (! preg_match_all('#\[([^\[\]]*)\]\('.$escaped.'\)#', $markdown, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
-            return [$markdown, false, null];
-        }
-        if (! isset($matches[$targetIndex])) {
+        // Match ALL markdown links, then filter through hrefMatches the same
+        // way findInMarkdown does. Mirror of Bard's counter-step-then-check.
+        if (! preg_match_all('#\[([^\[\]]*)\]\(([^)]+)\)#', $markdown, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
             return [$markdown, false, null];
         }
 
-        $target = $matches[$targetIndex];
-        $fullMatch = $target[0][0];
-        $matchOffset = $target[0][1];
-        $anchor = $target[1][0];
+        $counter = 0;
+        foreach ($matches as $match) {
+            $anchor = $match[1][0];
+            $href = $match[2][0];
 
-        if ($expectedAnchor !== null && trim($anchor) !== trim($expectedAnchor)) {
-            return [$markdown, false, null];
+            if (! $this->matcher->hrefMatches($href, $search)) {
+                continue;
+            }
+
+            if ($counter !== $targetIndex) {
+                $counter++;
+                continue;
+            }
+
+            // counter === $targetIndex: this is THE candidate. Mirror Bard's
+            // per-item verification — anchor-fingerprint AND exact-href check.
+            // Both gates produce silent skip (no replacement, no further
+            // iteration) which preserves the user-visible "skip with reason"
+            // pipeline upstream in UrlChangerApplyCommand.
+            if ($expectedAnchor !== null && trim($anchor) !== trim($expectedAnchor)) {
+                return [$markdown, false, null];
+            }
+            if ($href !== $oldUrl) {
+                return [$markdown, false, null];
+            }
+
+            $fullMatch = $match[0][0];
+            $matchOffset = $match[0][1];
+            $replacement = $newUrl === UrlHelper::UNLINK ? $anchor : '['.$anchor.']('.$newUrl.')';
+            $result = substr_replace($markdown, $replacement, $matchOffset, strlen($fullMatch));
+
+            $anchorStartInResult = $newUrl === UrlHelper::UNLINK ? $matchOffset : $matchOffset + 1;
+            $position = [
+                'char_start' => $anchorStartInResult,
+                'char_end' => $anchorStartInResult + strlen($anchor),
+            ];
+
+            return [$result, true, $position];
         }
 
-        $replacement = $newUrl === UrlHelper::UNLINK ? $anchor : '['.$anchor.']('.$newUrl.')';
-        $result = substr_replace($markdown, $replacement, $matchOffset, strlen($fullMatch));
-
-        $anchorStartInResult = $newUrl === UrlHelper::UNLINK ? $matchOffset : $matchOffset + 1;
-        $position = [
-            'char_start' => $anchorStartInResult,
-            'char_end' => $anchorStartInResult + strlen($anchor),
-        ];
-
-        return [$result, true, $position];
+        return [$markdown, false, null];
     }
 }

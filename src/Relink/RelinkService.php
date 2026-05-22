@@ -143,8 +143,11 @@ class RelinkService
                 return $did ? ['value' => $modified, 'position' => $position] : null;
             },
             onMarkdown: function (string $value) use ($originalHref, $occurrenceIndex, $originalAnchor): ?array {
+                // Re-Link operates on one specific URL — passing $originalHref as
+                // both $search and $oldUrl matches the existing Bard/Replicator
+                // calls on the previous lines (exact-mode-style targeting).
                 [$modified, $did, $position] = $this->urlReplacer->replaceNthInMarkdown(
-                    $value, $originalHref, UrlHelper::UNLINK, $occurrenceIndex, $originalAnchor
+                    $value, $originalHref, $originalHref, UrlHelper::UNLINK, $occurrenceIndex, $originalAnchor
                 );
                 return $did ? ['value' => $modified, 'position' => $position] : null;
             },
