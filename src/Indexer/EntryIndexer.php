@@ -318,12 +318,24 @@ class EntryIndexer
     protected function enrichWithKeywords(array $records): array
     {
         $corpus = [];
+        $titles = [];
         foreach ($records as $id => $record) {
-            // Combine title + text for keyword extraction
+            // Combined title + body for the TF-IDF tokenizer — same as
+            // before this refactor, keeps title-only words in the
+            // extraction stream so they can still surface as keywords.
             $corpus[$id] = $record->title.' '.$record->text;
+            // Title alone goes to extractAllWithTitles() as the
+            // FrequencyFilter title-protect context. The same words
+            // are stemmed and indexed in the protect set, which
+            // shields mid-frequency domain words (Rezept, Notebook,
+            // Suchmaschine) that the editor put in the title from the
+            // 50k-stopword cull. Body-only domain words that happen
+            // to be mid-frequency still get filtered — see Custom
+            // Stopwords / Custom Target Keywords escape valves.
+            $titles[$id] = $record->title;
         }
 
-        $allKeywords = $this->keywordExtractor->extractAll($corpus);
+        $allKeywords = $this->keywordExtractor->extractAllWithTitles($corpus, $titles);
 
         // Preserve ALL existing EntryRecord fields — only the keyword
         // map gets replaced. Earlier this method dropped suggestion

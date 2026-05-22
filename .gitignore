@@ -14,3 +14,11 @@ docs/SISTER_AUDIT_2026_05_17.md
 .idea/
 /test-results
 docs/internal/
+
+# Frequency-Words raw lists — too large for the repo (3-5MB each × 9 langs).
+# Pre-stemmed JSONs (`resources/data/frequency-stems-*.json`) are checked in
+# as the runtime artifact. To rebuild from scratch:
+#   1. Download `<lang>_50k.txt` from github.com/hermitdave/FrequencyWords
+#   2. Save as `resources/data/_raw_<lang>_50k.txt`
+#   3. Run `php artisan linkwise:build-frequency-stems <lang>`
+/resources/data/_raw_*_50k.txt
