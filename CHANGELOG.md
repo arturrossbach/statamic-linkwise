@@ -8,6 +8,111 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 _No unreleased changes._
 
+## [1.1.0] — 2026-05-22
+
+First post-launch release. Bundles the Cloudways production-smoke fixes,
+several UX cleanups, and a few additive features. No breaking changes
+to settings or stored data.
+
+### What's new
+
+- **Per-pair ignored-suggestions blocklist.** Editors can mark a
+  (source, target) pair as "don't suggest this again" — the ignore
+  survives re-scans. Pair is undirected, sorted internally so the same
+  conceptual pair always serialises identically. ([#74])
+- **Frequency-based keyword filter.** Top-50000 global word-frequency
+  list (Snowball-stemmed, title-protected) filters filler words from
+  TF-IDF keyword extraction so suggestions surface meaningful terms,
+  not "still / very / really". ([#75], [#76])
+- **Exec-availability pre-flight banner.** Linkwise now warns up-front
+  when PHP `exec()` / `proc_open()` are disabled via `disable_functions`.
+  Visible constraint instead of silently-broken Scan Content. ([#80])
+- **Welcome-screen onboarding checklist.** First-run users see a 4-step
+  checklist (pick language → choose collections → first Scan → browse
+  Links Report). ([#84])
+- **Seed test data command.** `php artisan linkwise:seed-test-data 30
+  --with-home` populates a fresh site with realistic article + page
+  content for local smoke tests. Cycle support for large counts. ([#88],
+  [#91], [#92])
+
+### What's changed
+
+- **"Target Keywords" tab renamed to "Custom Keywords".** The "Target"
+  wording had a deprecated SEO reading; the new label matches what the
+  tab actually manages. The auto-extracted content-keywords column is
+  removed from the table (the extraction path was deactivated in favor
+  of title-matching); the same list still appears in the Add Keywords
+  modal as a read-only reference, copyable into custom keywords. ([#89])
+- **Excluded entries no longer leak into reports.** The
+  `excluded_entries` setting now only filters the Suggestion machinery
+  — Domains, Broken Links and URL Changer show every entry regardless.
+  Matches the blueprint copy "neither suggested nor suggesting". ([#87])
+- **Overview recommendations are dismissable.** Per-recommendation ✕
+  button persists in sessionStorage; banners reappear in a fresh
+  browser session if the underlying condition still holds. ([#90])
+- **Stale-broken-link banner removed entirely.** Was nagging editors
+  for index updates they planned to recheck on their own cadence. ([#90])
+- **Suggestion-overlap toggle marked experimental + off by default.**
+  Removed the orphaned `min_keyword_score` field from the settings UI.
+  ([#77], [#78], [#79])
+- **BARD developer badge removed** from the Bard editor toolbar. ([#81])
+
+### What's fixed
+
+- **Select-All in the Suggestion modal now respects ignored pairs.**
+  Pre-fix, master-checkbox added ignored items to the bulk; the server
+  inserted them anyway. Three-layer defense — modal counter, emit
+  filter, server-side per-item gate in `LinkInsertCommand`. ([#85])
+- **URL Changer Apply works for multi-link Markdown fields.** Pre-fix,
+  the second-and-later matching link in a Markdown field skipped with
+  "Links were already gone — Run Scan Content". Counter semantic
+  aligned with Bard/Replicator (global hrefMatches counter, not URL-
+  restricted regex). API parity: `replaceNthInMarkdown` now takes
+  `$search` as 2nd positional argument, matching its sister methods.
+  ([#86])
+- **Excluded entries are no longer silently hidden from Domains and
+  Broken Links.** See "What's changed" → "Excluded entries no longer
+  leak". ([#87])
+
+### Internal
+
+- **Bundle now shipped in the repo** — no more `npm run build` step
+  required after `composer require`. ([#83])
+- **Package renamed to `arturrossbach/statamic-linkwise`** for
+  Marketplace consistency. ([#82])
+- **Settings UI: range-validation + auto-detected language display.**
+  ([#71], [#72], [#73])
+- **Frontend bundle** ships with hashed filenames; Statamic vendor-
+  publish picks the active hash from the manifest.
+
+### Action required after upgrade
+
+Run `php artisan linkwise:index` once to pick up the per-pair ignored
+store + the frequency-filter pass. Hard-refresh the Control Panel.
+
+[#71]: https://github.com/arturrossbach/statamic-linkwise/pull/71
+[#72]: https://github.com/arturrossbach/statamic-linkwise/pull/72
+[#73]: https://github.com/arturrossbach/statamic-linkwise/pull/73
+[#74]: https://github.com/arturrossbach/statamic-linkwise/pull/74
+[#75]: https://github.com/arturrossbach/statamic-linkwise/pull/75
+[#76]: https://github.com/arturrossbach/statamic-linkwise/pull/76
+[#77]: https://github.com/arturrossbach/statamic-linkwise/pull/77
+[#78]: https://github.com/arturrossbach/statamic-linkwise/pull/78
+[#79]: https://github.com/arturrossbach/statamic-linkwise/pull/79
+[#80]: https://github.com/arturrossbach/statamic-linkwise/pull/80
+[#81]: https://github.com/arturrossbach/statamic-linkwise/pull/81
+[#82]: https://github.com/arturrossbach/statamic-linkwise/pull/82
+[#83]: https://github.com/arturrossbach/statamic-linkwise/pull/83
+[#84]: https://github.com/arturrossbach/statamic-linkwise/pull/84
+[#85]: https://github.com/arturrossbach/statamic-linkwise/pull/85
+[#86]: https://github.com/arturrossbach/statamic-linkwise/pull/86
+[#87]: https://github.com/arturrossbach/statamic-linkwise/pull/87
+[#88]: https://github.com/arturrossbach/statamic-linkwise/pull/88
+[#89]: https://github.com/arturrossbach/statamic-linkwise/pull/89
+[#90]: https://github.com/arturrossbach/statamic-linkwise/pull/90
+[#91]: https://github.com/arturrossbach/statamic-linkwise/pull/91
+[#92]: https://github.com/arturrossbach/statamic-linkwise/pull/92
+
 ## [1.0.0] — 2026-05-21
 
 Initial public release.
