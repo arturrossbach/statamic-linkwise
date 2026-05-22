@@ -12,6 +12,7 @@ use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\BulkStatusWriter;
 use Arturrossbach\Linkwise\Support\JobLock;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
+use Arturrossbach\Linkwise\Suggestions\IgnoredSuggestionStore;
 use Statamic\Facades\Entry;
 
 /**
@@ -69,6 +70,22 @@ class LinkInsertCommand extends Command
 
         $insertions = $payload['insertions'] ?? [];
         $entryHashes = $payload['entry_hashes'] ?? [];
+
+        // Build an in-memory lookup for the ignored-pair gate. The store is
+        // file-backed; calling isIgnored() per item would re-read the file
+        // up to max:200 times per bulk — measurable on slow I/O hosts like
+        // Cloudways. The bulk runs in a single artisan process so the
+        // ignored-list cannot mutate mid-loop in a way that would matter
+        // (the modal that schedules the bulk already finalised its
+        // ignore/un-ignore state at dispatch time). Single load + O(1)
+        // set-membership replaces O(N) file reads.
+        //
+        // Key is "sortedA::sortedB" matching IgnoredSuggestionStore's
+        // internal normalisation — undirected pair semantics preserved.
+        $ignoredPairKeys = [];
+        foreach (app(IgnoredSuggestionStore::class)->loadAll() as $pair) {
+            $ignoredPairKeys[$pair[0].'::'.$pair[1]] = true;
+        }
         $entryTitle = $payload['entry_title'] ?? '';
         $startedBy = $payload['started_by'] ?? null;
         $startedById = $payload['started_by_id'] ?? null;
@@ -169,6 +186,30 @@ class LinkInsertCommand extends Command
                     // only anchor for Activity-Log render. Klasse-7 follow-up
                     // (activity_log_skip_context_gap, 2026-05-17).
                     $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'missing_link_target', $anchorText, null, null);
+                    $status->running($i + 1, $total, $succeeded, $skipped);
+                    continue;
+                }
+
+                // Defense-in-depth against ignored-pair leaks (user-bug
+                // 2026-05-22). The modal's Select-All filter + the
+                // insertSuggestions() emit filter both drop ignored pairs
+                // client-side, but a direct API call (or a stale tab
+                // sending a payload built before the user re-ignored a
+                // pair) could still arrive here. Per-item skip + skip-
+                // record so the activity-log shows what we refused.
+                // Internal targets only — external href has no entry-pair
+                // semantics. Pair is undirected, so normalise the lookup
+                // key the same way IgnoredSuggestionStore does.
+                $pairKey = $targetEntryId
+                    ? (strcmp($sourceEntryId, $targetEntryId) <= 0
+                        ? $sourceEntryId.'::'.$targetEntryId
+                        : $targetEntryId.'::'.$sourceEntryId)
+                    : null;
+                if ($pairKey !== null && isset($ignoredPairKeys[$pairKey])) {
+                    $msg = 'Pair is on the ignored-suggestions list';
+                    $errors[$msg] = ($errors[$msg] ?? 0) + 1;
+                    $skipped++;
+                    $bulkSkippedRecords[] = BulkSnapshotStore::buildSkipRecord($sourceEntryId, 'ignored', $anchorText, $targetEntryId, $href);
                     $status->running($i + 1, $total, $succeeded, $skipped);
                     continue;
                 }
