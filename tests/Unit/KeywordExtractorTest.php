@@ -20,10 +20,15 @@ class KeywordExtractorTest extends TestCase
 
     public function test_extracts_keywords_from_corpus(): void
     {
+        // Top-50k frequency filter is aggressive — use unambiguously
+        // domain-specific terms (kubernetes, postgresql, vitest etc.)
+        // whose stems are NOT in en_50k. Common words like "laravel",
+        // "redis" are domain too but `databas`, `cach`, `program` etc.
+        // would get filtered without title-protect.
         $corpus = [
-            'doc1' => 'Laravel provides excellent caching mechanisms. Redis and Memcached are supported. Laravel caching improves performance significantly.',
-            'doc2' => 'Setting up Redis for your application requires careful configuration. Redis cluster mode enables high availability.',
-            'doc3' => 'Database optimization involves indexing, query tuning, and connection pooling. Proper database design is fundamental.',
+            'doc1' => 'Linkwise kubernetes Redis Memcached. Linkwise statamic excellence.',
+            'doc2' => 'Redis Kubernetes setup. Redis cluster mode availability.',
+            'doc3' => 'PostgreSQL Vitest indexing query optimization. PostgreSQL Vitest design.',
         ];
 
         $keywords = $this->extractor->extractAll($corpus);
@@ -41,16 +46,20 @@ class KeywordExtractorTest extends TestCase
 
     public function test_tfidf_scores_unique_terms_higher(): void
     {
+        // `vue` is in the en top-50k list (stems to `vue`) — domain-
+        // specific in a Vue blog but common enough to be in the
+        // frequency list. Use a less-common term (`vitest`) that
+        // survives without title-protect.
         $corpus = [
-            'doc1' => 'Laravel caching with Redis improves performance. Laravel is fast. Laravel handles caching well.',
-            'doc2' => 'Redis configuration for production servers. Redis cluster setup guide.',
-            'doc3' => 'Vue.js components for frontend development. Vue reactive data binding.',
+            'doc1' => 'Linkwise Redis Kubernetes Linkwise Kubernetes.',
+            'doc2' => 'Redis Kubernetes setup. Redis cluster guide.',
+            'doc3' => 'Vitest PostgreSQL Snowball Vitest reactive.',
         ];
 
         $keywords = $this->extractor->extractAll($corpus);
 
-        // "vue" should be unique to doc3 and score high there
-        $this->assertArrayHasKey('vue', $keywords['doc3']);
+        // "vitest" should be unique to doc3 and score high there
+        $this->assertArrayHasKey('vitest', $keywords['doc3']);
 
         // "redis" appears in doc1 and doc2, so should have lower IDF
         // but still appear due to frequency
@@ -122,16 +131,17 @@ class KeywordExtractorTest extends TestCase
         // `fast` and `reliable` ARE in the list (mid-frequency) and now
         // get filtered out without title-protect — this is the intended
         // behaviour after the 2026-05-22 stem-first refactor.
-        // `linkwise` + `cach` survive the frequency filter — both are
-        // domain terms not in the en_50k list. We don't pin `fast`,
-        // `reliable`, etc. anymore: those mid-frequency words get
-        // filtered without title-protect, which is intended behaviour.
-        $tokens = $this->extractor->tokenize('Linkwise Caching kubernetes redis');
+        // Only pin domain-specific terms whose stems are NOT in
+        // the en top-50k frequency list. `cach` (from "caching") and
+        // `databas` (from "database") ARE in Top-50k now after the
+        // 2026-05-22 round-2 threshold change — they would get
+        // filtered without title-protect.
+        $tokens = $this->extractor->tokenize('Linkwise kubernetes redis statamic');
 
         $this->assertContains('linkwis', $tokens); // "linkwise" stemmed (EN drops trailing -e)
-        $this->assertContains('cach', $tokens); // "caching" stemmed
         $this->assertContains('kubernet', $tokens); // "kubernetes" stemmed
         $this->assertContains('redi', $tokens); // "redis" stemmed
+        $this->assertContains('statam', $tokens); // "statamic" stemmed
     }
 
     public function test_tokenize_removes_short_words(): void
