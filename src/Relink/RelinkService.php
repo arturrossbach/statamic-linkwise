@@ -98,7 +98,7 @@ class RelinkService
             return [
                 'ok' => false,
                 'reason' => 'entry_not_found',
-                'message' => 'Eintrag wurde inzwischen gelöscht.',
+                'message' => 'The entry has been deleted in the meantime.',
             ];
         }
 
@@ -106,7 +106,7 @@ class RelinkService
             return [
                 'ok' => false,
                 'reason' => 'entry_changed',
-                'message' => 'Eintrag wurde inzwischen geändert. Bitte Modal schließen und neu öffnen.',
+                'message' => 'The entry has been modified in the meantime. Please close the modal and reopen it.',
             ];
         }
 
@@ -154,7 +154,7 @@ class RelinkService
             return [
                 'ok' => false,
                 'reason' => 'entry_changed',
-                'message' => 'Der ursprüngliche Link wurde nicht gefunden — Eintrag wurde inzwischen geändert. Bitte Modal schließen und neu öffnen.',
+                'message' => 'The original link could not be found — the entry has been modified in the meantime. Please close the modal and reopen it.',
             ];
         }
 
@@ -178,7 +178,7 @@ class RelinkService
             return [
                 'ok' => false,
                 'reason' => 'anchor_edit_not_supported',
-                'message' => 'Der Anker-Edit ist keine einfache Erweiterung oder Verkürzung — bitte den Link löschen und neu setzen.',
+                'message' => 'The anchor edit is not a simple expansion or shortening — please delete the link and add it again.',
             ];
         }
 
@@ -220,7 +220,7 @@ class RelinkService
             return [
                 'ok' => false,
                 'reason' => 'entry_changed',
-                'message' => 'Eintrag wurde inzwischen geändert. Bitte Modal schließen und neu öffnen.',
+                'message' => 'The entry has been modified in the meantime. Please close the modal and reopen it.',
             ];
         }
 
@@ -435,15 +435,15 @@ class RelinkService
         $blockingLabel = $blockingHref !== null ? $this->formatHref($blockingHref) : null;
 
         return match ($reason) {
-            'anchor_not_found' => 'Der Anker-Text ist nicht (mehr) im Eintrag enthalten.',
-            'context_mismatch' => 'Der ursprüngliche Satz-Kontext ist nicht mehr im Eintrag — bitte Modal neu öffnen.',
+            'anchor_not_found' => 'The anchor text is no longer present in the entry.',
+            'context_mismatch' => 'The original sentence context is no longer in the entry — please reopen the modal.',
             'crosses_existing_link' => $blockingLabel !== null
-                ? "Der Anker überlappt mit einem bestehenden Link auf {$blockingLabel} im selben Eintrag. Bitte den Link zuerst entfernen und erneut versuchen."
-                : 'Der Anker überlappt mit einem bestehenden Link im selben Eintrag. Bitte den Link zuerst entfernen.',
-            'already_linked_to_target' => 'Dieser Text ist bereits mit dem Ziel verlinkt.',
-            'anchor_edit_not_supported' => 'Der Anker-Edit ist keine einfache Erweiterung oder Verkürzung — bitte den Link löschen und neu setzen.',
-            'invalid_position', 'out_of_range', 'crosses_nontext_boundary' => 'Der Anker konnte im Eintrag nicht platziert werden — bitte Modal neu öffnen.',
-            default => 'Re-Link konnte nicht ausgeführt werden.',
+                ? "The anchor overlaps with an existing link to {$blockingLabel} in the same entry. Please remove that link first and try again."
+                : 'The anchor overlaps with an existing link in the same entry. Please remove that link first.',
+            'already_linked_to_target' => 'This text is already linked to the target.',
+            'anchor_edit_not_supported' => 'The anchor edit is not a simple expansion or shortening — please delete the link and add it again.',
+            'invalid_position', 'out_of_range', 'crosses_nontext_boundary' => 'The anchor could not be placed in the entry — please reopen the modal.',
+            default => 'Re-link could not be performed.',
         };
     }
 

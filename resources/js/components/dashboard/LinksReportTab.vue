@@ -266,8 +266,11 @@
             :insert-progress="insertProgress"
             :rebuild-url="rebuildUrl"
             :autolink-store-url="autolinkStoreUrl"
+            :ignore-suggestion-url="ignoreSuggestionUrl"
+            :unignore-suggestion-url="unignoreSuggestionUrl"
             @close="closeSuggestModal"
             @insert="handleSuggestInsert"
+            @ignored="loadSuggestionCounts"
         />
     </div>
 </template>
@@ -306,6 +309,11 @@ export default {
         outboundInsertUrl: { type: String, default: '' },
         relinkUrl: { type: String, default: '' },
         autolinkStoreUrl: { type: String, default: '' },
+        // Per-pair ignored-suggestion endpoints (Klasse-10 guarantee-stack 2026-05-22).
+        // SuggestionModal hits POST to ignore, DELETE to un-ignore.
+        // Pair is undirected — backend normalises (entryA, entryB) on save.
+        ignoreSuggestionUrl: { type: String, default: '' },
+        unignoreSuggestionUrl: { type: String, default: '' },
         rebuildUrl: { type: String, default: '' },
         indexLastBuiltAt: { type: String, default: null },
         initialOrphaned: { type: Boolean, default: false },

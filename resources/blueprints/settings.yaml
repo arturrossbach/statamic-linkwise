@@ -221,7 +221,29 @@ sections:
         field:
           type: textarea
           display: Title Blacklist
-          instructions: "Titles to ignore for matching (one per line). Short or generic titles like 'Home' or 'Blog' cause false positives. _Run **Scan Content** after changing this so the Links Report counts reflect the blacklist._"
+          instructions: |
+            **Whole-title match, case-insensitive** — entries whose title equals one of these lines (ignoring upper/lower case and surrounding whitespace) will not be suggested as a link target in any Suggestion Modal. One title per line.
+
+            **What counts as a match:** `Home` filters "home", "HOME", "Home". It does NOT filter "My Home is great" — that's substring, not whole-title. Diacritics still count (`Café` ≠ `Cafe`).
+
+            **Where it acts:** the Suggestion Engine skips matching entries from the TARGET side — they won't appear as link suggestions in any Outbound Suggestion Modal. (They can still HAVE their own outbound suggestions — only being-suggested-to is filtered.)
+
+            **When to use:** if your site has multiple entries with the same generic title (e.g. each collection has its own "Home" or "Untitled draft"). Linkwise would otherwise treat each one as a valid link target whenever those generic words appear in your content.
+
+            **Pattern catches future entries automatically.** If you blacklist `Untitled`, any new entry titled "Untitled" (in any collection) will be skipped without you adding it again.
+
+            **Example:**
+
+            ```
+            Home
+            Blog
+            Welcome
+            Untitled
+            ```
+
+            **vs. Exclude Entries (above):** that picks specific entries by ID and cascades wider (also skips broken-link checks, auto-link applies, indexer). Use **Exclude Entries** for "this specific 404-page" type cases; use **Title Blacklist** for "every entry with this generic title" patterns.
+
+            _Run **Scan Content** after changing this so the Links Report counts reflect the new blacklist._
           placeholder: |
             Home
             Blog
