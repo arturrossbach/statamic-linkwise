@@ -478,8 +478,8 @@ class UrlReplacerTest extends TestCase
     {
         $md = 'See [first](https://old.com) and [second](https://old.com) here.';
 
-        // Replace only second (index 1)
-        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', 'https://new.com', 1);
+        // Replace only second (index 1) — single matching URL, exact mode.
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', 'https://old.com', 'https://new.com', 1);
         $this->assertTrue($replaced);
         $this->assertSame('See [first](https://old.com) and [second](https://new.com) here.', $result);
     }
@@ -488,9 +488,72 @@ class UrlReplacerTest extends TestCase
     {
         $md = 'See [first](https://old.com) and [second](https://old.com) here.';
 
-        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', 'https://new.com', 0);
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown($md, 'https://old.com', 'https://old.com', 'https://new.com', 0);
         $this->assertTrue($replaced);
         $this->assertSame('See [first](https://new.com) and [second](https://old.com) here.', $result);
+    }
+
+    public function test_replace_nth_in_markdown_multi_url_domain_search(): void
+    {
+        // User-bug 2026-05-22 reproduction: Home page with multiple distinct
+        // URLs sharing one domain. Smart-mode search by domain. Pre-fix:
+        // `replaceNthInMarkdown` used preg_quote($oldUrl) so targetIndex=1
+        // never resolved — second link returned "Links were already gone".
+        // Post-fix: global counter mirrors findInMarkdown / replaceNthInBard.
+        $md = 'See [foo](https://github.com/foo) and [bar](https://github.com/bar).';
+        $this->replacer->setMode('smart');
+
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown(
+            $md,
+            'github.com',                  // search (domain)
+            'https://github.com/bar',     // exact oldUrl to replace
+            'https://example.com/new',    // newUrl
+            1,                             // targetIndex (second hrefMatches positive)
+        );
+
+        $this->assertTrue($replaced, 'Second matching URL must be replaceable when distinct URLs share a domain.');
+        $this->assertSame('See [foo](https://github.com/foo) and [bar](https://example.com/new).', $result);
+    }
+
+    public function test_replace_nth_in_markdown_anchor_fingerprint_mismatch_skips(): void
+    {
+        // Mirror replaceNthInBard's anchor-fingerprint contract: when the
+        // expected anchor doesn't match the link at the counter-resolved
+        // position, return silent skip (no replacement). Prevents the
+        // wrong-link-overwrite path the anchor guard exists to block.
+        $md = '[real](https://old.com)';
+
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown(
+            $md,
+            'https://old.com',
+            'https://old.com',
+            'https://new.com',
+            0,
+            /* expectedAnchor */ 'wrong-anchor',
+        );
+
+        $this->assertFalse($replaced);
+        $this->assertSame($md, $result);
+    }
+
+    public function test_replace_nth_in_markdown_url_mismatch_at_target_index_skips(): void
+    {
+        // counter-resolved candidate has a different href than oldUrl —
+        // silent skip preserves the upstream "Links were already gone"
+        // pipeline in UrlChangerApplyCommand.
+        $md = '[a](https://github.com/foo) [b](https://github.com/bar)';
+        $this->replacer->setMode('smart');
+
+        [$result, $replaced] = $this->replacer->replaceNthInMarkdown(
+            $md,
+            'github.com',
+            'https://github.com/different',  // oldUrl that doesn't exist at counter=0
+            'https://new.com',
+            0,
+        );
+
+        $this->assertFalse($replaced);
+        $this->assertSame($md, $result);
     }
 
     public function test_occurrence_index_in_find_results(): void
@@ -619,7 +682,7 @@ class UrlReplacerTest extends TestCase
         $md = 'Follow the [Redis Setup Guide ]('.$href.') for best results.';
 
         [, $did] = $this->replacer->replaceNthInMarkdown(
-            $md, $href, '__LINKWISE_UNLINK__', 0, 'Redis Setup Guide'
+            $md, $href, $href, '__LINKWISE_UNLINK__', 0, 'Redis Setup Guide'
         );
 
         $this->assertTrue($did, 'Markdown trim-compare must accept whitespace-only differences');

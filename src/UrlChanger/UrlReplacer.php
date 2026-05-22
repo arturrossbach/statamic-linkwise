@@ -143,7 +143,7 @@ class UrlReplacer
                             break;
                         }
                     } elseif ($fieldType === 'markdown' && is_string($value)) {
-                        [$value, $replaced] = $this->replaceNthInMarkdown($value, $oldUrl, $newUrl, $index, $expectedAnchor);
+                        [$value, $replaced] = $this->replaceNthInMarkdown($value, $effectiveSearch, $oldUrl, $newUrl, $index, $expectedAnchor);
                         if ($replaced) {
                             $entry->set($handle, $value);
                             $modified = true;
@@ -234,9 +234,9 @@ class UrlReplacer
      *   exactly where to re-wrap, eliminating the find-first-walker re-search
      *   that previously caused Bug 18/19/20.
      */
-    public function replaceNthInMarkdown(string $markdown, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
+    public function replaceNthInMarkdown(string $markdown, string $search, string $oldUrl, string $newUrl, int $targetIndex, ?string $expectedAnchor = null): array
     {
-        return $this->positionReplacer->replaceNthInMarkdown($markdown, $oldUrl, $newUrl, $targetIndex, $expectedAnchor);
+        return $this->positionReplacer->replaceNthInMarkdown($markdown, $search, $oldUrl, $newUrl, $targetIndex, $expectedAnchor);
     }
 
     /**

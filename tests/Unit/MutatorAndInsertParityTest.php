@@ -322,7 +322,7 @@ class MutatorAndInsertParityTest extends TestCase
 
         $replacer = new UrlReplacer();
         [$bardOut, $bardReplaced] = $replacer->replaceNthInBard($bard, 'example.com', $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
-        [$mdOut, $mdReplaced] = $replacer->replaceNthInMarkdown($md, $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
+        [$mdOut, $mdReplaced] = $replacer->replaceNthInMarkdown($md, 'example.com', $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
         [$repOut, $repReplaced] = $replacer->replaceNthInReplicator($replicator, 'example.com', $argOldUrl, $argNewUrl, $argIndex, $expectedAnchor);
 
         $this->assertSame($expectReplaced, $bardReplaced, 'Bard replaced flag');
