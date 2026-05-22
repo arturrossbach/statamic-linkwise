@@ -187,6 +187,7 @@ class ServiceProvider extends AddonServiceProvider
                 'max_keywords_per_entry' => 'max_keywords_per_entry',
                 'min_keyword_score' => 'min_keyword_score',
                 'prevent_two_way' => 'prevent_two_way',
+                'enable_keyword_matches' => 'enable_keyword_matches',
                 'excluded_entries' => 'excluded_entries',
                 'excluded_collections' => 'excluded_collections',
                 'title_blacklist' => 'title_blacklist',
@@ -199,7 +200,7 @@ class ServiceProvider extends AddonServiceProvider
 
             $intKeys = ['min_phrase_words', 'max_keywords_per_entry', 'max_suggestions'];
             $floatKeys = ['min_score', 'min_keyword_score'];
-            $boolKeys = ['open_in_new_tab', 'prevent_two_way', 'auto_apply_on_save_enabled'];
+            $boolKeys = ['open_in_new_tab', 'prevent_two_way', 'auto_apply_on_save_enabled', 'enable_keyword_matches'];
 
             foreach ($configMap as $settingKey => $configKey) {
                 if (! isset($settings[$settingKey])) {

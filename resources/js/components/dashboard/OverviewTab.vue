@@ -1,12 +1,14 @@
 <template>
     <div>
         <!-- Data-freshness Indicator + Recommendations -->
-        <div v-if="indexLastBuiltAt || recommendations.length > 0" class="mb-4 space-y-2">
-            <div v-if="indexLastBuiltAt" class="text-xs text-gray-500 dark:text-gray-400">
-                Last indexed {{ relativeTime(indexLastBuiltAt) }}
-                <span v-if="brokenLastChecked"> · Last link check {{ relativeTime(brokenLastChecked) }}</span>
+        <div v-if="indexLastBuiltAt || recommendations.length > 0 || resolvedLanguage" class="mb-4 space-y-2">
+            <div class="text-xs text-gray-500 dark:text-gray-400">
+                <span v-if="indexLastBuiltAt">Last indexed {{ relativeTime(indexLastBuiltAt) }}</span>
+                <span v-if="brokenLastChecked">
+                    <span v-if="indexLastBuiltAt"> · </span>Last link check {{ relativeTime(brokenLastChecked) }}
+                </span>
                 <span v-if="resolvedLanguage">
-                    · Content language: <strong class="text-gray-700 dark:text-gray-300">{{ resolvedLanguage.name }}</strong>
+                    <span v-if="indexLastBuiltAt || brokenLastChecked"> · </span>Content language: <strong class="text-gray-700 dark:text-gray-300">{{ resolvedLanguage.name }}</strong>
                     <span v-if="resolvedLanguage.source === 'auto-detected'" class="text-amber-700 dark:text-amber-400" v-tooltip="resolvedLanguage.source_detail">
                         (auto-detected)
                     </span>
