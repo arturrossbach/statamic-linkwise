@@ -3,7 +3,10 @@
 composer.lock
 package-lock.json
 .phpunit.result.cache
-/resources/dist
+# Statamic-addon convention: ship built frontend assets (resources/dist/)
+# so `composer require` installs work without an npm build step on the
+# user's server. We don't gitignore /resources/dist — it's part of the
+# release artifact. CI rebuilds this on every push to master.
 /docs/.vitepress/dist
 /docs/.vitepress/cache
 .claude/
