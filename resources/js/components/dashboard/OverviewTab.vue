@@ -44,13 +44,31 @@
                                 <p class="font-medium text-sm">{{ rec.title }}</p>
                                 <p class="mt-0.5 text-xs opacity-80">{{ rec.body }}</p>
                             </div>
-                            <Button
-                                v-if="rec.action"
-                                :text="rec.action.label"
-                                size="sm"
-                                variant="default"
-                                @click="handleRecommendationAction(rec.action)"
-                            />
+                            <div class="flex items-center gap-1">
+                                <Button
+                                    v-if="rec.action"
+                                    :text="rec.action.label"
+                                    size="sm"
+                                    variant="default"
+                                    @click="handleRecommendationAction(rec.action)"
+                                />
+                                <!-- Per-recommendation dismiss. Persists in
+                                     sessionStorage so a closed banner stays
+                                     closed for the tab session but reappears
+                                     after a hard reload / new session if the
+                                     underlying condition still holds. User-
+                                     ask 2026-05-22 (Cloudways smoke): "der
+                                     nervt einfach, weg damit". -->
+                                <button
+                                    @click="dismissRecommendation(rec.key)"
+                                    class="text-xs opacity-50 hover:opacity-100 px-1.5 py-0.5"
+                                    :title="`Dismiss '${rec.title}' for this session`"
+                                    type="button"
+                                    aria-label="Dismiss recommendation"
+                                >
+                                    ✕
+                                </button>
+                            </div>
                         </div>
                     </Alert>
                 </div>
@@ -296,7 +314,7 @@
 import { Card, Button, Alert } from '@statamic/cms/ui';
 import HelpIcon from '../shared/HelpIcon.vue';
 import ClickIndicator from '../shared/ClickIndicator.vue';
-import { readString, writeString } from '../../utils/safeStorage.js';
+import { readString, writeString, readJson, writeJson } from '../../utils/safeStorage.js';
 
 // Threshold: after 7 days, suggest a re-scan
 const STALE_INDEX_DAYS = 7;
@@ -332,6 +350,13 @@ export default {
             // recommendations without searching; once they collapse it, the
             // choice sticks per-session via sessionStorage.
             recommendationsCollapsed: false,
+            // Set of recommendation keys the user dismissed via ✕ in this
+            // browser session. Persisted in sessionStorage so closed banners
+            // stay closed for tab-switches but reappear after a fresh login.
+            // User-Smoke 2026-05-22 (Cloudways): "30 orphaned (97%)" + the
+            // coverage banner were nagging for a permanent state the user
+            // already plans to fix later.
+            dismissedRecommendations: [],
         };
     },
 
@@ -340,6 +365,14 @@ export default {
         // `=== '1'` comparison degrades to false → accordion just defaults
         // to open every load.
         this.recommendationsCollapsed = readString('linkwise:overview:recommendationsCollapsed') === '1';
+
+        // Hydrate dismissed-recommendations set from sessionStorage so a
+        // banner the user closed earlier in the session stays closed across
+        // tab-switches. New session → array reset → all valid banners
+        // reappear (intentional: if the user is back, give them another
+        // chance to notice).
+        const dismissed = readJson('linkwise:overview:dismissedRecommendations', []);
+        this.dismissedRecommendations = Array.isArray(dismissed) ? dismissed : [];
     },
 
     computed: {
@@ -371,9 +404,23 @@ export default {
 
         /**
          * Dynamic recommendations based on current state.
-         * Ordered by urgency — most critical first.
+         * Ordered by urgency — most critical first. Recommendations the
+         * user dismissed in this session via the ✕ button are filtered
+         * out via `dismissedRecommendations`.
          */
         recommendations() {
+            const all = this.allRecommendations;
+            if (this.dismissedRecommendations.length === 0) return all;
+            return all.filter(r => ! this.dismissedRecommendations.includes(r.key));
+        },
+
+        /**
+         * Full recommendation set BEFORE dismissal filtering. Split into
+         * its own computed so the dismiss step remains a transparent
+         * filter — keeps the ordering + key-generation logic untouched
+         * by the user's session-scoped exclusions.
+         */
+        allRecommendations() {
             const recs = [];
 
             // Broken links never checked
@@ -445,6 +492,12 @@ export default {
     },
 
     methods: {
+        dismissRecommendation(key) {
+            if (this.dismissedRecommendations.includes(key)) return;
+            this.dismissedRecommendations = [...this.dismissedRecommendations, key];
+            writeJson('linkwise:overview:dismissedRecommendations', this.dismissedRecommendations);
+        },
+
         badgeClass(status) {
             return {
                 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400': status === 'great',
