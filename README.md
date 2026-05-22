@@ -1,8 +1,11 @@
 # Linkwise
 
-**The internal linking assistant for Statamic.** Find broken links, suggest internal-link opportunities, manage link attributes, and bulk-replace URLs across your entire site — without leaving the Control Panel.
+**The internal linking assistant Statamic editors actually use.** Find broken links, surface internal-link opportunities, manage `rel`-attribute governance per domain, and bulk-replace URLs across your entire site — without leaving the Control Panel.
 
-Built specifically for Statamic 6 with Inertia, native UI components, and editorial workflows in mind. No external services. Your link data never leaves your server.
+Built for **Statamic 6** with Inertia + native UI components. No external services. No telemetry. Your link data stays on your server.
+
+📖 **Documentation:** [linkwise.arturrossbach.de](https://linkwise.arturrossbach.de) *(deploying)*
+🛒 **Marketplace:** [statamic.com/addons/arturrossbach/linkwise](https://statamic.com/addons/arturrossbach/linkwise) *(submitting)*
 
 ---
 
