@@ -5,7 +5,7 @@
 Built for **Statamic 6** with Inertia + native UI components. No external services. No telemetry. Your link data stays on your server.
 
 📖 **Documentation:** [linkwise.arturrossbach.de](https://linkwise.arturrossbach.de) *(deploying)*
-🛒 **Marketplace:** [statamic.com/addons/arturrossbach/linkwise](https://statamic.com/addons/arturrossbach/linkwise) *(submitting)*
+🛒 **Marketplace:** [statamic.com/addons/arturrossbach/statamic-linkwise](https://statamic.com/addons/arturrossbach/statamic-linkwise) *(submitting)*
 
 ---
 
@@ -23,7 +23,7 @@ Built for **Statamic 6** with Inertia + native UI components. No external servic
 ## Installation
 
 ```bash
-composer require arturrossbach/linkwise
+composer require arturrossbach/statamic-linkwise
 ```
 
 Auto-registers via `AddonServiceProvider`. Open Control Panel → **Linkwise** in the nav. First visit triggers a content scan.

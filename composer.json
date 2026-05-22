@@ -1,5 +1,5 @@
 {
-    "name": "arturrossbach/linkwise",
+    "name": "arturrossbach/statamic-linkwise",
     "type": "statamic-addon",
     "description": "Intelligent internal linking assistant for Statamic — find broken links, suggest internal links, manage rel attributes, and bulk-replace URLs.",
     "license": "proprietary",
