@@ -99,33 +99,31 @@ class SkipRecordContextPinTest extends TestCase
 
     public function test_link_insert_command_passes_anchor_and_target_to_buildSkipRecord(): void
     {
-        // LinkInsertCommand has 5 buildSkipRecord call-sites. After the
-        // fix, all five must pass $anchorText + $targetEntryId (where
-        // available — 'missing_link_target' at line 168 has no target
-        // by definition, hence the null-passthrough at that site).
+        // LinkInsertCommand has 6 buildSkipRecord call-sites after the
+        // 2026-05-22 ignored-pair gate (user-bug fix). All six must pass
+        // $anchorText + $targetEntryId (where available — 'missing_link_target'
+        // has no target by definition, hence the null-passthrough at that site).
         $src = file_get_contents(dirname(__DIR__, 2).'/src/Commands/LinkInsertCommand.php');
 
-        // Pin all 5 call-shapes. Each one carries $anchorText as the 3rd
-        // arg. 4 of 5 also carry $targetEntryId as the 4th arg (the
-        // missing_link_target site at line 168 passes null because the
-        // skip reason is "no target was supplied").
+        // Pin all 6 call-shapes. Each one carries $anchorText as the 3rd arg.
+        // 5 of 6 also carry $targetEntryId as the 4th arg (the missing_link_target
+        // site passes null because the skip reason is "no target was supplied").
         $callCount = preg_match_all(
             '/BulkSnapshotStore::buildSkipRecord\(\s*\$sourceEntryId\s*,\s*\'[a-z_]+\'\s*,\s*\$anchorText/s',
             $src,
         );
-        $this->assertSame(5, $callCount,
-            'LinkInsertCommand must have exactly 5 buildSkipRecord calls each passing $anchorText '
-            .'as the 3rd argument (current: missing_link_target at L168, modified at L190 + L266, '
-            .'anchor_not_found at L260, error at L273).',
+        $this->assertSame(6, $callCount,
+            'LinkInsertCommand must have exactly 6 buildSkipRecord calls each passing $anchorText '
+            .'as the 3rd argument (missing_link_target, ignored, modified [x2], anchor_not_found, error).',
         );
 
-        // 4 of those 5 also pass $targetEntryId as the 4th arg.
+        // 5 of those 6 also pass $targetEntryId as the 4th arg.
         $withTargetCount = preg_match_all(
             '/BulkSnapshotStore::buildSkipRecord\(\s*\$sourceEntryId\s*,\s*\'[a-z_]+\'\s*,\s*\$anchorText\s*,\s*\$targetEntryId/s',
             $src,
         );
-        $this->assertSame(4, $withTargetCount,
-            'LinkInsertCommand must pass $targetEntryId as 4th arg in 4 of 5 call sites '
+        $this->assertSame(5, $withTargetCount,
+            'LinkInsertCommand must pass $targetEntryId as 4th arg in 5 of 6 call sites '
             .'(missing_link_target legitimately has null target — its whole point is missing target).',
         );
     }

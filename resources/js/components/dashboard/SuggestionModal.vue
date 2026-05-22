@@ -507,13 +507,25 @@ export default {
         },
 
         allSelected() {
+            // "Select All" semantics must match the visible/actionable
+            // rows — i.e. exclude is_ignored items. Otherwise checking
+            // the master checkbox adds ignored rows to `selected` even
+            // though they're hidden in the default-filtered table and
+            // can't be inserted (the ignore-button row never reaches
+            // the insert pipeline). User-bug 2026-05-22: 3 ignored +
+            // 3 actionable rows → master-check showed "Add 6 links"
+            // even though only 3 should land.
             if (!this.modal) return false;
             if (this.modal.mode === 'outbound') {
-                const pending = (this.modal.groups || []).filter(g => g._status === 'pending');
-                return pending.length > 0 && pending.every(g => this.selected.includes(g.key));
+                const selectable = (this.modal.groups || []).filter(g => {
+                    if (g._status !== 'pending') return false;
+                    const sel = (g.targets || []).find(t => t.target_entry_id === g._selectedTarget) || (g.targets || [])[0];
+                    return ! (sel && sel.is_ignored);
+                });
+                return selectable.length > 0 && selectable.every(g => this.selected.includes(g.key));
             }
-            const pending = (this.modal.suggestions || []).filter(s => s._status === 'pending');
-            return pending.length > 0 && pending.every(s => this.selected.includes(s));
+            const selectable = (this.modal.suggestions || []).filter(s => s._status === 'pending' && ! s.is_ignored);
+            return selectable.length > 0 && selectable.every(s => this.selected.includes(s));
         },
 
         /**
@@ -675,21 +687,53 @@ export default {
         },
 
         toggleSelectAll() {
+            // Mirror allSelected's filter — must exclude is_ignored
+            // items so "Add N links" reflects the actually-actionable
+            // count (not the hidden ignored rows). See allSelected
+            // computed for the user-bug rationale (2026-05-22).
             if (this.allSelected) {
                 this.selected = [];
                 return;
             }
             if (this.modal.mode === 'outbound') {
                 this.selected = (this.modal.groups || [])
-                    .filter(g => g._status === 'pending')
+                    .filter(g => {
+                        if (g._status !== 'pending') return false;
+                        const sel = (g.targets || []).find(t => t.target_entry_id === g._selectedTarget) || (g.targets || [])[0];
+                        return ! (sel && sel.is_ignored);
+                    })
                     .map(g => g.key);
             } else {
-                this.selected = [...(this.modal.suggestions || []).filter(s => s._status === 'pending')];
+                this.selected = [...(this.modal.suggestions || []).filter(s => s._status === 'pending' && ! s.is_ignored)];
             }
         },
 
         insertSuggestions() {
-            this.$emit('insert', this.selected);
+            // Belt-and-suspenders: even if a future code path bypasses
+            // toggleSelectAll's filter and lands an ignored row into
+            // `selected` (e.g. row was un-ignored then re-ignored without
+            // the un-select hook firing), we drop them here before they
+            // reach the insert pipeline. Server (LinkInsertCommand) skips
+            // ignored pairs per-item too — three layers, undirected pair.
+            let payload = this.selected;
+            if (this.modal && this.modal.mode === 'outbound') {
+                payload = payload.filter(key => {
+                    const g = (this.modal.groups || []).find(x => x.key === key);
+                    if (!g) return false;
+                    const sel = (g.targets || []).find(t => t.target_entry_id === g._selectedTarget) || (g.targets || [])[0];
+                    return ! (sel && sel.is_ignored);
+                });
+            } else {
+                payload = payload.filter(s => ! (s && s.is_ignored));
+            }
+            // If the filter ate everything (only ignored items leaked into
+            // `selected`), skip the round-trip — server would reject with
+            // 422 'insertions min:1' and the user would see a cryptic toast.
+            if (payload.length === 0) {
+                this.selected = [];
+                return;
+            }
+            this.$emit('insert', payload);
             this.selected = [];
         },
 

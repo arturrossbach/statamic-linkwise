@@ -228,6 +228,79 @@ describe('SuggestionModal ignore/un-ignore @ignored emit (Klasse-10 guarantee)',
         expect(suggestion.is_ignored).toBe(true);
     });
 
+    it('Select-All excludes ignored rows (inbound, user-bug 2026-05-22)', async () => {
+        // 3 ignored + 3 actionable inbound suggestions. Master-checkbox
+        // clicked → only the 3 actionable should land in `selected`.
+        // Pre-fix: master-check selected all 6 → "Add 6 links" button
+        // showed even though 3 were hidden + uninsertable.
+        const buildSuggestion = (id, ignored) => ({
+            source_entry_id: id,
+            source_title: 'Source ' + id,
+            source_collection: 'posts',
+            _anchor: 'a',
+            _originalAnchor: 'a',
+            _status: 'pending',
+            score: 0.5,
+            match_type: 'title',
+            is_ignored: ignored,
+        });
+        const wrapper = mountModal({
+            mode: 'inbound',
+            entryId: 'target',
+            title: 'x',
+            suggestions: [
+                buildSuggestion('s1', false),
+                buildSuggestion('s2', true),
+                buildSuggestion('s3', false),
+                buildSuggestion('s4', true),
+                buildSuggestion('s5', false),
+                buildSuggestion('s6', true),
+            ],
+            totalAvailable: 6,
+        });
+
+        // Trigger select-all
+        wrapper.vm.toggleSelectAll();
+
+        expect(wrapper.vm.selected.length).toBe(3);
+        // Verify only non-ignored suggestions made it in
+        const selectedIds = wrapper.vm.selected.map(s => s.source_entry_id).sort();
+        expect(selectedIds).toEqual(['s1', 's3', 's5']);
+    });
+
+    it('Select-All excludes ignored groups (outbound)', async () => {
+        // Outbound: a group is "ignored" when its currently-selected
+        // target carries is_ignored=true. Master-check must skip
+        // those groups (sister-branch to the inbound fix).
+        const buildGroup = (key, targetId, ignored) => ({
+            key,
+            _anchor: 'a',
+            _originalAnchor: 'a',
+            _status: 'pending',
+            _selectedTarget: targetId,
+            _expanded: false,
+            targets: [
+                { target_entry_id: targetId, target_title: 'T', target_collection: 'p', match_type: 'title', score: 0.7, is_ignored: ignored },
+            ],
+            sentence_context: 'sentence',
+        });
+        const wrapper = mountModal({
+            mode: 'outbound',
+            entryId: 'src',
+            title: 'x',
+            groups: [
+                buildGroup('g1', 't1', false),
+                buildGroup('g2', 't2', true),
+                buildGroup('g3', 't3', false),
+            ],
+        });
+
+        wrapper.vm.toggleSelectAll();
+
+        expect(wrapper.vm.selected.length).toBe(2);
+        expect(wrapper.vm.selected.sort()).toEqual(['g1', 'g3']);
+    });
+
     it('removes the item from `selected` when it gets ignored (inbound)', async () => {
         // User ticks the checkbox, then changes their mind and
         // clicks ✕. The "Add N links" counter must NOT carry the
@@ -343,5 +416,68 @@ describe('SuggestionModal ignore/un-ignore @ignored emit (Klasse-10 guarantee)',
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(wrapper.emitted('ignored')).toBeFalsy();
         expect(suggestion.is_ignored).toBe(false);
+    });
+
+    it('insertSuggestions belt-and-suspenders: filters ignored from emitted payload (inbound)', async () => {
+        // Defense-in-depth pin (user-bug 2026-05-22). The Select-All filter
+        // already drops ignored suggestions, but if a future refactor (or a
+        // direct test of `selected`) lands an ignored item in the array, the
+        // emit must STILL filter — server gates with the same rule, and
+        // emitting ignored items would burn a UX round-trip the server then
+        // rejects with skipped='ignored' in the Activity Log.
+        const wrapper = mount(SuggestionModal, {
+            props: {
+                modal: {
+                    mode: 'inbound',
+                    entryId: 'target',
+                    title: 'x',
+                    suggestions: [
+                        { source_entry_id: 's1', source_title: 'S1', source_collection: 'posts', _anchor: 'a', _originalAnchor: 'a', _status: 'pending', score: 0.5, match_type: 'title', is_ignored: false },
+                        { source_entry_id: 's2', source_title: 'S2', source_collection: 'posts', _anchor: 'b', _originalAnchor: 'b', _status: 'pending', score: 0.5, match_type: 'title', is_ignored: true },
+                    ],
+                    totalAvailable: 2,
+                },
+            },
+        });
+
+        // Bypass toggleSelectAll's filter on purpose — we want to prove the
+        // emit filter would catch a leak from any other source.
+        wrapper.vm.selected = [...wrapper.props('modal').suggestions];
+        wrapper.vm.insertSuggestions();
+        await flushPromises();
+
+        const insertEmit = wrapper.emitted('insert');
+        expect(insertEmit).toBeTruthy();
+        const payload = insertEmit[0][0];
+        expect(payload.length).toBe(1);
+        expect(payload[0].source_entry_id).toBe('s1');
+    });
+
+    it('insertSuggestions belt-and-suspenders: filters ignored groups from emitted payload (outbound)', async () => {
+        // Outbound: ignored is on the currently-selected target. The emit
+        // filter resolves the group → selected-target → is_ignored chain
+        // the same way toggleSelectAll does, so the server never sees
+        // ignored pairs even if a test bypassed the master-checkbox path.
+        const wrapper = mount(SuggestionModal, {
+            props: {
+                modal: {
+                    mode: 'outbound',
+                    entryId: 'src',
+                    title: 'x',
+                    groups: [
+                        { key: 'g1', _anchor: 'a', _originalAnchor: 'a', _status: 'pending', _selectedTarget: 't1', _expanded: false, targets: [{ target_entry_id: 't1', target_title: 'T1', target_collection: 'p', match_type: 'title', score: 0.7, is_ignored: false }], sentence_context: 's' },
+                        { key: 'g2', _anchor: 'b', _originalAnchor: 'b', _status: 'pending', _selectedTarget: 't2', _expanded: false, targets: [{ target_entry_id: 't2', target_title: 'T2', target_collection: 'p', match_type: 'title', score: 0.7, is_ignored: true }], sentence_context: 's' },
+                    ],
+                },
+            },
+        });
+
+        wrapper.vm.selected = ['g1', 'g2'];
+        wrapper.vm.insertSuggestions();
+        await flushPromises();
+
+        const insertEmit = wrapper.emitted('insert');
+        expect(insertEmit).toBeTruthy();
+        expect(insertEmit[0][0]).toEqual(['g1']);
     });
 });
