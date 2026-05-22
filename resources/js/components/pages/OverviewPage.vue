@@ -17,6 +17,7 @@
             :broken-last-checked="brokenLastChecked"
             :index-last-built-at="indexLastBuiltAt"
             :domains-count="domainsCount"
+            :resolved-language="resolvedLanguage"
             @navigate="navigateToTab"
         />
     </LinkwiseLayout>
@@ -38,6 +39,7 @@ export default {
         brokenLastChecked: { type: String, default: null },
         indexLastBuiltAt: { type: String, default: null },
         domainsCount: { type: Number, default: null },
+        resolvedLanguage: { type: Object, default: null },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },

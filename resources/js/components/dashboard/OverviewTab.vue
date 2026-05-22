@@ -5,6 +5,15 @@
             <div v-if="indexLastBuiltAt" class="text-xs text-gray-500 dark:text-gray-400">
                 Last indexed {{ relativeTime(indexLastBuiltAt) }}
                 <span v-if="brokenLastChecked"> · Last link check {{ relativeTime(brokenLastChecked) }}</span>
+                <span v-if="resolvedLanguage">
+                    · Content language: <strong class="text-gray-700 dark:text-gray-300">{{ resolvedLanguage.name }}</strong>
+                    <span v-if="resolvedLanguage.source === 'auto-detected'" class="text-amber-700 dark:text-amber-400" v-tooltip="resolvedLanguage.source_detail">
+                        (auto-detected)
+                    </span>
+                    <span v-else-if="resolvedLanguage.source === 'fallback'" class="text-amber-700 dark:text-amber-400" v-tooltip="resolvedLanguage.source_detail">
+                        (fallback)
+                    </span>
+                </span>
             </div>
 
             <!-- Recommendations grouped under a Joomla-style <details> summary
@@ -305,6 +314,11 @@ export default {
         brokenLastChecked: { type: String, default: null },
         indexLastBuiltAt: { type: String, default: null },
         domainsCount: { type: Number, default: null },
+        // {code, name, source: 'explicit'|'auto-detected'|'fallback', source_detail}
+        // — used to surface which language Linkwise's NLP pipeline is
+        // actually using, especially when the user left the language
+        // setting empty and Linkwise auto-detected from Statamic's locale.
+        resolvedLanguage: { type: Object, default: null },
     },
 
     emits: ['navigate'],

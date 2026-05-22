@@ -75,6 +75,12 @@ sections:
           display: Max Suggestions
           instructions: "Maximum number of suggestions to display in the sidebar panel."
           default: 10
+          min: 1
+          max: 200
+          validate:
+            - 'integer'
+            - 'min:1'
+            - 'max:200'
           width: 50
 
       - handle: open_in_new_tab
@@ -94,15 +100,27 @@ sections:
           display: Minimum Phrase Words
           instructions: "Minimum number of words a title phrase must have to be considered a match."
           default: 2
+          min: 1
+          max: 10
+          validate:
+            - 'integer'
+            - 'min:1'
+            - 'max:10'
           width: 50
 
       - handle: min_score
         field:
-          type: text
+          type: float
           display: Minimum Title Match Score
-          instructions: "Minimum relevance score (0-1) for title-based suggestions. Higher = fewer but better matches."
-          default: "0.4"
-          input_type: number
+          instructions: "Minimum relevance score (0.0 – 1.0) for title-based suggestions. Higher = fewer but better matches."
+          default: 0.4
+          min: 0
+          max: 1
+          step: 0.05
+          validate:
+            - 'numeric'
+            - 'min:0'
+            - 'max:1'
           width: 50
 
       - handle: max_keywords_per_entry
@@ -111,15 +129,27 @@ sections:
           display: Max Keywords per Entry
           instructions: "Maximum TF-IDF keywords to extract per entry."
           default: 20
+          min: 1
+          max: 100
+          validate:
+            - 'integer'
+            - 'min:1'
+            - 'max:100'
           width: 50
 
       - handle: min_keyword_score
         field:
-          type: text
+          type: float
           display: Minimum Keyword Score
-          instructions: "Minimum keyword overlap score (0-1) for keyword-based suggestions. Lower = more suggestions but more noise."
-          default: "0.15"
-          input_type: number
+          instructions: "Minimum keyword overlap score (0.0 – 1.0) for keyword-based suggestions. Lower = more suggestions but more noise."
+          default: 0.15
+          min: 0
+          max: 1
+          step: 0.05
+          validate:
+            - 'numeric'
+            - 'min:0'
+            - 'max:1'
           width: 50
 
       - handle: prevent_two_way
