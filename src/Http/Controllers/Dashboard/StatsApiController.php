@@ -34,6 +34,12 @@ class StatsApiController extends CpController
     public function suggestionCounts(): JsonResponse
     {
         $records = $this->indexer->load();
+        // 2026-05-22: post-Indexer-filter-removal, excluded entries are in the
+        // index but their Suggestion counts must always read as zero. The
+        // EntryIndexer already writes 0 for them, but a fresh-index race or
+        // a custom record with stale counts could surface non-zero here.
+        // Defense-in-depth: re-zero excluded records at read time.
+        $excludedFilter = new \Arturrossbach\Linkwise\Suggestions\ExcludedEntryFilter;
         $counts = [];
 
         // Subtract per-entry ignored pairs from the cached totals so
@@ -55,6 +61,15 @@ class StatsApiController extends CpController
         // the next Scan Content (cached totals get refreshed from the
         // engine, then this subtraction is over the same baseline).
         foreach ($records as $record) {
+            // Excluded entries: zero on both sides regardless of any stale
+            // count that might still be on the record. The badge in Links
+            // Report should never imply Linkwise has Suggestion-work to do
+            // for an entry the user explicitly excluded.
+            if ($excludedFilter->isExcludedRecord($record)) {
+                $counts[$record->id] = ['inbound' => 0, 'outbound' => 0];
+                continue;
+            }
+
             $ignoredHere = $this->ignoredStore->ignoredCountFor($record->id);
             // Shape pinned by StatsAndDomainAttributeTest — only
             // 'inbound' + 'outbound' keys leave this method. Extra

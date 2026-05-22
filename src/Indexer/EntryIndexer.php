@@ -29,9 +29,20 @@ class EntryIndexer
      */
     public function buildIndex(bool $withSuggestions = false): array
     {
+        // Note (2026-05-22): excluded_entries / excluded_collections used to
+        // be applied HERE — the filter dropped excluded entries out of the
+        // persisted index entirely. That semantics leaked into every Indexer
+        // consumer: Domains, Broken-Links, URL-Changer, Activity-Log — even
+        // though the blueprint copy explicitly promised "neither suggested
+        // nor suggesting" (Suggestion-scope only). User-bug 2026-05-22:
+        // putting `Home` in excluded_entries made the Domains panel empty
+        // and the URL-Changer see phantom links.
+        //
+        // Post-fix: the Indexer is universe-of-entries-agnostic. Every
+        // Suggestion-generating path consults `ExcludedEntryFilter` explicitly;
+        // non-Suggestion reports see every entry. See [[architectural_health]]
+        // for the new bug-class entry.
         $collections = config('linkwise.collections', []);
-        $excludedCollections = config('linkwise.excluded_collections', []);
-        $excludedEntries = config('linkwise.excluded_entries', []);
         $statusFilter = config('linkwise.entry_status', 'published');
 
         $query = EntryFacade::query();
@@ -44,16 +55,6 @@ class EntryIndexer
         $records = [];
 
         foreach ($entries as $entry) {
-            // Skip excluded collections
-            if (! empty($excludedCollections) && in_array($entry->collectionHandle(), $excludedCollections, true)) {
-                continue;
-            }
-
-            // Skip excluded entries
-            if (! empty($excludedEntries) && in_array($entry->id(), $excludedEntries, true)) {
-                continue;
-            }
-
             // Skip unpublished entries if status filter is 'published'
             if ($statusFilter === 'published' && method_exists($entry, 'published') && ! $entry->published()) {
                 continue;
@@ -124,6 +125,11 @@ class EntryIndexer
     {
         $engine = app(\Arturrossbach\Linkwise\Suggestions\SuggestionEngine::class);
         $inboundEngine = app(\Arturrossbach\Linkwise\Suggestions\InboundEngine::class);
+        // Excluded-entries gate (2026-05-22): post-Indexer-filter-removal, every
+        // Suggestion-generating path consults ExcludedEntryFilter explicitly.
+        // Here: source-side skip (no outbound suggestions for excluded sources)
+        // + target-side skip (no inbound count for excluded targets).
+        $excludedFilter = new \Arturrossbach\Linkwise\Suggestions\ExcludedEntryFilter;
 
         $total = count($records);
         $current = 0;
@@ -138,6 +144,14 @@ class EntryIndexer
             $current++;
             if ($onProgress) {
                 $onProgress($current, $total, $record->title);
+            }
+
+            // Excluded entries contribute zero Suggestion-counts in either
+            // direction. We still keep the record in the index for non-
+            // Suggestion reports (Domains/BrokenLinks/Links Report).
+            if ($excludedFilter->isExcludedRecord($record)) {
+                $outboundCounts[$entryId] = 0;
+                continue;
             }
 
             // Unlimited suggestions for accurate inbound inversion (Phase 2)
@@ -183,6 +197,14 @@ class EntryIndexer
         // (anchorIsLinkedInEntry + dry-run insert)
         $inboundCounts = [];
         foreach ($records as $entryId => $record) {
+            // Excluded targets contribute zero inbound suggestions — even if
+            // Phase 1 happened to collect candidates pointing here (excluded
+            // sources skip Phase 1 entirely, but a non-excluded source whose
+            // engine returned this excluded target would still surface here).
+            if ($excludedFilter->isExcludedRecord($record)) {
+                $inboundCounts[$entryId] = 0;
+                continue;
+            }
             if (! isset($inboundCandidates[$entryId])) {
                 $inboundCounts[$entryId] = 0;
                 continue;
@@ -267,6 +289,7 @@ class EntryIndexer
         $records = $this->load();
         $engine = app(\Arturrossbach\Linkwise\Suggestions\SuggestionEngine::class);
         $inboundEngine = app(\Arturrossbach\Linkwise\Suggestions\InboundEngine::class);
+        $excludedFilter = new \Arturrossbach\Linkwise\Suggestions\ExcludedEntryFilter;
         $counts = [];
         $changed = false;
 
@@ -277,12 +300,20 @@ class EntryIndexer
 
             $record = $records[$entryId];
 
-            // Outbound: same code path as OutboundController (via shared Grouper)
-            $suggestions = $engine->suggest($record->text, $records, $entryId, $record->outboundLinks);
-            $outboundCount = \Arturrossbach\Linkwise\Suggestions\OutboundSuggestionGrouper::countGroups($suggestions, $entryId);
+            // Excluded entries always count as zero in both directions —
+            // the Suggestion engines refuse to operate on them, so we don't
+            // even call out.
+            if ($excludedFilter->isExcludedRecord($record)) {
+                $outboundCount = 0;
+                $inboundCount = 0;
+            } else {
+                // Outbound: same code path as OutboundController (via shared Grouper)
+                $suggestions = $engine->suggest($record->text, $records, $entryId, $record->outboundLinks);
+                $outboundCount = \Arturrossbach\Linkwise\Suggestions\OutboundSuggestionGrouper::countGroups($suggestions, $entryId);
 
-            // Inbound: use suggestFiltered (single source of truth)
-            $inboundCount = count($inboundEngine->suggestFiltered($entryId));
+                // Inbound: use suggestFiltered (single source of truth)
+                $inboundCount = count($inboundEngine->suggestFiltered($entryId));
+            }
 
             $counts[$entryId] = [
                 'inbound' => $inboundCount,

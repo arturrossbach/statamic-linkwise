@@ -30,19 +30,14 @@ class DomainReport
         $records = $this->indexer->load();
         $domains = [];
 
-        $excludedEntries = config('linkwise.excluded_entries', []);
-        $excludedEntries = is_array($excludedEntries) ? $excludedEntries : [];
-        $excludedCollections = config('linkwise.excluded_collections', []);
-        $excludedCollections = is_array($excludedCollections) ? $excludedCollections : [];
-
+        // 2026-05-22: excluded_entries / excluded_collections used to be
+        // re-applied here on top of the Indexer's own filter. User-bug
+        // (Cloudways smoke): putting `Home` in excluded_entries hid the
+        // entry from the Domains panel even though the blueprint copy
+        // explicitly promised "neither suggested nor suggesting" — i.e.
+        // Suggestion-scope only. Domains is a real-link report, not a
+        // suggestion path, so the filter never belonged here.
         foreach ($records as $record) {
-            if (in_array($record->id, $excludedEntries, true)) {
-                continue;
-            }
-            if (! empty($excludedCollections) && in_array($record->collection, $excludedCollections, true)) {
-                continue;
-            }
-
             $entry = Entry::find($record->id);
 
             if (! $entry) {
