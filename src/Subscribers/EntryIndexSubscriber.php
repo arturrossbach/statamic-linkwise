@@ -59,6 +59,12 @@ class EntryIndexSubscriber
                 $keywords = $this->extractor->extractSingle(
                     $record->title.' '.$record->text,
                     $corpusTokens,
+                    // Title-Protect against the FrequencyFilter
+                    // (2026-05-22): mid-frequency domain words that
+                    // the editor put in the title (e.g. `Rezept`,
+                    // `Notebook`) survive the filter that would
+                    // otherwise treat them as common-language junk.
+                    $record->title,
                 );
 
                 // Preserve the previous record's suggestion counts +
