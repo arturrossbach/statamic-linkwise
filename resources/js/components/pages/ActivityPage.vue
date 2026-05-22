@@ -1038,6 +1038,8 @@ export default {
                 reasonText = 'Insertion payload was missing both target entry and href';
             } else if (row.reason === 'error') {
                 reasonText = 'Unexpected error during write — see log for details';
+            } else if (row.reason === 'ignored') {
+                reasonText = 'Pair is on the ignored-suggestions list — un-ignore in the modal to allow it';
             } else {
                 // 'modified' (and unknown reason fallback): editor + when.
                 const who = row.modified_by ? `by <strong>${this.escape(row.modified_by)}</strong>` : 'by another editor';
