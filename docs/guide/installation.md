@@ -22,7 +22,7 @@ disable_functions =   ; ensure 'exec' is NOT listed
 ## Install via Composer
 
 ```bash
-composer require arturrossbach/linkwise
+composer require arturrossbach/statamic-linkwise
 ```
 
 The addon auto-registers via `AddonServiceProvider`. No manual provider registration, no config-file publishing required to get started.
@@ -55,7 +55,7 @@ If the Overview shows zero entries:
 ## Uninstall
 
 ```bash
-composer remove arturrossbach/linkwise
+composer remove arturrossbach/statamic-linkwise
 ```
 
 Linkwise data lives in `storage/linkwise/`. Uninstalling does **not** delete this directory — you can remove it manually if you want a clean slate, or keep it in case you reinstall later.

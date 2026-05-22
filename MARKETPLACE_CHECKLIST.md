@@ -34,7 +34,7 @@ Track here what's done vs what's open before tagging v1.0.0.
 
 ## Marketplace prep
 
-- [ ] **Packagist**: register `arturrossbach/linkwise` package
+- [ ] **Packagist**: register `arturrossbach/statamic-linkwise` package
 - [ ] **Statamic seller account**: create at statamic.com/creator/begin, link Stripe
 - [ ] **Marketplace listing**: title, description, feature bullets
 - [ ] **Screenshots** (8 recommended):

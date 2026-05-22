@@ -152,7 +152,7 @@ class ServiceProvider extends AddonServiceProvider
     protected function mergeAddonSettingsIntoConfig(): void
     {
         try {
-            $addon = Addon::all()->first(fn ($a) => $a->id() === 'arturrossbach/linkwise');
+            $addon = Addon::all()->first(fn ($a) => $a->id() === 'arturrossbach/statamic-linkwise');
 
             if (! $addon) {
                 return;
