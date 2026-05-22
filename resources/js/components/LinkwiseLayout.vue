@@ -191,18 +191,16 @@
                 v-if="notificationCount > 0"
                 v-model:notifications-collapsed="notificationsCollapsed"
                 :notification-count="notificationCount"
-                :show-stale-check="showStaleCheck"
-                :stale-check-title="staleCheckTitle"
-                :stale-check-body="staleCheckBody"
-                :checking-from-banner="checkingFromBanner"
+                :show-stale-check="false"
+                stale-check-title=""
+                stale-check-body=""
+                :checking-from-banner="false"
                 :run-check-disabled="!!activeBulk"
                 :show-completion="!!lastCompletion && !activeBulk"
                 :completion-banner-variant="completionBannerVariant"
                 :completion-banner-label="completionBannerLabel"
                 :interrupted-bulk="interruptedBulk"
                 :interrupted-bulk-label="interruptedBulkLabel"
-                @run-stale-check="runStaleCheck"
-                @dismiss-stale-check="dismissStaleCheck"
                 @dismiss-completion="dismissCompletion"
                 @dismiss-interrupted-bulk="dismissInterruptedBulk"
             />
@@ -340,23 +338,15 @@ export default {
 
         // Count of currently-visible persistent notifications. Drives the
         // <details> summary "X notifications" + the v-if that hides the
-        // entire accordion when nothing is pending.
+        // entire accordion when nothing is pending. The stale-check signal
+        // was removed 2026-05-22 (user-direction "der nervt einfach, weg
+        // damit") — it kept resurfacing for low-risk index updates the
+        // user already planned to recheck on their own cadence.
         notificationCount() {
             let n = 0;
-            if (this.showStaleCheck) n++;
             if (this.lastCompletion && !this.activeBulk) n++;
             if (this.interruptedBulk) n++;
             return n;
-        },
-
-        /**
-         * Stale-check signal from server (set by DashboardController::staleCheckProps).
-         * is_stale === true means the index has been rebuilt since the last
-         * broken-link check (>5min). Read from $page.props so every Linkwise
-         * page picks it up without each *Page.vue having to declare a prop.
-         */
-        staleCheck() {
-            return this.$page?.props?.staleCheck || null;
         },
 
         /**
@@ -393,36 +383,9 @@ export default {
             return fns.join(', ');
         },
 
-        showStaleCheck() {
-            // Never stack on top of an active bulk — keeps visual hierarchy.
-            if (this.activeBulk) return false;
-            if (! this.staleCheck?.is_stale) return false;
-            // Dismiss persists per index-state (keyed by index_built_at).
-            // The user's dismissal sticks across reloads + tab navigations
-            // until the next scan changes the index timestamp — at which
-            // point the stored dismissal no longer matches and the banner
-            // resurfaces, because the staleness condition is genuinely new.
-            const dismissedFor = this.staleCheckDismissedFor;
-            const currentIndexAt = this.staleCheck?.index_built_at || '';
-            if (dismissedFor && dismissedFor === currentIndexAt) return false;
-            return true;
-        },
-
-        staleCheckTitle() {
-            if (!this.staleCheck?.broken_last_checked) {
-                return 'Broken-link check has never run';
-            }
-            return 'Recent edits may have introduced new broken links';
-        },
-
-        staleCheckBody() {
-            const c = this.staleCheck;
-            if (!c) return '';
-            if (!c.broken_last_checked) {
-                return 'Run the initial check to surface dead URLs across your content.';
-            }
-            return 'The content index has been updated since the last broken-link check. Re-run the check to catch any new dead URLs.';
-        },
+        // staleCheck signal removed 2026-05-22. Banner was nagging editors
+        // for every index rebuild even when they planned a manual broken-
+        // link recheck on their own cadence. See notificationCount above.
 
         // Single source of truth for "is anything running anywhere in Linkwise".
         // Reads from the bulkOperationService reactive store — covers light ops
@@ -507,12 +470,6 @@ export default {
             // heartbeat is set once and Date.now() isn't reactive).
             tickClock: Date.now(),
             tickClockTimer: null,
-            // Stale-check banner state. dismissedFor stores the index_built_at
-            // value the user dismissed for — persists across reloads via
-            // sessionStorage (initialised in mounted) so dismissing actually
-            // sticks until the next scan changes the index timestamp.
-            checkingFromBanner: false,
-            staleCheckDismissedFor: null,
             // Exec-availability warning dismiss state — session-scoped
             // (NOT persistent like staleCheck). Reason: the underlying
             // hosting restriction doesn't go away on its own; if a user
@@ -563,14 +520,6 @@ export default {
         // so the computed `lastCompletion` below picks it up reactively.
         getLastCompletion();
 
-        // Restore the persisted "dismissed for which index_built_at" marker
-        // so reloads + tab switches don't resurrect the stale-check banner
-        // the user already acknowledged. The next scan invalidates this
-        // because index_built_at changes and the comparison stops matching.
-        // safeStorage swallows quota/private-mode failures — banner just
-        // won't stay dismissed across reload (a UX nicety, not load-bearing).
-        this.staleCheckDismissedFor = readString('linkwise:staleCheck:dismissedFor');
-
         // Restore collapsed/expanded state of the notifications accordion so
         // a user who collapsed it doesn't get it re-pushed open on every nav.
         this.notificationsCollapsed = readString('linkwise:notifications:collapsed') === '1';
@@ -610,74 +559,13 @@ export default {
     },
 
     methods: {
-        /**
-         * Banner CTA: kick off a broken-link check. Reuses the existing
-         * /linkwise/check-links endpoint so the unified bulk-status poller
-         * picks up the running phase and renders the live progress banner —
-         * the stale-check banner stays out of the way once the check starts.
-         */
-        async runStaleCheck() {
-            const url = this.staleCheck?.check_url;
-            if (!url) return;
-
-            // Persist user-intent: clicking "Run check now" implies "I've
-            // acknowledged the staleness and am acting on it — don't show
-            // me this banner again for this index version". Without this,
-            // multiple paths can re-surface the banner after the check
-            // (server-side timing edges, index-rebuilding subscribers,
-            // browser-side prop caching). The dismiss is keyed to the
-            // CURRENT index_built_at, so a future scan that produces a new
-            // index version will correctly resurface the banner.
-            const indexAt = this.staleCheck?.index_built_at || '';
-            if (indexAt) {
-                this.staleCheckDismissedFor = indexAt;
-                writeString('linkwise:staleCheck:dismissedFor', indexAt);
-            }
-
-            this.checkingFromBanner = true;
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRF-TOKEN': Statamic.$config.get('csrfToken'),
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                });
-                if (response.status === 409) {
-                    const data = await response.json().catch(() => ({}));
-                    Statamic.$toast.info(data.message || 'Another bulk operation is running.');
-                    return;
-                }
-                if (!response.ok) {
-                    Statamic.$toast.error('Failed to start link check.');
-                    return;
-                }
-                // Trigger an immediate poll so the live banner shows up
-                // without 1.5s lag.
-                this.pollBulkStatusOnce();
-            } catch (error) {
-                Statamic.$toast.error('Failed to start link check.');
-                console.error('[Linkwise]', error);
-            } finally {
-                this.checkingFromBanner = false;
-            }
-        },
+        // runStaleCheck / dismissStaleCheck removed 2026-05-22 along with
+        // the stale-check banner. Notifications accordion still pinned to
+        // false for show-stale-check so the inner Alert never renders.
 
         // handleNotificationsToggle removed in Sprint 5 PR 3d — the
         // sub-component's v-model emit + the `notificationsCollapsed`
-        // watcher below handle the toggle + persistence. The watcher
-        // also covers fireTerminalToast's auto-open mutation (which
-        // bypassed the old handler entirely).
-
-        dismissStaleCheck() {
-            // Persist the dismissal scoped to the current index timestamp.
-            // Reloads + tab switches honour it; the next scan changes
-            // index_built_at and the comparison in showStaleCheck stops
-            // matching, so a genuinely-new staleness condition resurfaces.
-            const indexAt = this.staleCheck?.index_built_at || '';
-            this.staleCheckDismissedFor = indexAt;
-            writeString('linkwise:staleCheck:dismissedFor', indexAt);
-        },
+        // watcher below handle the toggle + persistence.
 
         /**
          * Open the README for this addon in a new tab. Lives in the header
