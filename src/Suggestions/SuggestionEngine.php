@@ -96,6 +96,17 @@ class SuggestionEngine
         // Tokenize source text once for keyword matching (stemmed + original mapping)
         [$sourceTokens, $stemToOriginal] = TextNormalizer::tokenizeWithMapping($text);
 
+        // Stage-1 pre-filter set (V1.2 perf gate): O(1) stem-lookup for the
+        // intersection check below. Built once per suggest() call; reused
+        // across all target records.
+        $sourceTokenSet = array_flip($sourceTokens);
+
+        // Per-call cache of stemmed title-tokens per target. Building the
+        // stems is the only non-trivial work the gate does (~5 stem-calls
+        // per target), and the gate runs for every target in the index —
+        // amortise across the foreach below.
+        $titleStemsCache = [];
+
         // Load all custom target keywords once (not per entry)
         $allCustomKeywords = [];
         try {
@@ -117,6 +128,79 @@ class SuggestionEngine
             // Filter by target collections
             if (! empty($targetCollections) && ! in_array($record->collection, $targetCollections, true)) {
                 continue;
+            }
+
+            // ───── Stage-1 pre-filter (V1.2 perf gate) ─────
+            //
+            // Cheap stemmed-token-set intersection. If the source carries
+            // NO stem from either the target's title OR its TF-IDF keyword
+            // map, no downstream path can fire. Skip the pair before the
+            // expensive phrase regex + stem cluster + compound passes.
+            //
+            // Why a single-hit threshold (not "min 2 stems"): the compound
+            // path (findTitleCompoundMatches) and the custom-keyword path
+            // both legitimately produce matches from a SINGLE stem hit.
+            // A 1-word hyphenated compound title like "CMS-Migration"
+            // has only one stem; gating that at ≥2 would zero out the
+            // entire path. Keyword-only suggestions (target has no
+            // title-stem overlap but a strong TF-IDF keyword hit) need
+            // their stems via the keyword map. Both are union'd into the
+            // gate set.
+            //
+            // Cost: O(|gateSet|) per pair (typical 5–15 stems). Hot-path
+            // lookups O(1) on $sourceTokenSet (built once outside loop).
+            // Empty gate set ≡ no signal to filter on → pass through to
+            // existing paths.
+            if (! isset($titleStemsCache[$record->id])) {
+                [$titleStems] = TextNormalizer::tokenizeWithMapping($record->title);
+                // Keyword stems are already stemmed (the keyword map is
+                // built by KeywordExtractor::extract which stems before
+                // storing). Use array_keys directly.
+                $keywordStems = array_keys($record->keywords);
+                $titleStemsCache[$record->id] = array_values(array_unique(array_merge($titleStems, $keywordStems)));
+            }
+            $gateStems = $titleStemsCache[$record->id];
+            if (! empty($gateStems)) {
+                $hit = false;
+                // Stage A: exact stem match (O(1) hash lookup) — catches
+                // the common case where both sides went through the same
+                // stemmer.
+                foreach ($gateStems as $stem) {
+                    if (isset($sourceTokenSet[$stem])) {
+                        $hit = true;
+                        break;
+                    }
+                }
+                // Stage B (only when A failed): prefix overlap. Required
+                // because the active stemmer language may not strip every
+                // inflection on every word — e.g. an English stemmer on a
+                // German plural compound ("cms-migration" vs "cms-migrationen")
+                // leaves divergent surface forms. The compound match path
+                // downstream handles this via suffix-tolerant regex; the
+                // pre-filter mirrors the tolerance with a >=4-char prefix
+                // overlap so it doesn't block what the compound path
+                // would have matched.
+                if (! $hit) {
+                    foreach ($gateStems as $stem) {
+                        $len = mb_strlen($stem);
+                        if ($len < 4) {
+                            continue;
+                        }
+                        foreach ($sourceTokenSet as $sourceStem => $_) {
+                            $sourceLen = mb_strlen($sourceStem);
+                            if ($sourceLen < 4) {
+                                continue;
+                            }
+                            if (str_starts_with($sourceStem, $stem) || str_starts_with($stem, $sourceStem)) {
+                                $hit = true;
+                                break 2;
+                            }
+                        }
+                    }
+                }
+                if (! $hit) {
+                    continue;
+                }
             }
 
             // Tier 1: Title phrase matching (all positions)
