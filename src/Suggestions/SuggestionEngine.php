@@ -65,6 +65,21 @@ class SuggestionEngine
         $normalizedText = TextNormalizer::normalize($text);
         $suggestions = [];
 
+        // Multisite locale-scoping (V1.x). Source-locale is the content language
+        // of the entry we're generating suggestions FOR; it drives both the
+        // same-locale target filter below and the per-source stemmer used to
+        // tokenize $text. Null on single-site installs (the Indexer leaves
+        // EntryRecord::$locale null when there's no language decision to
+        // make) — in that case the same-locale filter short-circuits to
+        // "pass" and tokenizeWithMappingFor delegates to the legacy global
+        // stemmer/stopword path. Half-migrated indices (some records carry
+        // locale, others don't) also pass: the filter only fires when BOTH
+        // sides carry a locale, otherwise it would silently drop legacy
+        // targets after a partial reindex.
+        $sourceLocale = ($excludeEntryId && isset($index[$excludeEntryId]))
+            ? $index[$excludeEntryId]->locale
+            : null;
+
         // If excludeEntryId is in the index, also exclude its outbound links
         if ($excludeEntryId && isset($index[$excludeEntryId])) {
             $alreadyLinkedIds = array_merge($alreadyLinkedIds, $index[$excludeEntryId]->outboundLinks);
@@ -93,8 +108,13 @@ class SuggestionEngine
         $titleBlacklist = $this->getTitleBlacklist();
         $targetCollections = $this->getConfigArray('linkwise.target_collections');
 
-        // Tokenize source text once for keyword matching (stemmed + original mapping)
-        [$sourceTokens, $stemToOriginal] = TextNormalizer::tokenizeWithMapping($text);
+        // Tokenize source text once for keyword matching (stemmed + original mapping).
+        // Uses the SOURCE entry's locale so a DE source on an EN-default install
+        // is stemmed with the German stemmer and filters against the German
+        // stopword list — fixes the PR #100 root cause one level up (English
+        // "and" isn't in the DE stopword list, so a global EN/DE-mismatch let
+        // it through as a content word in the stem-cluster path).
+        [$sourceTokens, $stemToOriginal] = TextNormalizer::tokenizeWithMappingFor($text, $sourceLocale);
 
         // Stage-1 pre-filter set (V1.2 perf gate): O(1) stem-lookup for the
         // intersection check below. Built once per suggest() call; reused
@@ -117,6 +137,17 @@ class SuggestionEngine
 
         foreach ($index as $record) {
             if (in_array($record->id, $excludeIds, true)) {
+                continue;
+            }
+
+            // Multisite locale-scoping. Cross-locale links render incorrectly
+            // (LinkMark::convertHref's `$item->in(Site::current())` falls back
+            // to the original entry's URL when no localization exists in the
+            // current site) and clutter the editor's review modal with
+            // wrong-language anchors. Only enforce when BOTH sides carry a
+            // locale so single-site installs and half-migrated indices keep
+            // their existing behavior.
+            if ($sourceLocale !== null && $record->locale !== null && $sourceLocale !== $record->locale) {
                 continue;
             }
 
@@ -152,7 +183,11 @@ class SuggestionEngine
             // Empty gate set ≡ no signal to filter on → pass through to
             // existing paths.
             if (! isset($titleStemsCache[$record->id])) {
-                [$titleStems] = TextNormalizer::tokenizeWithMapping($record->title);
+                // Post-filter source and target share the same locale (or one
+                // side is null = legacy/single-site). Tokenize the target
+                // title with the source stemmer so prefilter stems match the
+                // sourceTokenSet built above.
+                [$titleStems] = TextNormalizer::tokenizeWithMappingFor($record->title, $sourceLocale);
                 // Keyword stems are already stemmed (the keyword map is
                 // built by KeywordExtractor::extract which stems before
                 // storing). Use array_keys directly.
@@ -458,7 +493,9 @@ class SuggestionEngine
             return [];
         }
 
-        $stemmer = new Stemmer;
+        // Per-target locale stemmer. Same-locale filter in suggest() guarantees
+        // source and target share this locale (or both null = legacy/single-site).
+        $stemmer = new Stemmer($record->locale);
         $suggestions = [];
 
         foreach ($compounds as $compound) {
@@ -808,7 +845,15 @@ class SuggestionEngine
      */
     protected function findUnorderedStemMatch(string $originalText, EntryRecord $record, int $titleWordCount): ?Suggestion
     {
-        $stemmer = new Stemmer;
+        // Per-target locale stemmer. After the same-locale filter in suggest(),
+        // source and target share this locale (or both null). Fixes the PR
+        // #100 root cause: the stemmer used here was global-resolved, so a DE
+        // site with EN content stemmed English title words like "and" through
+        // the German stemmer and let the coordinator slip into the cluster
+        // span. With per-entry locale, the stemmer matches the title's
+        // language and the coordinator-stopword guard below is now belt-and-
+        // suspenders rather than the load-bearing fix.
+        $stemmer = new Stemmer($record->locale);
         $normalizedTitle = TextNormalizer::normalize($record->title);
         $titleWords = explode(' ', $normalizedTitle);
 

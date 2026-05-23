@@ -145,6 +145,26 @@ class LanguageRegistry
     }
 
     /**
+     * Map a raw locale string (Statamic `Site::shortLocale()` or `locale()`,
+     * e.g. `de_DE`, `de`, `pt_BR`) to a supported 2-char ISO code, or null
+     * when nothing in {@see LANGUAGES} matches.
+     *
+     * Pure function — no container, no Site lookup. Used by the Indexer to
+     * stamp each {@see EntryRecord} with its content language at write time,
+     * and by the SuggestionEngine to pick a per-entry stemmer in multisite
+     * installs. The global {@see resolve()} chain (config → Site::current →
+     * fallback) stays unchanged for callers that don't have an Entry in hand.
+     */
+    public static function resolveFor(?string $rawLocale): ?string
+    {
+        if (! is_string($rawLocale) || $rawLocale === '') {
+            return null;
+        }
+        $short = mb_strtolower(mb_substr($rawLocale, 0, 2));
+        return isset(self::LANGUAGES[$short]) ? $short : null;
+    }
+
+    /**
      * Resolve the configured language with sensible fallbacks:
      *  1. linkwise.language config explicitly set + valid → use it
      *  2. Statamic site locale (e.g. de_DE → de) maps to a known code → use it
