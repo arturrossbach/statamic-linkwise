@@ -177,3 +177,40 @@ class SuggestionEngineStemClusterCoordTest extends TestCase
         }
     }
 }
+
+class SuggestionEngineKeywordAnchorCoordTest extends \Arturrossbach\Linkwise\Tests\TestCase
+{
+    public function test_findBestAnchor_rejects_coordinator_gap_falls_back_to_strategy2(): void
+    {
+        // Source-grep pin (mirrors the existing source-pattern test style
+        // for guarantees the unit harness can't easily assert without
+        // wiring TF-IDF state). Pins that findBestAnchor checks the
+        // coordinator list when accepting a 1-word-gap match in Strategy 1.
+        // Without the check, "performance and tuning" surfaces as a
+        // user-visible Müll-anchor through the TF-IDF keyword-fallback
+        // path even after the RAKE + stem-cluster guards.
+        $src = file_get_contents(dirname(__DIR__, 2).'/src/Suggestions/SuggestionEngine.php');
+
+        $this->assertMatchesRegularExpression(
+            '/protected function findBestAnchor.*?\$coordinatorStopwords/s',
+            $src,
+            'findBestAnchor must declare a coordinatorStopwords list to reject "and"-bridged anchors.',
+        );
+        $this->assertStringContainsString("'and', 'or', 'but'", $src);
+        $this->assertStringContainsString("'und', 'oder'", $src);
+
+        // Pin that BOTH order-checks (primary-then-other AND other-then-
+        // primary) run the gap-word through the coordinator filter.
+        // Counted occurrences: the in_array($gap, $coordinatorStopwords...)
+        // call must appear at least twice in findBestAnchor body.
+        $bodyMatch = preg_match(
+            '/protected function findBestAnchor.*?(?=\n    protected|\n    public|\n\})/s',
+            $src,
+            $bodyMatches,
+        );
+        $this->assertSame(1, $bodyMatch, 'Unable to isolate findBestAnchor body.');
+        $count = substr_count($bodyMatches[0], 'in_array($gap, $coordinatorStopwords');
+        $this->assertGreaterThanOrEqual(2, $count,
+            'Both primary→other and other→primary order-checks must consult the coordinator list.');
+    }
+}
