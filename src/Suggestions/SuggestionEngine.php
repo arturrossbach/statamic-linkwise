@@ -985,58 +985,40 @@ class SuggestionEngine
             $phrases[] = $coreBoth;
         }
 
-        // Generate contiguous n-grams down to minPhraseWords. The previous
-        // hard floor of 3 words combined with the strict start/end stopword
-        // filter caused long descriptive titles to produce no usable phrases
-        // at all — e.g. "WAR RAGES ON Houthis launch missile..." generated
-        // zero phrases starting with "war" because in en_de mixed mode "war"
-        // was treated as a stopword (legitimate German past-tense of "sein"),
-        // even though it's a content word in the actual English title.
+        // RAKE-style candidate generation (Rose et al. 2010, Step 1+2):
+        // split the normalized token stream at stopwords; each surviving
+        // content-word run is a candidate. Punctuation was already replaced
+        // with spaces by TextNormalizer::normalize at the top of this method,
+        // so stopwords are the only remaining phrase delimiter.
         //
-        // Two changes here:
-        //   (1) walk down to minPhraseWords (default 2), not hard-3
-        //   (2) reject only phrases where ALL tokens are stopwords; keep
-        //       phrases where at least one word carries content. This still
-        //       drops noise like "and the" without nuking "WAR RAGES" or
-        //       similar where the multi-language stopword union false-flags
-        //       a content word at a boundary.
-        $minLen = max(2, $this->minPhraseWords);
-        if (count($words) >= max(3, $minLen + 1)) {
-            $significantWords = array_filter($words, fn ($w) => ! TextNormalizer::isStopword($w));
-
-            if (count($significantWords) >= 2) {
-                for ($len = count($words) - 1; $len >= $minLen; $len--) {
-                    for ($start = 0; $start <= count($words) - $len; $start++) {
-                        $slice = array_slice($words, $start, $len);
-                        $phrase = implode(' ', $slice);
-
-                        // Boundary-stopword reject (user-bug 2026-05-23):
-                        // generated n-grams must start AND end with a content
-                        // word. Otherwise titles like "Performance Tuning and
-                        // Optimization Tactics" produce trash anchors —
-                        // "performance and", "and optimization", "and
-                        // optimization tactics" — that the user sees as
-                        // 60%-confident suggestions in the modal.
-                        //
-                        // The Houthi-style mixed-language false-positive
-                        // (en_de mode treating English "war" as German
-                        // stopword) is handled by the leading/trailing
-                        // stopword-strip phrases above (`core` + `coreTail` +
-                        // `coreBoth` at Z. 967-986), not by this loop —
-                        // those carry the rescue path for descriptive
-                        // titles that the language-union over-prunes.
-                        $first = $slice[0] ?? '';
-                        $last = $slice[$len - 1] ?? '';
-                        $startsWithStopword = $first !== '' && TextNormalizer::isStopword($first);
-                        $endsWithStopword = $last !== '' && TextNormalizer::isStopword($last);
-                        if ($startsWithStopword || $endsWithStopword) {
-                            continue;
-                        }
-
-                        $phrases[] = $phrase;
-                    }
+        // Why this replaces the previous all-n-grams generator (user-bug
+        // 2026-05-23): the old loop emitted every contiguous slice and then
+        // filtered, which let boundary-stopword runs slip through ("performance
+        // and", "and optimization"). RAKE only emits *between-stopword*
+        // content-word runs by construction — boundary-stopword phrases can't
+        // exist in the output.
+        //
+        // Adjoining-keywords heuristic (original RAKE rejoins pairs that
+        // co-occur 2+ times in the document) is deliberately omitted —
+        // Linkwise operates per title (typically 5–10 words, no repetition
+        // signal). The Full-Title phrase + core/coreTail/coreBoth strips
+        // above carry the rescue path for descriptive titles whose only
+        // legitimate phrase form crosses an interior stopword (e.g.
+        // "Tip of the Iceberg" survives via the Full-Title path).
+        $currentRun = [];
+        foreach ($words as $word) {
+            if ($word === '' || TextNormalizer::isStopword($word)) {
+                if (count($currentRun) >= $this->minPhraseWords) {
+                    $phrases[] = implode(' ', $currentRun);
                 }
+                $currentRun = [];
+                continue;
             }
+            $currentRun[] = $word;
+        }
+        // Tail flush — last run if the title doesn't end on a stopword.
+        if (count($currentRun) >= $this->minPhraseWords) {
+            $phrases[] = implode(' ', $currentRun);
         }
 
         // Deduplicate, sort by length desc (longest first)
