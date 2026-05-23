@@ -663,6 +663,26 @@ export default {
          * bulk-status poller — no per-job polling here anymore.
          */
         async rebuildIndex() {
+            // Optimistic UI: flip `rebuilding` (= activeBulk.kind==='scan')
+            // immediately so the button shows its loading spinner the moment
+            // the user clicks, not 5–7s later when the status-poller picks
+            // up the server-side 'starting' phase. On slow hosts (Cloudways
+            // with disable_functions-residual overhead) the exec() call to
+            // dispatch the artisan command can take that long before the
+            // first status write lands — the user previously thought their
+            // click hadn't registered. Set the active state to a placeholder
+            // 'starting' snapshot; the next pollBulkStatusOnce replaces it
+            // with the real server status as soon as the bulk writes its
+            // first heartbeat.
+            setHeavyState({
+                kind: 'scan',
+                label: 'Scan Content',
+                current: 0,
+                total: 0,
+                canCancel: false,
+                cancelUrl: null,
+                context: { phase: 'starting' },
+            });
             try {
                 const response = await fetch(this.rebuildUrl, {
                     method: 'POST',
@@ -675,11 +695,13 @@ export default {
                 if (response.status === 409) {
                     const data = await response.json().catch(() => ({}));
                     Statamic.$toast.info(data.message || 'Another bulk operation is running. Wait for it to finish.');
+                    setHeavyState(null);
                     return;
                 }
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
                     Statamic.$toast.error(`Could not scan content: ${data?.error || data?.message || `HTTP ${response.status}`}`);
+                    setHeavyState(null);
                     return;
                 }
 
@@ -687,6 +709,7 @@ export default {
                 this.pollBulkStatusOnce();
             } catch (error) {
                 Statamic.$toast.error(`Could not scan content: ${error.message || 'network error'}`);
+                setHeavyState(null);
             }
         },
 
