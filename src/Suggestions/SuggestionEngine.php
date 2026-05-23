@@ -812,8 +812,25 @@ class SuggestionEngine
         $normalizedTitle = TextNormalizer::normalize($record->title);
         $titleWords = explode(' ', $normalizedTitle);
 
-        // Get content words from title (skip stopwords)
-        $titleContentWords = array_filter($titleWords, fn ($w) => $w !== '' && ! TextNormalizer::isStopword($w));
+        // Coordinator stopwords filtered language-agnostically. When a site's
+        // active stemmer-language disagrees with the content language (German
+        // language setting + English article titles like "Analytics and
+        // Measuring Content Performance"), isStopword("and") returns false
+        // because "and" is not in the German list — but the coordinator
+        // semantic ("and" as splitter between two independent concepts) is
+        // universal. Without this explicit list, the stem-cluster path
+        // accepted "and" as a title content word and produced "and
+        // performance" / "performance and" / "Content quality and" anchors.
+        // User-bug 2026-05-23, Cloudways smoke with language=de site +
+        // English seed articles.
+        static $coordinatorStopwords = [
+            'and', 'or', 'but', 'nor', 'yet', 'so',
+            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
+        ];
+        // Get content words from title (skip stopwords + coordinators).
+        $titleContentWords = array_filter($titleWords, fn ($w) => $w !== ''
+            && ! TextNormalizer::isStopword($w)
+            && ! in_array(mb_strtolower($w), $coordinatorStopwords, true));
         $titleContentWords = array_values($titleContentWords);
 
         if (count($titleContentWords) < 2) {
@@ -934,6 +951,55 @@ class SuggestionEngine
         $anchorText = $trimmedAnchor;
         $bestFirst = $bestFirst + $anchorShift;
         $spanLength = mb_strlen($anchorText);
+
+        // Additional language-agnostic boundary trim for coordinator
+        // conjunctions ("and", "und", "or", "oder", …) that are NOT in
+        // the active language's stopword list. Site-language=de + English
+        // article titles leaves "and" unfiltered above; this second pass
+        // strips boundary "and" / "or" regardless of language. User-bug
+        // 2026-05-23 (Cloudways smoke with DE setting + EN seed data).
+        static $coordBoundaryWords = [
+            'and', 'or', 'but', 'nor', 'yet', 'so',
+            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
+        ];
+        $stripCoordPunct = fn (string $w): string => preg_replace('/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u', '', mb_strtolower($w));
+        // Loop to peel multiple stacked coordinators if the cluster ever
+        // surfaces something like "and or X".
+        while (true) {
+            $words = preg_split('/\s+/', trim($anchorText));
+            $words = array_values(array_filter($words, fn ($w) => $w !== ''));
+            if (count($words) < 2) break;
+
+            $first = $stripCoordPunct($words[0]);
+            $last = $stripCoordPunct($words[count($words) - 1]);
+            $hitFirst = in_array($first, $coordBoundaryWords, true);
+            $hitLast = in_array($last, $coordBoundaryWords, true);
+            if (! $hitFirst && ! $hitLast) break;
+
+            if ($hitFirst) {
+                // Drop leading word from anchor + shift bestFirst forward
+                // by the consumed chars (word + separator).
+                $oldLen = mb_strlen($anchorText);
+                $rest = ltrim(mb_substr($anchorText, mb_strlen($words[0])));
+                $consumed = $oldLen - mb_strlen($rest);
+                $anchorText = $rest;
+                $bestFirst += $consumed;
+            }
+            if ($hitLast && $anchorText !== '') {
+                $words2 = preg_split('/\s+/', trim($anchorText));
+                $words2 = array_values(array_filter($words2, fn ($w) => $w !== ''));
+                if (count($words2) >= 2) {
+                    $tail = $words2[count($words2) - 1];
+                    $beforeTail = mb_substr($anchorText, 0, mb_strrpos($anchorText, $tail));
+                    $anchorText = rtrim($beforeTail);
+                }
+            }
+        }
+        $spanLength = mb_strlen($anchorText);
+        // Bail if the trim cascade ate everything substantive.
+        if ($spanLength === 0 || count(preg_split('/\s+/', trim($anchorText))) < 1) {
+            return null;
+        }
 
         // Reject anchors that span sentence boundaries (. ! ?)
         if (preg_match('/[.!?]\s/', $anchorText)) {
