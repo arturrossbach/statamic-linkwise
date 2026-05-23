@@ -23,6 +23,15 @@ class EntryRecord
      *   walks each text-node separately). Legacy index records without this field
      *   fall back to outboundLinks (= distinct count, the old behaviour).
      */
+    /**
+     * @param  ?string  $locale  ISO-639-1 code (e.g. 'de', 'en') resolved from the
+     *   entry's site `shortLocale()` at index time. Null on single-site installs
+     *   where there is no Locale-scoping decision to make — `null === null`
+     *   passes the source-locale filter in {@see \Arturrossbach\Linkwise\Suggestions\SuggestionEngine}
+     *   so legacy index entries written before this field shipped continue to
+     *   work without a forced reindex. NOT the Statamic site-handle (which is
+     *   user-chosen and not a stemmer key).
+     */
     public function __construct(
         public readonly string $id,
         public readonly string $title,
@@ -36,6 +45,7 @@ class EntryRecord
         public readonly bool $hasTitleMatch = false,
         public readonly array $tokens = [],
         public readonly array $outboundLinkOccurrences = [],
+        public readonly ?string $locale = null,
     ) {}
 
     /**
@@ -65,6 +75,7 @@ class EntryRecord
             'outboundLinks', 'keywords',
             'inboundSuggestionCount', 'outboundSuggestionCount',
             'hasTitleMatch', 'tokens', 'outboundLinkOccurrences',
+            'locale',
         ];
 
         $unknown = array_diff(array_keys($overrides), $allowed);
@@ -87,6 +98,7 @@ class EntryRecord
             hasTitleMatch: $overrides['hasTitleMatch'] ?? $this->hasTitleMatch,
             tokens: $overrides['tokens'] ?? $this->tokens,
             outboundLinkOccurrences: $overrides['outboundLinkOccurrences'] ?? $this->outboundLinkOccurrences,
+            locale: array_key_exists('locale', $overrides) ? $overrides['locale'] : $this->locale,
         );
     }
 
@@ -117,6 +129,7 @@ class EntryRecord
             'outbound_suggestion_count' => $this->outboundSuggestionCount,
             'has_title_match' => $this->hasTitleMatch,
             'tokens' => $this->tokens,
+            'locale' => $this->locale,
         ];
     }
 
@@ -150,6 +163,7 @@ class EntryRecord
             hasTitleMatch: (bool) ($data['has_title_match'] ?? false),
             tokens: isset($data['tokens']) && is_array($data['tokens']) ? array_values(array_filter($data['tokens'], 'is_string')) : [],
             outboundLinkOccurrences: isset($data['outbound_link_occurrences']) && is_array($data['outbound_link_occurrences']) ? $data['outbound_link_occurrences'] : [],
+            locale: isset($data['locale']) && is_string($data['locale']) && $data['locale'] !== '' ? $data['locale'] : null,
         );
     }
 }

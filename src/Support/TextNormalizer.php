@@ -55,19 +55,51 @@ class TextNormalizer
      */
     public static function tokenizeWithMapping(string $text): array
     {
+        return static::tokenizeWithMappingFor($text, null);
+    }
+
+    /**
+     * Same as {@see tokenizeWithMapping()} but uses an explicit ISO-639-1
+     * locale for both the stopword filter and the stemmer. Multisite
+     * locale-scoping (V1.x): the SuggestionEngine reads the source entry's
+     * locale from {@see \Arturrossbach\Linkwise\Indexer\EntryRecord::$locale}
+     * and tokenizes the source text with the matching language, so a DE
+     * source on an EN-default install isn't stemmed as English. Closes the
+     * PR #100 root cause (language-mismatch in the stem fallback) one level
+     * up, instead of patching individual coordinator-stopword leaks.
+     *
+     * Null locale ≡ legacy global behavior — falls back to
+     * {@see resolveStemmer()} + {@see getStopwords()}.
+     *
+     * @return array{0: string[], 1: array<string, string>}  [stemmedTokens, stemToOriginal]
+     */
+    public static function tokenizeWithMappingFor(string $text, ?string $locale): array
+    {
         $normalized = static::normalize($text);
         $words = explode(' ', $normalized);
 
-        $filtered = array_values(array_filter($words, fn ($w) => $w !== '' && ! static::isStopword($w)));
+        $stopwords = $locale !== null
+            ? array_flip(Stopwords::forLanguage($locale))
+            : null;
+        $stemmer = $locale !== null
+            ? new Stemmer($locale)
+            : static::resolveStemmer();
 
-        $stemmer = static::resolveStemmer();
         $stemmed = [];
         $stemToOriginal = [];
 
-        foreach ($filtered as $word) {
+        foreach ($words as $word) {
+            if ($word === '') {
+                continue;
+            }
+            $isStop = $stopwords !== null
+                ? isset($stopwords[$word])
+                : static::isStopword($word);
+            if ($isStop) {
+                continue;
+            }
             $stem = $stemmer->stem($word);
             $stemmed[] = $stem;
-            // Keep first occurrence's original form (most natural for anchor text)
             if (! isset($stemToOriginal[$stem])) {
                 $stemToOriginal[$stem] = $word;
             }

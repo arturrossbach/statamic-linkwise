@@ -4,6 +4,7 @@ namespace Arturrossbach\Linkwise\Indexer;
 
 use Illuminate\Support\Facades\Log;
 use Arturrossbach\Linkwise\NLP\KeywordExtractor;
+use Arturrossbach\Linkwise\NLP\LanguageRegistry;
 use Arturrossbach\Linkwise\Support\ProseMirrorTypes;
 use Arturrossbach\Linkwise\Support\TextExtractor;
 use Arturrossbach\Linkwise\Support\UrlHelper;
@@ -452,6 +453,23 @@ class EntryIndexer
         $cleanText = trim($text);
         $tokens = $this->keywordExtractor->tokenize($title.' '.$cleanText);
 
+        // Per-entry locale (ISO-639-1) for multisite locale-scoping in the
+        // SuggestionEngine. Null on single-site installs or when the entry's
+        // site locale doesn't map to a supported language code — the
+        // suggest-loop treats `null === null` as "pass" so single-site users
+        // see no behavior change. Multisite users get cross-locale suggestion
+        // leakage cut off at the source-vs-target equality check.
+        $locale = null;
+        try {
+            $site = $entry->site();
+            if ($site !== null) {
+                $raw = (string) ($site->shortLocale() ?? $site->locale() ?? '');
+                $locale = LanguageRegistry::resolveFor($raw);
+            }
+        } catch (\Throwable) {
+            // Entry has no site (e.g. malformed fixture) — leave locale null.
+        }
+
         return new EntryRecord(
             id: $entry->id(),
             title: $title,
@@ -466,6 +484,7 @@ class EntryIndexer
             // unique each Bard subtree), $linkOccurrences is collected in
             // parallel from the *WithOccurrences helpers.
             outboundLinkOccurrences: array_values($linkOccurrences),
+            locale: $locale,
         );
     }
 
