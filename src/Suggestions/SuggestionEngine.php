@@ -725,6 +725,15 @@ class SuggestionEngine
      */
     protected function findBestAnchor(string $text, string $primaryKeyword, array $matchingKeywords): string
     {
+        // Coordinator stopwords that MUST NOT bridge two keywords —
+        // produces user-visible Müll like "performance and tuning".
+        // Bridge prepositions (von/of/for/in/…) are fine. See
+        // SuggestionEngineStemClusterCoordTest for the rationale.
+        static $coordinatorStopwords = [
+            'and', 'or', 'but', 'nor', 'yet', 'so',
+            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
+        ];
+
         // Strategy 1: Try to find two matching keywords near each other (0-1 word gap)
         foreach ($matchingKeywords as $otherKeyword) {
             if ($otherKeyword === $primaryKeyword) {
@@ -735,15 +744,24 @@ class SuggestionEngine
             $o = preg_quote($otherKeyword, '/');
 
             // Check "primary [gap?] other" order
-            $pattern = '/\b('.$p.'\s+(?:[\p{L}\p{N}-]+\s+)?'.$o.')\b/iu';
+            $pattern = '/\b('.$p.'\s+(?:([\p{L}\p{N}-]+)\s+)?'.$o.')\b/iu';
             if (preg_match($pattern, $text, $m)) {
-                return $m[1];
+                // Reject if the gap word is a coordinator — "performance
+                // and tuning" is a user-bug Müll-anchor, "performance for
+                // tuning" or "performance über tuning" is fine.
+                $gap = isset($m[2]) ? mb_strtolower($m[2]) : '';
+                if ($gap === '' || ! in_array($gap, $coordinatorStopwords, true)) {
+                    return $m[1];
+                }
             }
 
             // Check "other [gap?] primary" order
-            $pattern = '/\b('.$o.'\s+(?:[\p{L}\p{N}-]+\s+)?'.$p.')\b/iu';
+            $pattern = '/\b('.$o.'\s+(?:([\p{L}\p{N}-]+)\s+)?'.$p.')\b/iu';
             if (preg_match($pattern, $text, $m)) {
-                return $m[1];
+                $gap = isset($m[2]) ? mb_strtolower($m[2]) : '';
+                if ($gap === '' || ! in_array($gap, $coordinatorStopwords, true)) {
+                    return $m[1];
+                }
             }
         }
 
