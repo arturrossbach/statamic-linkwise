@@ -1010,18 +1010,30 @@ class SuggestionEngine
                         $slice = array_slice($words, $start, $len);
                         $phrase = implode(' ', $slice);
 
-                        // Reject only if EVERY word is a stopword — keeps
-                        // boundary content words intact across language modes.
-                        $allStopwords = true;
-                        foreach ($slice as $w) {
-                            if ($w !== '' && ! TextNormalizer::isStopword($w)) {
-                                $allStopwords = false;
-                                break;
-                            }
+                        // Boundary-stopword reject (user-bug 2026-05-23):
+                        // generated n-grams must start AND end with a content
+                        // word. Otherwise titles like "Performance Tuning and
+                        // Optimization Tactics" produce trash anchors —
+                        // "performance and", "and optimization", "and
+                        // optimization tactics" — that the user sees as
+                        // 60%-confident suggestions in the modal.
+                        //
+                        // The Houthi-style mixed-language false-positive
+                        // (en_de mode treating English "war" as German
+                        // stopword) is handled by the leading/trailing
+                        // stopword-strip phrases above (`core` + `coreTail` +
+                        // `coreBoth` at Z. 967-986), not by this loop —
+                        // those carry the rescue path for descriptive
+                        // titles that the language-union over-prunes.
+                        $first = $slice[0] ?? '';
+                        $last = $slice[$len - 1] ?? '';
+                        $startsWithStopword = $first !== '' && TextNormalizer::isStopword($first);
+                        $endsWithStopword = $last !== '' && TextNormalizer::isStopword($last);
+                        if ($startsWithStopword || $endsWithStopword) {
+                            continue;
                         }
-                        if (! $allStopwords) {
-                            $phrases[] = $phrase;
-                        }
+
+                        $phrases[] = $phrase;
                     }
                 }
             }
