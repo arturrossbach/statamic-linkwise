@@ -908,6 +908,15 @@ class SuggestionEngine
 
         $anchorText = mb_substr($originalText, $bestFirst, $spanLength);
 
+        // Trim leading + trailing stopwords (mirror findMatches anchor trim).
+        // Pre-fix: the stem-fallback path returned raw cluster spans like
+        // "and performance" with the boundary stopword intact, even though
+        // findMatches consistently trims them. User-bug 2026-05-23.
+        [$trimmedAnchor, $anchorShift] = TextNormalizer::trimBoundaryStopwords($anchorText);
+        $anchorText = $trimmedAnchor;
+        $bestFirst = $bestFirst + $anchorShift;
+        $spanLength = mb_strlen($anchorText);
+
         // Reject anchors that span sentence boundaries (. ! ?)
         if (preg_match('/[.!?]\s/', $anchorText)) {
             return null;
@@ -915,6 +924,51 @@ class SuggestionEngine
 
         // Reject anchors longer than 80 characters
         if (mb_strlen($anchorText) > 80) {
+            return null;
+        }
+
+        // Reject anchors with interior coordination conjunctions
+        // (user-bug 2026-05-23): "optimization and performance" connects
+        // two stems via a coordinator ("and") — structurally fragmented,
+        // inverted order vs title, semantically two independent concepts
+        // glued together. The user reads this as "and-Müll".
+        //
+        // Bridge prepositions ("von", "of", "in", "for", etc.) are NOT
+        // rejected — they bind concepts into a coherent phrase. Editors
+        // legitimately want "Wollsocken von Bircher" as an anchor where
+        // "von" is the linking preposition between two title content
+        // words. Coordinators do the opposite: they split.
+        //
+        // Stopword list is the union of common English + German
+        // coordinators. POS-tagging would be cleaner but adds a heavy
+        // dependency we deliberately avoid in V1.
+        static $coordinationStopwords = [
+            'and', 'or', 'but', 'nor', 'yet', 'so',
+            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
+        ];
+        $clusterWords = preg_split('/\s+/', trim($anchorText));
+        $clusterWords = array_values(array_filter($clusterWords, fn ($w) => $w !== ''));
+        $contentCount = 0;
+        $hasInteriorCoord = false;
+        foreach ($clusterWords as $idx => $cw) {
+            $lower = mb_strtolower($cw);
+            $isStop = TextNormalizer::isStopword($lower);
+            if (! $isStop) {
+                $contentCount++;
+            }
+            $isBoundary = $idx === 0 || $idx === count($clusterWords) - 1;
+            if (! $isBoundary && in_array($lower, $coordinationStopwords, true)) {
+                $hasInteriorCoord = true;
+            }
+        }
+        // Reject only the canonical Müll-shape: exactly 2 content words
+        // separated by a coordinator ("X and Y") — semantically gluing two
+        // independent concepts. Larger anchors (3+ content words) with an
+        // interior "and" usually form a legitimate phrase that overlaps
+        // the title strongly enough to justify the link (e.g. "internal
+        // linking and better SEO" against "Internal Linking Strategy for
+        // Better SEO").
+        if ($contentCount === 2 && $hasInteriorCoord) {
             return null;
         }
 
