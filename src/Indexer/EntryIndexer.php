@@ -455,16 +455,26 @@ class EntryIndexer
 
         // Per-entry locale (ISO-639-1) for multisite locale-scoping in the
         // SuggestionEngine. Null on single-site installs or when the entry's
-        // site locale doesn't map to a supported language code — the
-        // suggest-loop treats `null === null` as "pass" so single-site users
-        // see no behavior change. Multisite users get cross-locale suggestion
-        // leakage cut off at the source-vs-target equality check.
+        // site has no usable language declaration — the suggest-loop treats
+        // `null === null` as "pass" so single-site users see no behavior
+        // change. Multisite users get cross-locale suggestion leakage cut
+        // off at the source-vs-target equality check.
+        //
+        // Source = `$site->lang()`, not `shortLocale()`. Statamic's own
+        // consumer code (Localize middleware, Carbon, slug-gen, Entry::title
+        // localization) reads `lang()` because the user can declare an
+        // explicit `lang:` in sites.yaml that differs from `locale:` —
+        // canonical case is a Swiss-DE site with `locale: en_US` (PHP date
+        // formatting in English) + `lang: de` (German content). Reading
+        // `shortLocale()` directly would bypass that override and stem the
+        // German content with the English stemmer. `lang()` itself falls
+        // back to `shortLocale()` when no override is set, so the single-
+        // site path is unaffected.
         $locale = null;
         try {
             $site = $entry->site();
             if ($site !== null) {
-                $raw = (string) ($site->shortLocale() ?? $site->locale() ?? '');
-                $locale = LanguageRegistry::resolveFor($raw);
+                $locale = LanguageRegistry::resolveFor((string) ($site->lang() ?? ''));
             }
         } catch (\Throwable) {
             // Entry has no site (e.g. malformed fixture) — leave locale null.
