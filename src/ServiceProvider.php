@@ -10,6 +10,7 @@ use Arturrossbach\Linkwise\Commands\DetailUnlinkCommand;
 use Arturrossbach\Linkwise\Commands\IndexCommand;
 use Arturrossbach\Linkwise\Commands\LinkInsertCommand;
 use Arturrossbach\Linkwise\Commands\NormalizeBardCommand;
+use Arturrossbach\Linkwise\Commands\SeedMultilingualCommand;
 use Arturrossbach\Linkwise\Commands\SeedTestDataCommand;
 use Arturrossbach\Linkwise\Commands\UrlChangerApplyCommand;
 use Arturrossbach\Linkwise\Links\LinkwiseLinkMark;
@@ -35,6 +36,7 @@ class ServiceProvider extends AddonServiceProvider
         DetailUnlinkCommand::class,
         LinkInsertCommand::class,
         SeedTestDataCommand::class,
+        SeedMultilingualCommand::class,
         AuditCommand::class,
         NormalizeBardCommand::class,
         \Arturrossbach\Linkwise\Commands\BuildFrequencyStemsCommand::class,
