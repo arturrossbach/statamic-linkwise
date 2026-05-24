@@ -90,6 +90,25 @@ not marketing claims. If your language is not in this list, the runtime
 falls back to English defaults; you can verify behaviour with a local
 scan before licensing.
 
+### Multisite + per-locale scoping (V1.2+)
+
+On Statamic-multisite installs, Linkwise auto-detects each entry's
+content language via `$site->lang()` and:
+
+- **Scopes Suggestions per-site.** A DE-source entry only suggests DE-target entries. EN sources don't surface DE targets and vice versa. Auto-routing of `statamic://entry::<uuid>` to the current-site localization is handled by Statamic core; Linkwise's filter prevents cross-locale suggestions from ever being generated.
+- **Per-rule locale scoping for Auto-Link.** A rule with `locales: ['de']` fires only on DE entries, even when the keyword appears in EN content as a loanword. Leave the locales empty to keep today's "all sites" behavior.
+- **URL Changer per-locale option.** Restrict a domain migration to a single site when needed.
+- **Locale filters** on Links Report, Broken Links, and locale badges in the Suggestion modals.
+- **Editor sees inherited titles.** If a blueprint declares `title: { localizable: false }`, the Links Report shows an "(inherited <code>)" hint so the editor knows the title is the Origin's.
+
+Single-site installs see **no UI differences** — every multilang surface hides itself when the index has fewer than two distinct locales.
+
+For the full per-tab UX inventory + V1.3 roadmap, see [`docs/POST_MULTILANG_GAPS.md`](docs/POST_MULTILANG_GAPS.md). For the code-level audit + design rationale, see [`docs/MULTISITE_AUDIT.md`](docs/MULTISITE_AUDIT.md).
+
+### Language Quality Tiers
+
+Coordinator-stopwords (the "don't bridge two stems via `und` / `et` / `y`" anchor-quality filter) are explicitly hand-curated for **English + German** and grammar-reference-derived for the other 12 CONFIDENT-tier languages. The latter are not native-speaker validated; if you spot a false-reject ("Linkwise refused an anchor I expected to see") in FR / ES / IT / NL / PT / SV / DA / NO / FI / RO / RU / CA, please [open an issue](https://github.com/arturrossbach/statamic-linkwise/issues) — fixes ship within days.
+
 ### Confident (14 languages)
 
 Snowball stemmer + curated [stopwords-iso](https://github.com/stopwords-iso/stopwords-iso)
