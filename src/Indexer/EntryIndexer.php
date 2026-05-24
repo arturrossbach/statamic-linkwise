@@ -4,6 +4,7 @@ namespace Arturrossbach\Linkwise\Indexer;
 
 use Illuminate\Support\Facades\Log;
 use Arturrossbach\Linkwise\NLP\KeywordExtractor;
+use Arturrossbach\Linkwise\NLP\LanguageRegistry;
 use Arturrossbach\Linkwise\Support\ProseMirrorTypes;
 use Arturrossbach\Linkwise\Support\TextExtractor;
 use Arturrossbach\Linkwise\Support\UrlHelper;
@@ -399,7 +400,21 @@ class EntryIndexer
             return null;
         }
 
-        $extracted = $this->extractBardContent($entry);
+        // PR #102 audit A2 — skip body fields that are NOT localizable when
+        // the entry is a localization (= has an origin). The blueprint
+        // declares "this field's content is shared across all sites"; the
+        // value we'd read here is the foreign-language origin text. Indexing
+        // it under this entry's locale would re-introduce the cross-language
+        // stemmer bug at the body level. Pre-compute the entry-is-localization
+        // flag once; the per-field check inside is cheap.
+        $entryIsLocalization = false;
+        try {
+            $entryIsLocalization = $entry->origin() !== null && $entry->origin()->id() !== $entry->id();
+        } catch (\Throwable) {
+            // Localization status unreadable — index defensively (= include all fields).
+        }
+
+        $extracted = $this->extractBardContent($entry, $entryIsLocalization);
         $text = '';
         $links = [];
         // Parallel total-occurrence list (NOT deduped) for inbound-count parity
@@ -430,6 +445,10 @@ class EntryIndexer
         // operating on the same field set.
         foreach ($fields as $handle => $field) {
             if ($field->type() === 'markdown' && $handle !== 'title') {
+                // PR #102 audit A2 — skip foreign-language-body fields.
+                if ($entryIsLocalization && ! $field->isLocalizable()) {
+                    continue;
+                }
                 $value = $entry->get($handle);
 
                 if (is_string($value) && ! empty($value)) {
@@ -452,6 +471,61 @@ class EntryIndexer
         $cleanText = trim($text);
         $tokens = $this->keywordExtractor->tokenize($title.' '.$cleanText);
 
+        // Per-entry locale (ISO-639-1) for multisite locale-scoping in the
+        // SuggestionEngine. Null on single-site installs or when the entry's
+        // site has no usable language declaration — the suggest-loop treats
+        // `null === null` as "pass" so single-site users see no behavior
+        // change. Multisite users get cross-locale suggestion leakage cut
+        // off at the source-vs-target equality check.
+        //
+        // Source = `$site->lang()`, not `shortLocale()`. Statamic's own
+        // consumer code (Localize middleware, Carbon, slug-gen, Entry::title
+        // localization) reads `lang()` because the user can declare an
+        // explicit `lang:` in sites.yaml that differs from `locale:` —
+        // canonical case is a Swiss-DE site with `locale: en_US` (PHP date
+        // formatting in English) + `lang: de` (German content). Reading
+        // `shortLocale()` directly would bypass that override and stem the
+        // German content with the English stemmer. `lang()` itself falls
+        // back to `shortLocale()` when no override is set, so the single-
+        // site path is unaffected.
+        $locale = null;
+        try {
+            $site = $entry->site();
+            if ($site !== null) {
+                $locale = LanguageRegistry::resolveFor((string) ($site->lang() ?? ''));
+            }
+        } catch (\Throwable) {
+            // Entry has no site (e.g. malformed fixture) — leave locale null.
+        }
+
+        // PR #102 audit A1 — `localizable: false` on title field. When the
+        // blueprint declares title non-localizable AND the entry has an
+        // origin, `$entry->title()` returns the inherited Origin title (i.e.
+        // foreign-language text). Indexing it as this entry's title and
+        // stemming with this entry's locale would re-introduce the PR #100
+        // cross-language bug, just blueprint-driven. We stamp `titleLocale`
+        // from the Origin's site so the SuggestionEngine title-paths stem
+        // the title with its actual language while body paths keep this
+        // entry's locale. Default = locale (same value) on localizable or
+        // origin-self entries. Soft-fail on any blueprint/origin lookup
+        // throwable — fall back to locale (safe default = legacy behavior).
+        $titleLocale = $locale;
+        try {
+            $titleField = $entry->blueprint()?->field('title');
+            $isTitleLocalizable = $titleField === null || $titleField->isLocalizable();
+            if (! $isTitleLocalizable) {
+                $origin = $entry->origin();
+                if ($origin !== null && $origin->id() !== $entry->id()) {
+                    $originSite = $origin->site();
+                    if ($originSite !== null) {
+                        $titleLocale = LanguageRegistry::resolveFor((string) ($originSite->lang() ?? '')) ?? $locale;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // Blueprint or origin unreadable — stick with the entry locale.
+        }
+
         return new EntryRecord(
             id: $entry->id(),
             title: $title,
@@ -466,6 +540,8 @@ class EntryIndexer
             // unique each Bard subtree), $linkOccurrences is collected in
             // parallel from the *WithOccurrences helpers.
             outboundLinkOccurrences: array_values($linkOccurrences),
+            locale: $locale,
+            titleLocale: $titleLocale,
         );
     }
 
@@ -614,7 +690,7 @@ class EntryIndexer
      *
      * @return array{bard: array}
      */
-    protected function extractBardContent(Entry $entry): array
+    protected function extractBardContent(Entry $entry, bool $entryIsLocalization = false): array
     {
         $bardContents = [];
 
@@ -627,6 +703,15 @@ class EntryIndexer
         }
 
         foreach ($fields as $handle => $field) {
+            // PR #102 audit A2 — skip non-localizable bard / replicator
+            // fields on a localization. Their value is the inherited
+            // foreign-language body which would mis-stem with the
+            // entry-locale stemmer. Only the writable / overridable fields
+            // contribute to this entry's index footprint.
+            if ($entryIsLocalization && ! $field->isLocalizable()) {
+                continue;
+            }
+
             $value = $entry->value($handle);
 
             if (! is_array($value) || empty($value)) {

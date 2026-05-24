@@ -39,6 +39,15 @@ class EntryRecordTest extends TestCase
             // was constructed without explicit tokens — indexEntry() fills
             // them on every Scan Content.
             'tokens' => [],
+            // ISO-639-1 content language. Null when constructed without it
+            // or on single-site installs — the SuggestionEngine treats
+            // null === null as "pass" so legacy / single-site behavior is
+            // unchanged.
+            'locale' => null,
+            // Title-locale (PR #102 audit A1). Null when title is
+            // localizable or no localization-origin exists; otherwise the
+            // Origin-site's ISO-639-1 code.
+            'title_locale' => null,
         ], $record->toArray());
     }
 

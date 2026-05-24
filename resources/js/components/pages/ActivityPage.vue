@@ -182,6 +182,7 @@
                                 <tr v-for="e in sortedDetailEntries" :key="e.id">
                                     <td>
                                         <a v-if="e.edit_url" :href="e.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ e.title }}</a>
+                                        <span v-else-if="e.is_deleted" class="text-gray-400 italic" :title="e.id">{{ e.title }} <span class="text-[10px] uppercase tracking-wider text-red-500/70 dark:text-red-400/70 ml-1">deleted</span></span>
                                         <span v-else>{{ e.title }}</span>
                                         <span v-if="e.collection" class="ml-2 text-xs text-gray-400">{{ e.collection }}</span>
                                     </td>
