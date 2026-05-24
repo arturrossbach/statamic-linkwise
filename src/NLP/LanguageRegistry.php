@@ -91,6 +91,71 @@ class LanguageRegistry
      */
     public const DEFAULT_LANG = 'en';
 
+    /**
+     * Coordination conjunctions per language. Used by the SuggestionEngine's
+     * stem-cluster + RAKE fallback paths to reject anchors that bridge two
+     * independent concepts (PR #100 saga). These are NOT a substitute for
+     * the locale's regular stopword list — they're a curated subset known
+     * to surface in 2-content-word + coordinator Müll-anchors like
+     * "performance and optimization" / "performance et optimisation".
+     *
+     * Lower-cased ASCII for direct `in_array` comparison after
+     * mb_strtolower of candidate text. Multibyte characters (Russian
+     * "и", Catalan "però", Romanian "și") are kept in their canonical
+     * lowercase form — match is mb-aware at the call-site.
+     *
+     * Only the 14 CONFIDENT-tier languages are populated. LIMITED-tier
+     * sites still get the EN+DE shared fallback (see resolveCoordinators)
+     * so a Turkish or Polish site without an explicit per-lang list is
+     * no worse off than before this constant existed.
+     *
+     * Sources: Wikipedia's "coordinating conjunction" articles per language
+     * + native-speaker grammar references. Conservative inclusion — only
+     * the unambiguously-coordinating forms (no semi-disjunctive particles).
+     */
+    public const COORDINATORS_BY_LANG = [
+        // "for" is a FANBOYS coordinator in formal English grammar but in
+        // practice serves overwhelmingly as a bridge preposition ("best
+        // practices for production"). Including it as a coordinator would
+        // reject legitimate bridge-anchors. Existing pin
+        // SuggestionEngineStemClusterCoordTest::test_two_content_with_for_preposition_is_kept
+        // codifies the call.
+        'en' => ['and', 'or', 'but', 'nor', 'yet', 'so'],
+        'de' => ['und', 'oder', 'aber', 'sondern', 'doch', 'sowie'],
+        'fr' => ['et', 'ou', 'mais', 'ni', 'donc', 'car', 'or'],
+        'es' => ['y', 'e', 'o', 'u', 'pero', 'sino', 'mas', 'ni'],
+        'it' => ['e', 'ed', 'o', 'od', 'ma', 'però', 'oppure', 'né'],
+        'nl' => ['en', 'of', 'maar', 'dus', 'want', 'noch', 'doch'],
+        'pt' => ['e', 'ou', 'mas', 'porém', 'contudo', 'todavia', 'nem'],
+        'sv' => ['och', 'eller', 'men', 'utan', 'så', 'samt'],
+        'da' => ['og', 'eller', 'men', 'så', 'samt', 'thi'],
+        'no' => ['og', 'eller', 'men', 'så', 'samt'],
+        'fi' => ['ja', 'mutta', 'vai', 'tai', 'sekä', 'eli'],
+        'ro' => ['și', 'sau', 'dar', 'însă', 'ci', 'ori', 'iar'],
+        'ru' => ['и', 'или', 'но', 'а', 'да', 'либо', 'однако'],
+        'ca' => ['i', 'o', 'però', 'sinó', 'ni'],
+    ];
+
+    /**
+     * Shared EN+DE fallback for languages without a dedicated coordinator
+     * list. Mirrors the pre-PR-#102 hardcoded list — non-CONFIDENT-tier
+     * sites keep the protection they had before. Returns lowercase ASCII
+     * unless the locale-specific list itself uses multibyte forms.
+     *
+     * @return list<string>
+     */
+    public static function coordinatorsFor(?string $locale): array
+    {
+        if ($locale !== null && isset(self::COORDINATORS_BY_LANG[$locale])) {
+            return self::COORDINATORS_BY_LANG[$locale];
+        }
+        // Fallback = EN+DE union (the pre-PR-#102 hardcoded set).
+        return array_values(array_unique(array_merge(
+            self::COORDINATORS_BY_LANG['en'],
+            self::COORDINATORS_BY_LANG['de'],
+        )));
+    }
+
     /** @return self::TIER_* */
     public static function tier(string $code): string
     {

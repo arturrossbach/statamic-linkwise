@@ -187,6 +187,45 @@ class SuggestionEngineLocaleScopingTest extends TestCase
         $this->assertContains('und', $enTokens, '"und" must survive the English stopword list.');
     }
 
+    public function test_french_coordinator_does_not_bridge_anchor(): void
+    {
+        // PR #102 audit E2 — FR site, FR title with stem-cluster + "et" gap
+        // in source content. Pre-E2 the coordinator list was EN+DE only, so
+        // "et" passed as a content word and produced "performance et
+        // optimisation" Müll. With per-locale coordinators, "et" is rejected.
+        $index = [
+            'src' => $this->record('src', 'Source Article', 'fr'),
+            'tgt' => $this->record('tgt', 'Performance Réglage Optimisation', 'fr'),
+        ];
+        $results = $this->engine->suggest(
+            'Nous avons besoin de optimisation et performance pour le site.',
+            $index,
+            'src',
+        );
+
+        $anchors = array_map(fn ($r) => $r->anchorText, $results);
+        $bridged = array_filter($anchors, fn ($a) => str_contains(mb_strtolower($a), ' et '));
+        $this->assertEmpty($bridged, 'No FR anchor may bridge via "et": '.implode(' | ', $anchors));
+    }
+
+    public function test_spanish_coordinator_does_not_bridge_anchor(): void
+    {
+        // PR #102 audit E2 — ES site, ES title with stem-cluster + "y" gap.
+        $index = [
+            'src' => $this->record('src', 'Source Article', 'es'),
+            'tgt' => $this->record('tgt', 'Rendimiento Ajuste Optimización', 'es'),
+        ];
+        $results = $this->engine->suggest(
+            'Necesitamos optimización y rendimiento para el sitio.',
+            $index,
+            'src',
+        );
+
+        $anchors = array_map(fn ($r) => $r->anchorText, $results);
+        $bridged = array_filter($anchors, fn ($a) => str_contains(mb_strtolower($a), ' y '));
+        $this->assertEmpty($bridged, 'No ES anchor may bridge via "y": '.implode(' | ', $anchors));
+    }
+
     public function test_tokenize_with_mapping_for_null_locale_delegates_to_global(): void
     {
         // Backwards-compat path: null locale must produce the same output
