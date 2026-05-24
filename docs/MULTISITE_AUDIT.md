@@ -1,6 +1,26 @@
 # Multisite / Multilanguage Audit
 
-Status: DRAFT — Lese-Vorlage für Track-Triage. Keine Vor-Entscheidungen, keine Severity-Tags. Jeder Punkt: **HEUTE** (Ist-Zustand im Code) — **SOLL** (was korrektes Verhalten wäre) — **MINIMUM** (kleinste Code-Änderung die dorthin führt).
+Status: DRAFT — Lese-Vorlage für Track-Triage. Keine Vor-Entscheidungen, keine Severity-Tags. Jeder Punkt: **HEUTE** (Ist-Zustand im Code) — **SOLL** (was korrektes Verhalten wäre) — **MINIMUM** (kleinste Code-Änderung die dorthin führt) — **KOSTEN** (wenn relevant: Performance- oder Touch-Surface-Implikationen).
+
+## Verhältnis zu PR #101
+
+PR #101 (`feat/multilanguage-locale-scoping`) ist NICHT die vollständige Multisite-Story. Es liefert:
+- ✅ Per-Entry-Locale-Stamping via `$site->lang()` (B1)
+- ✅ Source-Locale-Filter im suggest()-Loop
+- ✅ Per-Source-Locale Stemmer in `tokenizeWithMappingFor` (Hot-Path)
+- ✅ Per-Target-Locale Stemmer in `findUnorderedStemMatch` (D2) + `findTitleCompoundMatches` (D3) + Stage-1-Prefilter (D4)
+- ✅ Backward-Compat für Single-Site (null-locale = pass)
+
+Das Audit identifiziert mindestens diese Lücken IN PR #101 SELBST:
+- ⚠️ **D1** — `findMatches` / `generateMatchPhrases` (Tier-1 Title-Phrase-Match) bleibt global-stopword-gesteuert
+- ⚠️ **E3** — `trimBoundaryStopwords` (Anchor-Trim) liest globalen Stopword-Set
+- ⚠️ **E2** — Coordinator-Stopwords hardcoded EN+DE (12 andere CONFIDENT-Sprachen leer)
+- ⚠️ **A1/A2** — `localizable`-Flag wird nicht respektiert
+- ⚠️ **C1** — Half-Migrated-Index-Pfad (Banner/Auto-Reindex offen)
+
+PR #101 ist also **partial**. Entweder das ist eine bewusste Entscheidung (Partial-Ship + Follow-up-Track) oder PR #101 wird zurückgehalten bis die Critical-Lücken mit drin sind. User-Decision.
+
+---
 
 Code-Stand: Branch `feat/multilanguage-locale-scoping` (PR #101) + dieser Branch. Verifiziert per Source-Read (kein Mutmaßen).
 
@@ -14,11 +34,13 @@ Anmerkung: Ein Item ohne SOLL ist eines wo ich nicht weiß, was korrekt ist — 
 **HEUTE:** `EntryIndexer::indexEntry()` liest `$entry->get('title') ?? $entry->title()` ohne den Blueprint-Flag `localizable` zu prüfen. Wenn der Title NICHT localizable ist, gibt Statamic den Origin-Title zurück (englisch bei EN-Origin). Linkwise indexiert ihn als Title des DE-Entries und stempelt `locale='de'`. SuggestionEngine stemt diesen englischen Title mit dem deutschen Stemmer → PR-#100-Bug-Muster wieder reaktiviert, nur Blueprint-getrieben statt Config-getrieben.
 **SOLL:** Wenn das title-Field `localizable: false` ist UND der Entry eine Localization ist (`$entry->origin()` nicht null), entweder (i) den Title nicht in den Stem-Index aufnehmen, (ii) den Title-Stemmer auf Origin-Locale wechseln, oder (iii) das Indexing pro Field-Source verzweigen.
 **MINIMUM:** Pro-Field-Branch in `indexEntry()`. Erfordert `$entry->blueprint()->field('title')?->isLocalizable()`-Check + Origin-Resolution. Komplexität: mittel. Touch-Surface: nur Indexer.
+**KOSTEN:** Aktuell ruft Indexer `$entry->blueprint()` einmal pro Entry (siehe `extractBardContent` Z. 622). Mit A1/A2 würden zusätzliche Field-Resolves dazukommen (pro relevantem Feld ein `field($handle)?->isLocalizable()`-Lookup). Auf 5000 Entries × 3-5 Felder = 15-25k zusätzliche Method-Calls pro Scan Content. Statamic-Blueprints sind im Stache gecached → vermutlich unproblematisch, aber nicht gemessen.
 
 ### A2 — Body / Content-Localizable nicht respektiert
 **HEUTE:** Selbe Mechanik wie A1, aber für Bard/Markdown-Body-Felder. Body ist im seed-Fieldset `localizable: true`, aber das ist nicht garantiert. Ein User mit `localizable: false` am Body bekommt fremdsprachigen Body in DE-Localization und Linkwise stemt mit DE-Stemmer.
 **SOLL:** Same as A1, pro Body-Field.
 **MINIMUM:** Ist-feld-localizable-Check als Schleife über Body-Felder in `extractBardContent()`. Wenn nicht localizable + Origin existiert → skip oder Origin-Locale verwenden.
+**KOSTEN:** Wie A1. Field-Lookups pro Body-Field. Replicator-walk macht's tiefer (Sub-Sets haben eigene Blueprints — N×M Lookups), aber Stache-Cache mitigiert.
 
 ### A3 — Stem-Index aus gemischten Locales pro Entry
 **HEUTE:** Wenn A1 + A2 gelten (Title EN, Body DE auf einer DE-Localization), wird ein einziger `tokens[]`-Array mit zwei Sprachen produziert. Globaler Stemmer dazwischen. Drift.
@@ -307,7 +329,7 @@ Beschrieben.
 4. **F1:** Auto-Link Rules — Per-Site-Filter im Datenshape ergänzen, oder dokumentieren als bekannte Limitation?
 5. **G1:** Custom-Keywords-Vererbung — implementieren oder dokumentieren?
 6. **H1:** Excluded-Entries-Origin-Group — breaking change riskieren?
-7. **L1:** Cross-Locale-Audit-Pin — definitiv ja, sehe ich keine Contra-Argumente.
+7. **L1:** Cross-Locale-Audit-Pin als separate Group — sinnvoll oder Overkill weil Filter sich-selbst-testet-via-suggest()-Aufruf?
 8. **N1:** `select_across_sites` — respekten oder dokumentieren?
 9. **N2:** Auto-Reindex bei Multisite-Switch — Event-Listener oder Banner?
 
