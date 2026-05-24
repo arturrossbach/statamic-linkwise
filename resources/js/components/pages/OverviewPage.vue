@@ -37,6 +37,7 @@
             :index-last-built-at="indexLastBuiltAt"
             :domains-count="domainsCount"
             :resolved-language="resolvedLanguage"
+            :locale-breakdown="localeBreakdown"
             @navigate="navigateToTab"
         />
     </LinkwiseLayout>
@@ -60,6 +61,7 @@ export default {
         domainsCount: { type: Number, default: null },
         resolvedLanguage: { type: Object, default: null },
         multisiteReindexNeeded: { type: Boolean, default: false },
+        localeBreakdown: { type: Object, default: () => ({}) },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },

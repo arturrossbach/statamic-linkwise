@@ -89,6 +89,21 @@
                     <div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Entries Indexed</div>
                         <div class="text-2xl font-bold mt-1 text-gray-900 dark:text-gray-100">{{ summary.total_entries }}</div>
+                        <!-- V1.2 Cross-Tab-C — per-locale breakdown chips.
+                             Only renders when the controller emitted a
+                             non-empty `localeBreakdown` (multisite + ≥2
+                             distinct locales in the index). Single-site
+                             stays visually unchanged. -->
+                        <div v-if="hasLocaleBreakdown" class="mt-1.5 flex flex-wrap items-center gap-1">
+                            <span
+                                v-for="(count, code) in localeBreakdown"
+                                :key="code"
+                                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                            >
+                                <span class="font-semibold text-gray-700 dark:text-gray-300">{{ count }}</span>
+                                <span>{{ code }}</span>
+                            </span>
+                        </div>
                     </div>
                     <div class="flex items-center gap-1">
                         <HelpIcon tooltip="Total entries tracked by Linkwise. Click to open the Links Report." />
@@ -339,9 +354,20 @@ export default {
         // actually using, especially when the user left the language
         // setting empty and Linkwise auto-detected from Statamic's locale.
         resolvedLanguage: { type: Object, default: null },
+        // V1.2 Cross-Tab-C — locale → count map. Empty/missing on single-
+        // site installs (the controller returns [] when the index has
+        // fewer than 2 distinct locales). Sorted by locale-code at the
+        // controller layer; frontend respects iteration order.
+        localeBreakdown: { type: Object, default: () => ({}) },
     },
 
     emits: ['navigate'],
+
+    computed: {
+        hasLocaleBreakdown() {
+            return this.localeBreakdown && Object.keys(this.localeBreakdown).length > 0;
+        },
+    },
 
     data() {
         return {

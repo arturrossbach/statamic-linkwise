@@ -88,6 +88,22 @@ class InertiaPagesController extends CpController
 
         $resolvedLanguage = \Arturrossbach\Linkwise\NLP\LanguageRegistry::resolveWithSource();
 
+        // V1.2 Cross-Tab-C — per-locale entry breakdown for the Overview's
+        // headline stats card. Frontend renders "165 EN · 10 DE · 10 NL"
+        // chips under the total. Empty + single-locale indices return an
+        // empty breakdown so the chips don't render (single-site stays
+        // visually identical to pre-V1.2).
+        $localeBreakdown = [];
+        foreach ($records as $r) {
+            if ($r->locale === null) continue;
+            $localeBreakdown[$r->locale] = ($localeBreakdown[$r->locale] ?? 0) + 1;
+        }
+        if (count($localeBreakdown) < 2) {
+            $localeBreakdown = [];
+        } else {
+            ksort($localeBreakdown);
+        }
+
         // PR #102 audit C1 — flag a "Re-Run Scan Content" banner on the
         // Overview when the install is multisite-enabled AND any record in
         // the persisted index lacks a locale stamp. That combination means
@@ -123,6 +139,7 @@ class InertiaPagesController extends CpController
                 'source_detail' => $resolvedLanguage['source_detail'],
             ],
             'multisiteReindexNeeded' => $multisiteReindexNeeded,
+            'localeBreakdown' => $localeBreakdown,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
