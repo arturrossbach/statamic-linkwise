@@ -114,9 +114,10 @@ class TextNormalizer
      *
      * @param  string[]  $words
      */
-    public static function stripLeadingStopwords(array $words): string
+    public static function stripLeadingStopwords(array $words, ?string $locale = null): string
     {
-        while (! empty($words) && static::isStopword($words[0])) {
+        $stopwords = static::resolveStopwordSet($locale);
+        while (! empty($words) && static::isStopwordIn($words[0], $stopwords)) {
             array_shift($words);
         }
 
@@ -138,8 +139,9 @@ class TextNormalizer
      *
      * @return array{0: string, 1: int}  [trimmedText, leadingShiftChars]
      */
-    public static function trimBoundaryStopwords(string $anchor): array
+    public static function trimBoundaryStopwords(string $anchor, ?string $locale = null): array
     {
+        $stopwordSet = static::resolveStopwordSet($locale);
         // Preserve original whitespace/punctuation between words by working
         // on a regex split that captures separators.
         $parts = preg_split('/(\s+)/u', $anchor, -1, PREG_SPLIT_DELIM_CAPTURE);
@@ -166,13 +168,13 @@ class TextNormalizer
         // punctuation stripped before the check).
         $first = 0;
         while ($first < count($wordIndexes)
-            && static::isStopword($stripPunct($parts[$wordIndexes[$first]]))) {
+            && static::isStopwordIn($stripPunct($parts[$wordIndexes[$first]]), $stopwordSet)) {
             $first++;
         }
         // Walk backward, drop while trailing word is a stopword.
         $last = count($wordIndexes) - 1;
         while ($last >= $first
-            && static::isStopword($stripPunct($parts[$wordIndexes[$last]]))) {
+            && static::isStopwordIn($stripPunct($parts[$wordIndexes[$last]]), $stopwordSet)) {
             $last--;
         }
         // Empty result (every word was a stopword) → keep original. A single
@@ -207,9 +209,10 @@ class TextNormalizer
      *
      * @param  string[]  $words
      */
-    public static function stripTrailingStopwords(array $words): string
+    public static function stripTrailingStopwords(array $words, ?string $locale = null): string
     {
-        while (! empty($words) && static::isStopword(end($words))) {
+        $stopwords = static::resolveStopwordSet($locale);
+        while (! empty($words) && static::isStopwordIn(end($words), $stopwords)) {
             array_pop($words);
         }
 
@@ -225,6 +228,36 @@ class TextNormalizer
     public static function getStopwords(): array
     {
         return Stopwords::forConfig();
+    }
+
+    /**
+     * Build an O(1) lookup set of stopwords for the given locale. PR #102
+     * audit E3/D1: every boundary-trim and phrase-strip path must use the
+     * SAME stopword source as the same-locale-filter in {@see \Arturrossbach\Linkwise\Suggestions\SuggestionEngine}.
+     * Null locale falls back to the global {@see getStopwords()} list so
+     * legacy callers (and single-site installs) keep their current behavior.
+     *
+     * @return array<string, bool>
+     */
+    public static function resolveStopwordSet(?string $locale): array
+    {
+        $words = $locale !== null
+            ? Stopwords::forLanguage($locale)
+            : static::getStopwords();
+
+        return array_flip($words);
+    }
+
+    /**
+     * Locale-aware `isStopword` companion — accepts a pre-built lookup set
+     * (typically from {@see resolveStopwordSet()}) for hot-loop callsites
+     * that would otherwise pay the array-flip cost N times.
+     *
+     * @param  array<string, bool>  $stopwordSet
+     */
+    public static function isStopwordIn(string $word, array $stopwordSet): bool
+    {
+        return isset($stopwordSet[$word]);
     }
 
     /**

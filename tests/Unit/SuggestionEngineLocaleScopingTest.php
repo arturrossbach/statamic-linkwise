@@ -226,6 +226,42 @@ class SuggestionEngineLocaleScopingTest extends TestCase
         $this->assertEmpty($bridged, 'No ES anchor may bridge via "y": '.implode(' | ', $anchors));
     }
 
+    public function test_d1_generate_match_phrases_uses_target_locale_stopwords(): void
+    {
+        // PR #102 audit D1 — generateMatchPhrases routes through
+        // stripLeadingStopwords + stripTrailingStopwords. With a DE title
+        // and DE source, the leading "Die" must be strippable to also
+        // surface "Optimierung der Datenbank" as a candidate phrase.
+        // Without per-locale routing, the EN-default install would leave
+        // the "Die" in and miss the phrase variant.
+        $engine = $this->engine;
+        $phrases = $engine->generateMatchPhrases('Die Optimierung der Datenbank', 'de');
+
+        $this->assertContains('die optimierung der datenbank', array_map('mb_strtolower', $phrases));
+        $stripped = array_filter($phrases, fn ($p) => str_starts_with(mb_strtolower($p), 'optimierung'));
+        $this->assertNotEmpty($stripped, 'DE leading "Die" must be strippable: '.implode(' | ', $phrases));
+    }
+
+    public function test_e3_trim_boundary_stopwords_uses_target_locale(): void
+    {
+        // PR #102 audit E3 — trimBoundaryStopwords with DE locale trims a
+        // DE-leading stopword that EN-stopwords would have left in.
+        [$trimmed, $shift] = TextNormalizer::trimBoundaryStopwords('die Datenbank Optimierung', 'de');
+
+        $this->assertSame('Datenbank Optimierung', $trimmed);
+        $this->assertSame(4, $shift, '4-char shift = "die "');
+    }
+
+    public function test_e3_trim_boundary_stopwords_null_locale_falls_back_to_global(): void
+    {
+        // Single-site / legacy path: null locale → global stopword list.
+        // Identical output to no-arg call.
+        $a = TextNormalizer::trimBoundaryStopwords('the database optimization');
+        $b = TextNormalizer::trimBoundaryStopwords('the database optimization', null);
+
+        $this->assertSame($a, $b);
+    }
+
     public function test_tokenize_with_mapping_for_null_locale_delegates_to_global(): void
     {
         // Backwards-compat path: null locale must produce the same output
