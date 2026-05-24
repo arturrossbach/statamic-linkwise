@@ -4,6 +4,7 @@ namespace Arturrossbach\Linkwise\Suggestions;
 
 use Arturrossbach\Linkwise\Indexer\EntryRecord;
 use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
+use Arturrossbach\Linkwise\NLP\LanguageRegistry;
 use Arturrossbach\Linkwise\NLP\Stemmer;
 use Arturrossbach\Linkwise\Support\TextNormalizer;
 use Arturrossbach\Linkwise\NLP\Stopwords;
@@ -703,8 +704,10 @@ class SuggestionEngine
             array_keys($matchingKeywords),
         );
 
-        // Find the best anchor using original (unstemmed) words in the original text
-        $anchorText = $this->findBestAnchor($originalText, $bestOriginalWord, $originalMatchingWords);
+        // Find the best anchor using original (unstemmed) words in the original text.
+        // Per-target-locale coordinator-set: same-locale filter in suggest() guarantees
+        // source and target share this locale (or both null = legacy/single-site).
+        $anchorText = $this->findBestAnchor($originalText, $bestOriginalWord, $originalMatchingWords, $record->locale);
 
         // Find position of anchor in original text
         $pattern = '/\b'.preg_quote($anchorText, '/').'\b/iu';
@@ -760,16 +763,18 @@ class SuggestionEngine
      * Strategy: (1) adjacent keyword pair, (2) keyword + neighbor word from text.
      * Minimum 2 words to ensure meaningful anchor text.
      */
-    protected function findBestAnchor(string $text, string $primaryKeyword, array $matchingKeywords): string
+    protected function findBestAnchor(string $text, string $primaryKeyword, array $matchingKeywords, ?string $locale = null): string
     {
         // Coordinator stopwords that MUST NOT bridge two keywords —
         // produces user-visible Müll like "performance and tuning".
         // Bridge prepositions (von/of/for/in/…) are fine. See
         // SuggestionEngineStemClusterCoordTest for the rationale.
-        static $coordinatorStopwords = [
-            'and', 'or', 'but', 'nor', 'yet', 'so',
-            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
-        ];
+        //
+        // Per-locale list since PR #102 audit (E2): FR/ES/IT/NL/PT/SV/DA/
+        // NO/FI/RO/RU/CA also need coordinator protection. Null locale
+        // falls back to the EN+DE union for legacy / single-site /
+        // unknown-language sites — same protection as before the audit.
+        $coordinatorStopwords = LanguageRegistry::coordinatorsFor($locale);
 
         // Strategy 1: Try to find two matching keywords near each other (0-1 word gap)
         foreach ($matchingKeywords as $otherKeyword) {
@@ -857,21 +862,15 @@ class SuggestionEngine
         $normalizedTitle = TextNormalizer::normalize($record->title);
         $titleWords = explode(' ', $normalizedTitle);
 
-        // Coordinator stopwords filtered language-agnostically. When a site's
-        // active stemmer-language disagrees with the content language (German
-        // language setting + English article titles like "Analytics and
-        // Measuring Content Performance"), isStopword("and") returns false
-        // because "and" is not in the German list — but the coordinator
-        // semantic ("and" as splitter between two independent concepts) is
-        // universal. Without this explicit list, the stem-cluster path
-        // accepted "and" as a title content word and produced "and
-        // performance" / "performance and" / "Content quality and" anchors.
-        // User-bug 2026-05-23, Cloudways smoke with language=de site +
-        // English seed articles.
-        static $coordinatorStopwords = [
-            'and', 'or', 'but', 'nor', 'yet', 'so',
-            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
-        ];
+        // Per-target-locale coordinator-set. PR #100 introduced this as a
+        // hardcoded EN+DE list (the language-agnostic guard against the
+        // "performance and optimization" Müll shape from the Cloudways smoke
+        // 2026-05-23). PR #102 audit E2 expanded the list to all 14
+        // CONFIDENT-tier languages because FR/ES/IT/NL/PT/SV/DA/NO/FI/RO/RU/CA
+        // sites can produce the same Müll with their own coordinators
+        // (et/y/e/en/och/og/ja/și/и/i). Null locale falls back to EN+DE
+        // union — same protection legacy/single-site users already had.
+        $coordinatorStopwords = LanguageRegistry::coordinatorsFor($record->locale);
         // Get content words from title (skip stopwords + coordinators).
         $titleContentWords = array_filter($titleWords, fn ($w) => $w !== ''
             && ! TextNormalizer::isStopword($w)
@@ -997,16 +996,10 @@ class SuggestionEngine
         $bestFirst = $bestFirst + $anchorShift;
         $spanLength = mb_strlen($anchorText);
 
-        // Additional language-agnostic boundary trim for coordinator
-        // conjunctions ("and", "und", "or", "oder", …) that are NOT in
-        // the active language's stopword list. Site-language=de + English
-        // article titles leaves "and" unfiltered above; this second pass
-        // strips boundary "and" / "or" regardless of language. User-bug
-        // 2026-05-23 (Cloudways smoke with DE setting + EN seed data).
-        static $coordBoundaryWords = [
-            'and', 'or', 'but', 'nor', 'yet', 'so',
-            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
-        ];
+        // Per-target-locale boundary trim for coordinator conjunctions
+        // ("and", "und", "et", "y", …) that are not in the active stopword
+        // list. PR #102 audit E2: was hardcoded EN+DE only.
+        $coordBoundaryWords = LanguageRegistry::coordinatorsFor($record->locale);
         $stripCoordPunct = fn (string $w): string => preg_replace('/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u', '', mb_strtolower($w));
         // Loop to peel multiple stacked coordinators if the cluster ever
         // surfaces something like "and or X".
@@ -1068,13 +1061,9 @@ class SuggestionEngine
         // "von" is the linking preposition between two title content
         // words. Coordinators do the opposite: they split.
         //
-        // Stopword list is the union of common English + German
-        // coordinators. POS-tagging would be cleaner but adds a heavy
-        // dependency we deliberately avoid in V1.
-        static $coordinationStopwords = [
-            'and', 'or', 'but', 'nor', 'yet', 'so',
-            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
-        ];
+        // Per-target-locale list (PR #102 audit E2). POS-tagging would be
+        // cleaner but adds a heavy dependency we deliberately avoid in V1.
+        $coordinationStopwords = LanguageRegistry::coordinatorsFor($record->locale);
         $clusterWords = preg_split('/\s+/', trim($anchorText));
         $clusterWords = array_values(array_filter($clusterWords, fn ($w) => $w !== ''));
         $contentCount = 0;
