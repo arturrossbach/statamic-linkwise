@@ -450,6 +450,7 @@ class SuggestionEngine
                         contextTruncatedEnd: $context['truncated_end'],
                         matchType: 'title',
                         matchReason: "The title phrase \"{$phrase}\" was found directly in the text.",
+                        targetLocale: $record->locale,
                     );
                 }
                 break; // Best phrase matched — don't try shorter phrases
@@ -566,6 +567,7 @@ class SuggestionEngine
                     contextTruncatedEnd: $context['truncated_end'],
                     matchType: 'title-compound',
                     matchReason: "The title compound \"{$compound}\" was found directly in the text.",
+                    targetLocale: $record->locale,
                 );
             }
         }
@@ -658,6 +660,7 @@ class SuggestionEngine
                         contextTruncatedEnd: $context['truncated_end'],
                         matchType: 'custom',
                         matchReason: "Matches the custom target keyword \"{$keyword}\" that was set for this entry.",
+                        targetLocale: $record->locale,
                     );
                 }
             }
@@ -773,6 +776,7 @@ class SuggestionEngine
             contextTruncatedEnd: $context['truncated_end'],
             matchType: 'keyword',
             matchReason: 'This entry and "'.mb_substr($record->title, 0, 40).'" share similar topics: '.implode(', ', array_slice($originalMatchingWords, 0, 5)).'.',
+            targetLocale: $record->locale,
         );
     }
 
@@ -1177,6 +1181,7 @@ class SuggestionEngine
                 foreach ($titleStems as $ts) { if ($ts['stem'] === $stem) return $ts['original']; }
                 return $stem;
             }, array_values($foundStems)), 0, 5)).'.',
+            targetLocale: $record->locale,
         );
     }
 
@@ -1418,6 +1423,7 @@ class SuggestionEngine
             contextTruncatedEnd: $suggestion->contextTruncatedEnd,
             matchType: $suggestion->matchType,
             matchReason: $suggestion->matchReason.($matchCount > 0 ? " Additionally, {$matchCount} custom target keyword(s) matched." : ''),
+            targetLocale: $suggestion->targetLocale,
         );
     }
 

@@ -108,6 +108,7 @@ class InboundEngine
                     contextTruncatedEnd: $suggestion->contextTruncatedEnd,
                     matchType: $suggestion->matchType,
                     matchReason: $suggestion->matchReason,
+                    sourceLocale: $sourceRecord->locale,
                 );
             }
 
@@ -290,6 +291,7 @@ class InboundEngine
                 contextTruncatedEnd: $context['truncated_end'] ?? false,
                 matchType: 'custom',
                 matchReason: "Matches the custom target keyword \"{$keyword}\" that was set for this entry.",
+                sourceLocale: $sourceRecord->locale,
             );
 
             break; // One match per source entry is enough

@@ -207,6 +207,8 @@
                                 <td>
                                     <a v-if="s.source_edit_url" :href="s.source_edit_url" target="_blank" class="font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">{{ s.source_title }}</a>
                                     <span v-else class="font-medium text-gray-900 dark:text-gray-100">{{ s.source_title }}</span>
+                                    <!-- V1.2 Cross-Tab-E — source locale badge. Hides on null/empty. -->
+                                    <span v-if="s.source_locale" class="ml-1 inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ s.source_locale }}</span>
                                     <div class="text-xs text-gray-400">{{ s.source_collection }}</div>
                                     <div v-if="s._status === 'failed' && s._error" class="text-xs text-red-500 mt-1">{{ s._error }}</div>
                                 </td>
@@ -328,6 +330,8 @@
                                         <div class="flex items-center gap-1">
                                             <a v-if="selectedTarget(group)?.target_edit_url" :href="selectedTarget(group).target_edit_url" target="_blank" class="text-xs font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">{{ selectedTarget(group)?.target_title }}</a>
                                             <span v-else class="text-xs font-medium text-gray-900 dark:text-gray-100">{{ selectedTarget(group)?.target_title }}</span>
+                                            <!-- V1.2 Cross-Tab-E — target locale badge. -->
+                                            <span v-if="selectedTarget(group)?.target_locale" class="inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ selectedTarget(group)?.target_locale }}</span>
                                             <button
                                                 v-if="group.targets.length > 1 && group._status === 'pending'"
                                                 @click="group._expanded = !group._expanded"
