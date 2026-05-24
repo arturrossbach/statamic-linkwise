@@ -45,7 +45,7 @@ class SuggestionEngineLocaleScopingTest extends TestCase
         $this->engine = new SuggestionEngine;
     }
 
-    protected function record(string $id, string $title, ?string $locale, string $text = ''): EntryRecord
+    protected function record(string $id, string $title, ?string $locale, string $text = '', ?string $titleLocale = null): EntryRecord
     {
         return new EntryRecord(
             id: $id,
@@ -55,6 +55,7 @@ class SuggestionEngineLocaleScopingTest extends TestCase
             text: $text,
             outboundLinks: [],
             locale: $locale,
+            titleLocale: $titleLocale ?? $locale,
         );
     }
 
@@ -224,6 +225,43 @@ class SuggestionEngineLocaleScopingTest extends TestCase
         $anchors = array_map(fn ($r) => $r->anchorText, $results);
         $bridged = array_filter($anchors, fn ($a) => str_contains(mb_strtolower($a), ' y '));
         $this->assertEmpty($bridged, 'No ES anchor may bridge via "y": '.implode(' | ', $anchors));
+    }
+
+    public function test_a1_title_localizable_false_uses_origin_locale_for_stemming(): void
+    {
+        // PR #102 audit A1 — DE-localization of an EN-origin with
+        // `localizable: false` on title. The inherited English title is
+        // stemmed with EN-stemmer (via titleLocale), not DE-stemmer.
+        // Without A1, the DE-source's "und" coordinator would be filtered
+        // by the GERMAN coordinator-list (correct) but the title stems
+        // would be produced by the German stemmer applied to English text
+        // (PR #100 root cause). With A1: title-paths use the title's
+        // actual language, body-filter still passes (locale match).
+        //
+        // Smoke: same call signature, different titleLocale, different
+        // engine behavior on title-stem generation. We assert the engine
+        // doesn't crash and produces ZERO Müll anchors (the EN title
+        // wouldn't produce real German stems even by accident).
+        $index = [
+            'src' => $this->record('src', 'Deutscher Quelltitel', 'de'),
+            'tgt' => $this->record('tgt', 'Analytics and Measuring Content', 'de', titleLocale: 'en'),
+        ];
+        $results = $this->engine->suggest(
+            'Wir messen Analytics und Performance über externe Tools.',
+            $index,
+            'src',
+        );
+
+        // The English title stemmed with the EN-stemmer produces stems like
+        // "analyt"/"measur"/"content" which don't match the DE-stemmed
+        // source ("messen"→"mess", "Performance"→"performanc", "Tools"→
+        // "tool"). Either zero suggestions or — if a happy-accident match
+        // surfaces — no anchor may carry an interior "und" coordinator
+        // (since that would mean the title stems WERE German, i.e. the
+        // bug we're guarding against).
+        $anchors = array_map(fn ($r) => $r->anchorText, $results);
+        $bridged = array_filter($anchors, fn ($a) => str_contains(mb_strtolower($a), ' und '));
+        $this->assertEmpty($bridged, 'titleLocale=en must use EN-stemmer on the English title (no "und"-bridged anchor): '.implode(' | ', $anchors));
     }
 
     public function test_d1_generate_match_phrases_uses_target_locale_stopwords(): void

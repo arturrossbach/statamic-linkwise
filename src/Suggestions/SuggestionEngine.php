@@ -368,12 +368,12 @@ class SuggestionEngine
      */
     protected function findMatches(string $normalizedText, string $originalText, EntryRecord $record): array
     {
-        // Tier-1 title-phrase matching. PR #102 audit D1: pass record locale
-        // so the phrase-stripping and stopword-boundary logic uses the same
-        // language as the title — pre-D1 a DE-title in an EN-default install
-        // had its leading "Die" / trailing "und" left in by the EN-stopword-
-        // driven strip, producing low-quality match phrases.
-        $phrases = $this->generateMatchPhrases($record->title, $record->locale);
+        // Tier-1 title-phrase matching. PR #102 audit D1 + A1: pass the
+        // title's locale (which may differ from the entry's locale when
+        // blueprint declares `localizable: false` on title) so the phrase-
+        // stripping and stopword-boundary logic uses the title's actual
+        // language. Falls back to entry locale when titleLocale is null.
+        $phrases = $this->generateMatchPhrases($record->title, $record->titleLocale ?? $record->locale);
         $titleWordCount = count(explode(' ', TextNormalizer::normalize($record->title)));
         $suggestions = [];
 
@@ -420,10 +420,11 @@ class SuggestionEngine
                     // Trim leading/trailing stopwords from the matched span
                     // (e.g. "als gleichberechtigter Bestandteil" → "gleich-
                     // berechtigter Bestandteil"). Middle stopwords stay.
-                    // PR #102 audit E3: target-locale-aware so a DE-title
-                    // anchor in an EN-default install actually trims "die"/
-                    // "als" / etc.
-                    [$trimmed, $shift] = TextNormalizer::trimBoundaryStopwords($anchorText, $record->locale);
+                    // PR #102 audit E3 + A1: title-locale-aware so a DE-
+                    // title anchor in an EN-default install actually trims
+                    // "die"/"als"/etc, and a non-localizable title in a
+                    // DE-localization uses the title's true language.
+                    [$trimmed, $shift] = TextNormalizer::trimBoundaryStopwords($anchorText, $record->titleLocale ?? $record->locale);
                     $anchorText = $trimmed;
                     $position = $this->byteToCharOffset($originalText, $m[1]) + $shift;
                     $context = $this->extractContext($originalText, $position, mb_strlen($anchorText));
@@ -502,9 +503,10 @@ class SuggestionEngine
             return [];
         }
 
-        // Per-target locale stemmer. Same-locale filter in suggest() guarantees
-        // source and target share this locale (or both null = legacy/single-site).
-        $stemmer = new Stemmer($record->locale);
+        // Per-title-locale stemmer (PR #102 audit A1). Falls back to the
+        // entry locale when the title is localizable, so the standard path
+        // is unchanged.
+        $stemmer = new Stemmer($record->titleLocale ?? $record->locale);
         $suggestions = [];
 
         foreach ($compounds as $compound) {
@@ -858,15 +860,15 @@ class SuggestionEngine
      */
     protected function findUnorderedStemMatch(string $originalText, EntryRecord $record, int $titleWordCount): ?Suggestion
     {
-        // Per-target locale stemmer. After the same-locale filter in suggest(),
-        // source and target share this locale (or both null). Fixes the PR
-        // #100 root cause: the stemmer used here was global-resolved, so a DE
-        // site with EN content stemmed English title words like "and" through
-        // the German stemmer and let the coordinator slip into the cluster
-        // span. With per-entry locale, the stemmer matches the title's
-        // language and the coordinator-stopword guard below is now belt-and-
-        // suspenders rather than the load-bearing fix.
-        $stemmer = new Stemmer($record->locale);
+        // Per-target-title-locale stemmer. PR #102 audit A1: the title and
+        // body can live in different languages when the blueprint declares
+        // `localizable: false` on title — a DE-localization of an EN-origin
+        // inherits the English title even though the body is German. Stem
+        // the title with its actual language (titleLocale, set by Indexer);
+        // body-side coordinator-list stays on $record->locale (the body's
+        // language, after the same-locale filter equals source-locale).
+        $titleLocale = $record->titleLocale ?? $record->locale;
+        $stemmer = new Stemmer($titleLocale);
         $normalizedTitle = TextNormalizer::normalize($record->title);
         $titleWords = explode(' ', $normalizedTitle);
 
@@ -999,7 +1001,7 @@ class SuggestionEngine
         // Pre-fix: the stem-fallback path returned raw cluster spans like
         // "and performance" with the boundary stopword intact, even though
         // findMatches consistently trims them. User-bug 2026-05-23.
-        [$trimmedAnchor, $anchorShift] = TextNormalizer::trimBoundaryStopwords($anchorText, $record->locale);
+        [$trimmedAnchor, $anchorShift] = TextNormalizer::trimBoundaryStopwords($anchorText, $titleLocale);
         $anchorText = $trimmedAnchor;
         $bestFirst = $bestFirst + $anchorShift;
         $spanLength = mb_strlen($anchorText);
