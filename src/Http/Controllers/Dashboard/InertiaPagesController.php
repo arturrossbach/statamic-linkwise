@@ -374,8 +374,16 @@ class InertiaPagesController extends CpController
             }
         }
 
+        $isMultisite = false;
+        try {
+            $isMultisite = \Statamic\Facades\Site::multiEnabled();
+        } catch (\Throwable) {
+            // Facade missing in some test contexts — default false.
+        }
+
         return Inertia::render('linkwise::Domains', [
             'domains' => $domainsData,
+            'isMultisite' => $isMultisite,
             'saveUrl' => cp_route('linkwise.save-domain-attribute'),
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),

@@ -37,7 +37,11 @@ class SettingsBlueprintConfigParityTest extends TestCase
      * Today: empty — all 18 visible settings honour the contract.
      */
     private const EXEMPT_HANDLES = [
-        // 'some_handle' => 'Justification: ...',
+        // V1.2 Cross-Tab-F — static HTML info banner. Not a user-configurable
+        // setting, just a sprach-agnostisches-Hinweis-Element with no
+        // backing config-key. The blueprint `html` fieldtype doesn't
+        // persist to YAML either, so the parity test would fail by design.
+        'multisite_note' => 'Static HTML banner, not a config-driven setting',
     ];
 
     public function test_every_blueprint_handle_has_config_default(): void

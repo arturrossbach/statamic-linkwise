@@ -2,6 +2,15 @@ sections:
   general:
     display: General
     fields:
+      - handle: multisite_note
+        field:
+          type: html
+          # V1.2 Cross-Tab-F — sprach-agnostisches Banner. Linkwise's
+          # Settings are global by design; per-site overrides for
+          # `collections`, `custom_stopwords`, `excluded_entries` are
+          # tracked for V1.3 (see docs/POST_MULTILANG_GAPS.md M2/M3/H1).
+          html: '<div class="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-md px-3 py-2 leading-relaxed"><strong>Settings affect all sites.</strong> On multisite installs, per-site overrides for collections, stopwords, and excluded entries are planned for V1.3. Until then this page is global — per-entry locale-scoping (introduced in v1.2) still works correctly across all sites without changing anything here.</div>'
+
       - handle: language
         field:
           type: select
