@@ -368,7 +368,12 @@ class SuggestionEngine
      */
     protected function findMatches(string $normalizedText, string $originalText, EntryRecord $record): array
     {
-        $phrases = $this->generateMatchPhrases($record->title);
+        // Tier-1 title-phrase matching. PR #102 audit D1: pass record locale
+        // so the phrase-stripping and stopword-boundary logic uses the same
+        // language as the title — pre-D1 a DE-title in an EN-default install
+        // had its leading "Die" / trailing "und" left in by the EN-stopword-
+        // driven strip, producing low-quality match phrases.
+        $phrases = $this->generateMatchPhrases($record->title, $record->locale);
         $titleWordCount = count(explode(' ', TextNormalizer::normalize($record->title)));
         $suggestions = [];
 
@@ -415,7 +420,10 @@ class SuggestionEngine
                     // Trim leading/trailing stopwords from the matched span
                     // (e.g. "als gleichberechtigter Bestandteil" → "gleich-
                     // berechtigter Bestandteil"). Middle stopwords stay.
-                    [$trimmed, $shift] = TextNormalizer::trimBoundaryStopwords($anchorText);
+                    // PR #102 audit E3: target-locale-aware so a DE-title
+                    // anchor in an EN-default install actually trims "die"/
+                    // "als" / etc.
+                    [$trimmed, $shift] = TextNormalizer::trimBoundaryStopwords($anchorText, $record->locale);
                     $anchorText = $trimmed;
                     $position = $this->byteToCharOffset($originalText, $m[1]) + $shift;
                     $context = $this->extractContext($originalText, $position, mb_strlen($anchorText));
@@ -991,7 +999,7 @@ class SuggestionEngine
         // Pre-fix: the stem-fallback path returned raw cluster spans like
         // "and performance" with the boundary stopword intact, even though
         // findMatches consistently trims them. User-bug 2026-05-23.
-        [$trimmedAnchor, $anchorShift] = TextNormalizer::trimBoundaryStopwords($anchorText);
+        [$trimmedAnchor, $anchorShift] = TextNormalizer::trimBoundaryStopwords($anchorText, $record->locale);
         $anchorText = $trimmedAnchor;
         $bestFirst = $bestFirst + $anchorShift;
         $spanLength = mb_strlen($anchorText);
@@ -1210,7 +1218,7 @@ class SuggestionEngine
      * Generate match phrases from a title.
      * Returns phrases sorted by length descending (longest first for greedy matching).
      */
-    public function generateMatchPhrases(string $title): array
+    public function generateMatchPhrases(string $title, ?string $locale = null): array
     {
         $normalized = TextNormalizer::normalize($title);
         $words = explode(' ', $normalized);
@@ -1220,14 +1228,14 @@ class SuggestionEngine
         $phrases[] = $normalized;
 
         // Title with leading stopwords stripped
-        $core = TextNormalizer::stripLeadingStopwords($words);
+        $core = TextNormalizer::stripLeadingStopwords($words, $locale);
 
         if ($core !== $normalized && str_word_count($core) >= $this->minPhraseWords) {
             $phrases[] = $core;
         }
 
         // Title with trailing stopwords stripped
-        $coreTail = TextNormalizer::stripTrailingStopwords($words);
+        $coreTail = TextNormalizer::stripTrailingStopwords($words, $locale);
 
         if ($coreTail !== $normalized && $coreTail !== $core && str_word_count($coreTail) >= $this->minPhraseWords) {
             $phrases[] = $coreTail;
@@ -1235,7 +1243,7 @@ class SuggestionEngine
 
         // Both leading and trailing stripped
         $coreWords = explode(' ', $core);
-        $coreBoth = TextNormalizer::stripTrailingStopwords($coreWords);
+        $coreBoth = TextNormalizer::stripTrailingStopwords($coreWords, $locale);
 
         if ($coreBoth !== $core && $coreBoth !== $coreTail && str_word_count($coreBoth) >= $this->minPhraseWords) {
             $phrases[] = $coreBoth;
