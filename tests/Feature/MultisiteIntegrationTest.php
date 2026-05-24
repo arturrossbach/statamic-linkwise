@@ -112,6 +112,52 @@ class MultisiteIntegrationTest extends TestCase
         $this->assertSame('de', $deRecord->locale, '$entry->site()->lang() must produce de for the de site');
     }
 
+    public function test_origin_chain_resolves_target_localization_for_current_site(): void
+    {
+        // PR #102 audit point 3 — verify the assumption Linkwise makes about
+        // Statamic's `LinkMark::convertHref` routing: given a link of the form
+        // `statamic://entry::<en-uuid>` rendered on the DE site, Statamic's
+        // `$item->in(Site::current())` traverses the origin chain and returns
+        // the DE-localization entry. If this assumption is false, a manually-
+        // inserted cross-locale link (Auto-Link Rule, editor manual link,
+        // pre-Linkwise legacy content) would render the wrong URL on the
+        // public site — embarrassing failure mode for marketplace customers.
+        //
+        // The same-locale filter in suggest() prevents Linkwise itself from
+        // GENERATING cross-locale links, but the editor / Rule paths bypass
+        // that defense. The render-side rescue depends on this routing path
+        // working as documented in the LinkMark source we read.
+
+        $en = Entry::make()
+            ->id('en-origin-id')
+            ->collection('articles')
+            ->locale('default')
+            ->slug('origin-en')
+            ->data(['title' => 'Origin Article in English']);
+        $en->save();
+
+        $de = Entry::make()
+            ->id('de-localization-id')
+            ->collection('articles')
+            ->locale('de')
+            ->origin($en)
+            ->slug('lokalisierung-de')
+            ->data(['title' => 'Lokalisierung auf Deutsch']);
+        $de->save();
+
+        // Reload from storage so the origin chain is reconstructed from disk,
+        // not held in memory — matches what LinkMark::convertHref sees.
+        $reloaded = Entry::find($en->id());
+        $this->assertNotNull($reloaded, 'EN origin must be findable by UUID after save.');
+
+        $this->assertTrue($reloaded->existsIn('de'), 'Origin must expose a DE localization via existsIn().');
+
+        $resolved = $reloaded->in('de');
+        $this->assertNotNull($resolved, 'in(de) must traverse the origin chain to the DE-localization.');
+        $this->assertSame('de-localization-id', $resolved->id(), 'in(de) must return the DE-localization entry, not the EN origin.');
+        $this->assertSame('de', $resolved->site()->handle(), 'Resolved entry must live on the de site.');
+    }
+
     public function test_suggest_filters_cross_locale_via_indexed_records(): void
     {
         // Source is an EN entry; target is a DE entry with the same root
