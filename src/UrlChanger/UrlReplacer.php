@@ -44,9 +44,14 @@ class UrlReplacer
      *
      * @return array{search: string, replace: string, total_replacements: int, entries: array}
      */
-    public function preview(string $search, string $replace): array
+    /**
+     * Run a preview without writing. Optional `$localeFilter` (V1.2
+     * Cross-Tab-D) restricts the scan to entries whose site matches the
+     * given ISO-639-1 code. Null = all sites = today's behavior.
+     */
+    public function preview(string $search, string $replace, ?string $localeFilter = null): array
     {
-        return $this->process($search, $replace);
+        return $this->process($search, $replace, $localeFilter);
     }
 
     /**
@@ -335,7 +340,7 @@ class UrlReplacer
      * 2026-05-09. All actual writes must go through applySelected which
      * uses SafeEntrySaver::save and inherits the full safety stack.
      */
-    protected function process(string $search, string $replace): array
+    protected function process(string $search, string $replace, ?string $localeFilter = null): array
     {
         $entries = Entry::all();
         $result = [
@@ -346,6 +351,26 @@ class UrlReplacer
         ];
 
         foreach ($entries as $entry) {
+            // V1.2 Cross-Tab-D — locale-scope. Restrict the scan to entries
+            // whose site lang() resolves to the filter code. Null filter
+            // means "all sites" (today's behavior). Editor on a DE-only
+            // domain-migration only sees DE-Entries in the preview, and
+            // the subsequent apply also stays scoped.
+            if ($localeFilter !== null) {
+                try {
+                    $entryLocale = \Arturrossbach\Linkwise\NLP\LanguageRegistry::resolveFor(
+                        (string) ($entry->site()->lang() ?? '')
+                    );
+                    if ($entryLocale !== $localeFilter) {
+                        continue;
+                    }
+                } catch (\Throwable) {
+                    // Entry without a usable site → skip when filter is set;
+                    // we can't honor the scope, so safer to exclude.
+                    continue;
+                }
+            }
+
             $entryResult = $this->processEntry($entry, $search, $replace);
 
             if (! empty($entryResult['occurrences'])) {

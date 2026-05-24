@@ -619,6 +619,11 @@ class InertiaPagesController extends CpController
 
     public function urlChanger(Request $request): \Inertia\Response
     {
+        // V1.2 Cross-Tab-D — surface availableLocales so the URL Changer
+        // form can render the "Apply to: All sites / <locale>" select.
+        $records = $this->indexer->load();
+        $availableLocales = \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::availableLocales($records);
+
         $domainReport = new DomainReport($this->indexer);
         // Frontend expects `[{domain: 'example.com'}, ...]` (it accesses
         // `d.domain` in the autocomplete). Returning plain strings crashed
@@ -637,6 +642,7 @@ class InertiaPagesController extends CpController
                 'apply_cancel_url' => cp_route('linkwise.url-changer.apply-cancel'),
             ],
             'domains' => $domains,
+            'availableLocales' => $availableLocales,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),

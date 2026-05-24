@@ -16,11 +16,23 @@
         <!-- Search with Combobox (WCAG WAI-ARIA 1.2 Combobox Pattern) -->
         <Card class="mb-6">
             <div class="relative">
-                <div class="flex items-center gap-2 mb-1">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
                     <label id="url-search-label" class="text-xs text-gray-500 dark:text-gray-400">Search for a domain, URL, or keyword</label>
                     <select v-model="searchMode" class="text-xs border border-gray-300 dark:border-gray-700 dark:bg-gray-800 rounded px-1.5 py-0.5" aria-label="Match mode">
                         <option value="smart">Smart match</option>
                         <option value="exact">Exact match</option>
+                    </select>
+                    <!-- V1.2 Cross-Tab-D — locale-scope select. Hides on
+                         single-site / single-locale-index. Empty = all
+                         sites = today's behavior. -->
+                    <select
+                        v-if="availableLocales.length > 0"
+                        v-model="localeFilter"
+                        class="text-xs border border-gray-300 dark:border-gray-700 dark:bg-gray-800 rounded px-1.5 py-0.5"
+                        aria-label="Apply to site"
+                    >
+                        <option :value="null">All sites</option>
+                        <option v-for="loc in availableLocales" :key="loc" :value="loc">{{ loc }}</option>
                     </select>
                 </div>
                 <input
@@ -221,12 +233,19 @@ export default {
         data: { type: Object, required: true },
         domains: { type: Array, default: () => [] },
         initialSearch: { type: String, default: '' },
+        // V1.2 Cross-Tab-D — list of ISO codes the URL Changer can scope
+        // its scan to. Empty array on single-site / single-locale-index
+        // hides the "Apply to" select entirely.
+        availableLocales: { type: Array, default: () => [] },
     },
 
     data() {
         return {
             search: this.initialSearch || '',
             searchMode: 'smart',
+            // V1.2 Cross-Tab-D — current locale scope. Null = all sites.
+            // Goes into preview + apply requests as `locale` field.
+            localeFilter: null,
             previewedMode: 'smart',
             bulkReplaceUrl: '',
             suppressSuggestions: false,
@@ -474,7 +493,7 @@ export default {
                         'X-CSRF-TOKEN': Statamic.$config.get('csrfToken'),
                         'X-Requested-With': 'XMLHttpRequest',
                     },
-                    body: JSON.stringify({ search: this.search, mode: this.searchMode }),
+                    body: JSON.stringify({ search: this.search, mode: this.searchMode, locale: this.localeFilter }),
                 });
 
                 if (response.ok) {
