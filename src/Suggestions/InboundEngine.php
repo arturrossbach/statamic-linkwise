@@ -71,11 +71,18 @@ class InboundEngine
                 continue;
             }
 
-            // Find target's title/keywords in source's text
+            // Find target's title/keywords in source's text. Pass the source
+            // record's locale explicitly: the SuggestionEngine's same-locale
+            // filter normally reads it from $index[$excludeEntryId], but
+            // here $index = $singleIndex contains only the target, NOT the
+            // source. Without this override, cross-locale inbound pairs
+            // slip through (user-bug 2026-05-24 — EN target showed DE+NL
+            // source candidates in the inbound modal).
             $suggestions = $this->engine->suggest(
                 $sourceRecord->text,
                 $singleIndex,
                 $sourceRecord->id,
+                sourceLocaleOverride: $sourceRecord->locale,
             );
 
             foreach ($suggestions as $suggestion) {
@@ -214,6 +221,21 @@ class InboundEngine
         $customKeywords = $this->keywordManager->getKeywords($targetEntryId);
 
         if (empty($customKeywords)) {
+            return [];
+        }
+
+        // PR #101 same-locale filter (user-bug 2026-05-24 follow-up). The
+        // main suggest() path is now correctly scoped, but the custom-
+        // keywords path here goes straight to mb_stripos against the
+        // source body. Without an explicit locale check, EN custom
+        // keywords on a target would surface DE/NL sources whose body
+        // happens to contain the English loanword.
+        $records = $this->indexer->load();
+        $targetRecord = $records[$targetEntryId] ?? null;
+        if ($targetRecord !== null
+            && $sourceRecord->locale !== null
+            && $targetRecord->locale !== null
+            && $sourceRecord->locale !== $targetRecord->locale) {
             return [];
         }
 

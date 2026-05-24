@@ -61,7 +61,7 @@ class SuggestionEngine
      * @param  string[]  $alreadyLinkedIds  Entry IDs already linked in the source content
      * @return Suggestion[]
      */
-    public function suggest(string $text, array $index, ?string $excludeEntryId = null, array $alreadyLinkedIds = [], ?int $maxSuggestions = null): array
+    public function suggest(string $text, array $index, ?string $excludeEntryId = null, array $alreadyLinkedIds = [], ?int $maxSuggestions = null, ?string $sourceLocaleOverride = null): array
     {
         $normalizedText = TextNormalizer::normalize($text);
         $suggestions = [];
@@ -77,9 +77,17 @@ class SuggestionEngine
         // locale, others don't) also pass: the filter only fires when BOTH
         // sides carry a locale, otherwise it would silently drop legacy
         // targets after a partial reindex.
-        $sourceLocale = ($excludeEntryId && isset($index[$excludeEntryId]))
-            ? $index[$excludeEntryId]->locale
-            : null;
+        //
+        // Inbound-flow exception (user-bug 2026-05-24): InboundEngine
+        // builds a $singleIndex containing only the target record, then
+        // iterates source records OUTSIDE the index. With that shape the
+        // source-locale lookup against $index[$excludeEntryId] returns
+        // null → filter silently passes cross-locale pairs. The caller
+        // passes $sourceLocaleOverride explicitly to close that gap.
+        $sourceLocale = $sourceLocaleOverride
+            ?? (($excludeEntryId && isset($index[$excludeEntryId]))
+                ? $index[$excludeEntryId]->locale
+                : null);
 
         // If excludeEntryId is in the index, also exclude its outbound links
         if ($excludeEntryId && isset($index[$excludeEntryId])) {
