@@ -5,10 +5,12 @@ sections:
       - handle: language
         field:
           type: select
-          display: 'Content language'
+          display: 'Content language (fallback)'
           clearable: true
           instructions: |
             Drives stop-word filtering, stemming, and keyword extraction. Leave empty to auto-detect from Statamic's site locale. "Confident" languages support inflected matching (plurals, conjugations); "Limited" languages match exact word forms only.
+
+            **On multisite installs**, each entry is automatically scoped to its own site's `lang` declaration — Linkwise stems and filters per-entry. This setting becomes the fallback used only when a site has no `lang:` declaration in `resources/sites.yaml`. Single-site installs use it as the primary language source.
 
             _Affects the NLP pipeline — run **Scan Content** (header button) after changing this for the new language to take effect._
           options:

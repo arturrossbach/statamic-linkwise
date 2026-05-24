@@ -23,6 +23,25 @@ class EntryRecord
      *   walks each text-node separately). Legacy index records without this field
      *   fall back to outboundLinks (= distinct count, the old behaviour).
      */
+    /**
+     * @param  ?string  $locale  ISO-639-1 code (e.g. 'de', 'en') resolved from the
+     *   entry's site `shortLocale()` at index time. Null on single-site installs
+     *   where there is no Locale-scoping decision to make — `null === null`
+     *   passes the source-locale filter in {@see \Arturrossbach\Linkwise\Suggestions\SuggestionEngine}
+     *   so legacy index entries written before this field shipped continue to
+     *   work without a forced reindex. NOT the Statamic site-handle (which is
+     *   user-chosen and not a stemmer key).
+     * @param  ?string  $titleLocale  Per PR #102 audit A1: locale of the actual
+     *   title-text content. Defaults to {@see $locale} when the title field
+     *   is localizable or the entry is its own origin. When the blueprint
+     *   declares `localizable: false` on title AND the entry is a localization
+     *   inheriting an Origin-language title (e.g. DE-site article whose title
+     *   reads "Analytics and Measuring..." because the EN-origin's title isn't
+     *   per-site overridable), this carries the origin's locale so the
+     *   SuggestionEngine title-paths stem the title with the correct language —
+     *   keeping the entry filterable on the body's locale but avoiding the
+     *   PR #100 cross-language-stemmer bug at the title.
+     */
     public function __construct(
         public readonly string $id,
         public readonly string $title,
@@ -36,6 +55,8 @@ class EntryRecord
         public readonly bool $hasTitleMatch = false,
         public readonly array $tokens = [],
         public readonly array $outboundLinkOccurrences = [],
+        public readonly ?string $locale = null,
+        public readonly ?string $titleLocale = null,
     ) {}
 
     /**
@@ -65,6 +86,7 @@ class EntryRecord
             'outboundLinks', 'keywords',
             'inboundSuggestionCount', 'outboundSuggestionCount',
             'hasTitleMatch', 'tokens', 'outboundLinkOccurrences',
+            'locale', 'titleLocale',
         ];
 
         $unknown = array_diff(array_keys($overrides), $allowed);
@@ -87,6 +109,8 @@ class EntryRecord
             hasTitleMatch: $overrides['hasTitleMatch'] ?? $this->hasTitleMatch,
             tokens: $overrides['tokens'] ?? $this->tokens,
             outboundLinkOccurrences: $overrides['outboundLinkOccurrences'] ?? $this->outboundLinkOccurrences,
+            locale: array_key_exists('locale', $overrides) ? $overrides['locale'] : $this->locale,
+            titleLocale: array_key_exists('titleLocale', $overrides) ? $overrides['titleLocale'] : $this->titleLocale,
         );
     }
 
@@ -117,6 +141,8 @@ class EntryRecord
             'outbound_suggestion_count' => $this->outboundSuggestionCount,
             'has_title_match' => $this->hasTitleMatch,
             'tokens' => $this->tokens,
+            'locale' => $this->locale,
+            'title_locale' => $this->titleLocale,
         ];
     }
 
@@ -150,6 +176,8 @@ class EntryRecord
             hasTitleMatch: (bool) ($data['has_title_match'] ?? false),
             tokens: isset($data['tokens']) && is_array($data['tokens']) ? array_values(array_filter($data['tokens'], 'is_string')) : [],
             outboundLinkOccurrences: isset($data['outbound_link_occurrences']) && is_array($data['outbound_link_occurrences']) ? $data['outbound_link_occurrences'] : [],
+            locale: isset($data['locale']) && is_string($data['locale']) && $data['locale'] !== '' ? $data['locale'] : null,
+            titleLocale: isset($data['title_locale']) && is_string($data['title_locale']) && $data['title_locale'] !== '' ? $data['title_locale'] : null,
         );
     }
 }

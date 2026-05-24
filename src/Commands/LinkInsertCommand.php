@@ -259,9 +259,34 @@ class LinkInsertCommand extends Command
                     // Append-on-success: only confirmed inserts make it
                     // into the snapshot.items list — guarantees the
                     // activity-log table reflects reality.
+                    //
+                    // Capture source + target titles AT write time. The
+                    // entries exist now (the write just succeeded against
+                    // them); if either gets deleted later, the activity-
+                    // log can still render the title from the snapshot
+                    // instead of falling back to a raw UUID. User-bug
+                    // 2026-05-24: Bulk-Insert against entries that were
+                    // re-seeded right after caused the drawer to show
+                    // opaque UUIDs in the Source-entry column.
+                    $sourceTitle = null;
+                    $targetTitle = null;
+                    try {
+                        $sourceTitle = \Statamic\Facades\Entry::find($sourceEntryId)?->title();
+                    } catch (\Throwable) {
+                        // Best-effort. Snapshot is forensic, not authoritative.
+                    }
+                    if ($targetEntryId) {
+                        try {
+                            $targetTitle = \Statamic\Facades\Entry::find($targetEntryId)?->title();
+                        } catch (\Throwable) {
+                            // Same — best-effort.
+                        }
+                    }
                     app(BulkSnapshotStore::class)->appendWrittenItem($snapshotId, [
                         'source_entry_id' => $sourceEntryId,
+                        'source_entry_title' => $sourceTitle,
                         'target_entry_id' => $targetEntryId ?? '',
+                        'target_entry_title' => $targetTitle,
                         'href' => $effectiveHref,
                         'anchor_text' => $anchorText,
                         'sentence_context' => $insertion['sentence_context'] ?? '',

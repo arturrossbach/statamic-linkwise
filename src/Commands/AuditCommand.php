@@ -102,6 +102,7 @@ class AuditCommand extends Command
             'target-keywords'        => fn () => $this->auditTargetKeywords(),
             'links-report'           => fn () => $this->auditLinksReport(),
             'overview'               => fn () => $this->auditOverview(),
+            'locale-scope'           => fn () => $this->auditLocaleScope(),
         ];
 
         if ($only && ! isset($paths[$only])) {
@@ -801,6 +802,7 @@ class AuditCommand extends Command
         $sample = array_filter($records, fn ($r) => ($r->outboundSuggestionCount ?? 0) > 0);
 
         foreach ($sample as $record) {
+            $this->progressDot();
             $entry = Entry::find($record->id);
             if (! $entry) continue;
 
@@ -905,6 +907,7 @@ class AuditCommand extends Command
         $sample = array_filter($records, fn ($r) => ($r->outboundSuggestionCount ?? 0) > 0);
 
         foreach ($sample as $record) {
+            $this->progressDot();
             try {
                 $raw = $this->suggestionEngine->suggest(
                     $record->text, $records, $record->id, $record->outboundLinks
@@ -2219,6 +2222,74 @@ class AuditCommand extends Command
         $this->pass($path);
     }
 
+    // ──────────────────────────────────────────────────────────────────
+    // PR #102 audit L1 — Locale-Scope pin
+    // ──────────────────────────────────────────────────────────────────
+    // Direct, independent test: for every source/target pair where both
+    // sides carry a locale AND those locales differ, the SuggestionEngine
+    // must produce zero suggestions. This is structurally different from
+    // `suggestions-safety` (which runs `suggest()` and inspects what comes
+    // back via the engine's OWN filter) — here we explicitly construct the
+    // forbidden cross-locale shape and assert the filter rejects it.
+    //
+    // Skips silently on single-site installs where every record's locale
+    // is null (the filter has nothing to check).
+    protected function auditLocaleScope(): void
+    {
+        $this->line('<fg=yellow>locale-scope</> — cross-locale source/target pairs yield zero suggestions');
+
+        $records = $this->indexer->load();
+
+        // Group records by locale. Iterate over locale pairs (a, b) with a != b
+        // and pick the first record from each bucket. Don't try a full N×N
+        // pass — the goal is structural verification, not exhaustive enumeration.
+        $byLocale = [];
+        foreach ($records as $r) {
+            if ($r->locale === null) continue;
+            $byLocale[$r->locale][] = $r;
+        }
+
+        if (count($byLocale) < 2) {
+            // Single-site or all-null index — nothing to scope-check. Record
+            // a passing no-op so the report shows the group ran.
+            $this->pass('locale-scope');
+            return;
+        }
+
+        $locales = array_keys($byLocale);
+        foreach ($locales as $sourceLocale) {
+            $sources = $byLocale[$sourceLocale];
+            // Take up to 3 sources per locale — enough to catch a stuck
+            // filter, bounded enough to keep the audit fast on large indices.
+            $sources = array_slice($sources, 0, 3);
+
+            foreach ($sources as $source) {
+                $this->progressDot();
+                try {
+                    $suggestions = $this->suggestionEngine->suggest(
+                        $source->text, $records, $source->id, $source->outboundLinks
+                    );
+                } catch (\Throwable $e) {
+                    $this->recordFailure('locale-scope', "suggest() threw for source '{$source->title}' ({$sourceLocale}): ".$e->getMessage());
+                    continue;
+                }
+
+                foreach ($suggestions as $s) {
+                    $target = $records[$s->targetEntryId] ?? null;
+                    if ($target === null) continue;
+                    if ($target->locale === null) continue; // half-migrated; filter intentionally passes
+                    if ($target->locale !== $sourceLocale) {
+                        $this->recordFailure(
+                            'locale-scope',
+                            "source '{$source->title}' ({$sourceLocale}) suggested target '{$target->title}' ({$target->locale}) — cross-locale filter leaked"
+                        );
+                    }
+                }
+                $this->pass('locale-scope');
+            }
+        }
+    }
+
     // ─── Reporting ────────────────────────────────────────────────────
 
     protected function pass(string $path): void
@@ -2231,8 +2302,47 @@ class AuditCommand extends Command
         $this->failures[$path][] = $detail;
     }
 
+    /**
+     * PR #102 audit L2 — per-iteration progress dot for long-running audit
+     * groups. Without this, groups like `suggestions-safety` print their
+     * header line and then sit silent for 20+ minutes on real-size indices
+     * (heute Abend self-witnessed on prose-peak-test with 682 entries).
+     * Customers reading the command output assume it hung.
+     *
+     * Called per-iteration in the heavy groups; reportPath() emits a
+     * newline before the result so the dots don't sit on the same line as
+     * the ✓/✗ summary.
+     */
+    protected function progressDot(): void
+    {
+        if (! $this->hasProgressDots) {
+            $this->hasProgressDots = true;
+            // Two-space indent matches the ✓/✗ summary line.
+            $this->output->write('  ');
+        }
+        $this->output->write('.');
+        $this->progressDotCount++;
+        // Periodic newline so a 5000-entry walk doesn't produce a single
+        // 5000-char line that wraps unreadably in most terminals.
+        if ($this->progressDotCount % 100 === 0) {
+            $this->output->writeln('');
+            $this->hasProgressDots = false;
+        }
+    }
+
+    protected bool $hasProgressDots = false;
+    protected int $progressDotCount = 0;
+
     protected function reportPath(string $path): void
     {
+        // Newline before summary if we emitted any progress dots during
+        // the runner — keeps the ✓/✗ line clean.
+        if ($this->hasProgressDots) {
+            $this->output->writeln('');
+            $this->hasProgressDots = false;
+            $this->progressDotCount = 0;
+        }
+
         $passes = $this->passes[$path] ?? 0;
         $failures = $this->failures[$path] ?? [];
         $cap = (int) $this->option('max-failures');

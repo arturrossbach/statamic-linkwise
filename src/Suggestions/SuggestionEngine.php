@@ -4,6 +4,7 @@ namespace Arturrossbach\Linkwise\Suggestions;
 
 use Arturrossbach\Linkwise\Indexer\EntryRecord;
 use Arturrossbach\Linkwise\Keywords\TargetKeywordManager;
+use Arturrossbach\Linkwise\NLP\LanguageRegistry;
 use Arturrossbach\Linkwise\NLP\Stemmer;
 use Arturrossbach\Linkwise\Support\TextNormalizer;
 use Arturrossbach\Linkwise\NLP\Stopwords;
@@ -60,10 +61,33 @@ class SuggestionEngine
      * @param  string[]  $alreadyLinkedIds  Entry IDs already linked in the source content
      * @return Suggestion[]
      */
-    public function suggest(string $text, array $index, ?string $excludeEntryId = null, array $alreadyLinkedIds = [], ?int $maxSuggestions = null): array
+    public function suggest(string $text, array $index, ?string $excludeEntryId = null, array $alreadyLinkedIds = [], ?int $maxSuggestions = null, ?string $sourceLocaleOverride = null): array
     {
         $normalizedText = TextNormalizer::normalize($text);
         $suggestions = [];
+
+        // Multisite locale-scoping (V1.x). Source-locale is the content language
+        // of the entry we're generating suggestions FOR; it drives both the
+        // same-locale target filter below and the per-source stemmer used to
+        // tokenize $text. Null on single-site installs (the Indexer leaves
+        // EntryRecord::$locale null when there's no language decision to
+        // make) — in that case the same-locale filter short-circuits to
+        // "pass" and tokenizeWithMappingFor delegates to the legacy global
+        // stemmer/stopword path. Half-migrated indices (some records carry
+        // locale, others don't) also pass: the filter only fires when BOTH
+        // sides carry a locale, otherwise it would silently drop legacy
+        // targets after a partial reindex.
+        //
+        // Inbound-flow exception (user-bug 2026-05-24): InboundEngine
+        // builds a $singleIndex containing only the target record, then
+        // iterates source records OUTSIDE the index. With that shape the
+        // source-locale lookup against $index[$excludeEntryId] returns
+        // null → filter silently passes cross-locale pairs. The caller
+        // passes $sourceLocaleOverride explicitly to close that gap.
+        $sourceLocale = $sourceLocaleOverride
+            ?? (($excludeEntryId && isset($index[$excludeEntryId]))
+                ? $index[$excludeEntryId]->locale
+                : null);
 
         // If excludeEntryId is in the index, also exclude its outbound links
         if ($excludeEntryId && isset($index[$excludeEntryId])) {
@@ -93,8 +117,13 @@ class SuggestionEngine
         $titleBlacklist = $this->getTitleBlacklist();
         $targetCollections = $this->getConfigArray('linkwise.target_collections');
 
-        // Tokenize source text once for keyword matching (stemmed + original mapping)
-        [$sourceTokens, $stemToOriginal] = TextNormalizer::tokenizeWithMapping($text);
+        // Tokenize source text once for keyword matching (stemmed + original mapping).
+        // Uses the SOURCE entry's locale so a DE source on an EN-default install
+        // is stemmed with the German stemmer and filters against the German
+        // stopword list — fixes the PR #100 root cause one level up (English
+        // "and" isn't in the DE stopword list, so a global EN/DE-mismatch let
+        // it through as a content word in the stem-cluster path).
+        [$sourceTokens, $stemToOriginal] = TextNormalizer::tokenizeWithMappingFor($text, $sourceLocale);
 
         // Stage-1 pre-filter set (V1.2 perf gate): O(1) stem-lookup for the
         // intersection check below. Built once per suggest() call; reused
@@ -117,6 +146,17 @@ class SuggestionEngine
 
         foreach ($index as $record) {
             if (in_array($record->id, $excludeIds, true)) {
+                continue;
+            }
+
+            // Multisite locale-scoping. Cross-locale links render incorrectly
+            // (LinkMark::convertHref's `$item->in(Site::current())` falls back
+            // to the original entry's URL when no localization exists in the
+            // current site) and clutter the editor's review modal with
+            // wrong-language anchors. Only enforce when BOTH sides carry a
+            // locale so single-site installs and half-migrated indices keep
+            // their existing behavior.
+            if ($sourceLocale !== null && $record->locale !== null && $sourceLocale !== $record->locale) {
                 continue;
             }
 
@@ -152,7 +192,11 @@ class SuggestionEngine
             // Empty gate set ≡ no signal to filter on → pass through to
             // existing paths.
             if (! isset($titleStemsCache[$record->id])) {
-                [$titleStems] = TextNormalizer::tokenizeWithMapping($record->title);
+                // Post-filter source and target share the same locale (or one
+                // side is null = legacy/single-site). Tokenize the target
+                // title with the source stemmer so prefilter stems match the
+                // sourceTokenSet built above.
+                [$titleStems] = TextNormalizer::tokenizeWithMappingFor($record->title, $sourceLocale);
                 // Keyword stems are already stemmed (the keyword map is
                 // built by KeywordExtractor::extract which stems before
                 // storing). Use array_keys directly.
@@ -332,7 +376,12 @@ class SuggestionEngine
      */
     protected function findMatches(string $normalizedText, string $originalText, EntryRecord $record): array
     {
-        $phrases = $this->generateMatchPhrases($record->title);
+        // Tier-1 title-phrase matching. PR #102 audit D1 + A1: pass the
+        // title's locale (which may differ from the entry's locale when
+        // blueprint declares `localizable: false` on title) so the phrase-
+        // stripping and stopword-boundary logic uses the title's actual
+        // language. Falls back to entry locale when titleLocale is null.
+        $phrases = $this->generateMatchPhrases($record->title, $record->titleLocale ?? $record->locale);
         $titleWordCount = count(explode(' ', TextNormalizer::normalize($record->title)));
         $suggestions = [];
 
@@ -379,7 +428,11 @@ class SuggestionEngine
                     // Trim leading/trailing stopwords from the matched span
                     // (e.g. "als gleichberechtigter Bestandteil" → "gleich-
                     // berechtigter Bestandteil"). Middle stopwords stay.
-                    [$trimmed, $shift] = TextNormalizer::trimBoundaryStopwords($anchorText);
+                    // PR #102 audit E3 + A1: title-locale-aware so a DE-
+                    // title anchor in an EN-default install actually trims
+                    // "die"/"als"/etc, and a non-localizable title in a
+                    // DE-localization uses the title's true language.
+                    [$trimmed, $shift] = TextNormalizer::trimBoundaryStopwords($anchorText, $record->titleLocale ?? $record->locale);
                     $anchorText = $trimmed;
                     $position = $this->byteToCharOffset($originalText, $m[1]) + $shift;
                     $context = $this->extractContext($originalText, $position, mb_strlen($anchorText));
@@ -458,7 +511,10 @@ class SuggestionEngine
             return [];
         }
 
-        $stemmer = new Stemmer;
+        // Per-title-locale stemmer (PR #102 audit A1). Falls back to the
+        // entry locale when the title is localizable, so the standard path
+        // is unchanged.
+        $stemmer = new Stemmer($record->titleLocale ?? $record->locale);
         $suggestions = [];
 
         foreach ($compounds as $compound) {
@@ -666,8 +722,10 @@ class SuggestionEngine
             array_keys($matchingKeywords),
         );
 
-        // Find the best anchor using original (unstemmed) words in the original text
-        $anchorText = $this->findBestAnchor($originalText, $bestOriginalWord, $originalMatchingWords);
+        // Find the best anchor using original (unstemmed) words in the original text.
+        // Per-target-locale coordinator-set: same-locale filter in suggest() guarantees
+        // source and target share this locale (or both null = legacy/single-site).
+        $anchorText = $this->findBestAnchor($originalText, $bestOriginalWord, $originalMatchingWords, $record->locale);
 
         // Find position of anchor in original text
         $pattern = '/\b'.preg_quote($anchorText, '/').'\b/iu';
@@ -723,16 +781,18 @@ class SuggestionEngine
      * Strategy: (1) adjacent keyword pair, (2) keyword + neighbor word from text.
      * Minimum 2 words to ensure meaningful anchor text.
      */
-    protected function findBestAnchor(string $text, string $primaryKeyword, array $matchingKeywords): string
+    protected function findBestAnchor(string $text, string $primaryKeyword, array $matchingKeywords, ?string $locale = null): string
     {
         // Coordinator stopwords that MUST NOT bridge two keywords —
         // produces user-visible Müll like "performance and tuning".
         // Bridge prepositions (von/of/for/in/…) are fine. See
         // SuggestionEngineStemClusterCoordTest for the rationale.
-        static $coordinatorStopwords = [
-            'and', 'or', 'but', 'nor', 'yet', 'so',
-            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
-        ];
+        //
+        // Per-locale list since PR #102 audit (E2): FR/ES/IT/NL/PT/SV/DA/
+        // NO/FI/RO/RU/CA also need coordinator protection. Null locale
+        // falls back to the EN+DE union for legacy / single-site /
+        // unknown-language sites — same protection as before the audit.
+        $coordinatorStopwords = LanguageRegistry::coordinatorsFor($locale);
 
         // Strategy 1: Try to find two matching keywords near each other (0-1 word gap)
         foreach ($matchingKeywords as $otherKeyword) {
@@ -808,25 +868,27 @@ class SuggestionEngine
      */
     protected function findUnorderedStemMatch(string $originalText, EntryRecord $record, int $titleWordCount): ?Suggestion
     {
-        $stemmer = new Stemmer;
+        // Per-target-title-locale stemmer. PR #102 audit A1: the title and
+        // body can live in different languages when the blueprint declares
+        // `localizable: false` on title — a DE-localization of an EN-origin
+        // inherits the English title even though the body is German. Stem
+        // the title with its actual language (titleLocale, set by Indexer);
+        // body-side coordinator-list stays on $record->locale (the body's
+        // language, after the same-locale filter equals source-locale).
+        $titleLocale = $record->titleLocale ?? $record->locale;
+        $stemmer = new Stemmer($titleLocale);
         $normalizedTitle = TextNormalizer::normalize($record->title);
         $titleWords = explode(' ', $normalizedTitle);
 
-        // Coordinator stopwords filtered language-agnostically. When a site's
-        // active stemmer-language disagrees with the content language (German
-        // language setting + English article titles like "Analytics and
-        // Measuring Content Performance"), isStopword("and") returns false
-        // because "and" is not in the German list — but the coordinator
-        // semantic ("and" as splitter between two independent concepts) is
-        // universal. Without this explicit list, the stem-cluster path
-        // accepted "and" as a title content word and produced "and
-        // performance" / "performance and" / "Content quality and" anchors.
-        // User-bug 2026-05-23, Cloudways smoke with language=de site +
-        // English seed articles.
-        static $coordinatorStopwords = [
-            'and', 'or', 'but', 'nor', 'yet', 'so',
-            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
-        ];
+        // Per-target-locale coordinator-set. PR #100 introduced this as a
+        // hardcoded EN+DE list (the language-agnostic guard against the
+        // "performance and optimization" Müll shape from the Cloudways smoke
+        // 2026-05-23). PR #102 audit E2 expanded the list to all 14
+        // CONFIDENT-tier languages because FR/ES/IT/NL/PT/SV/DA/NO/FI/RO/RU/CA
+        // sites can produce the same Müll with their own coordinators
+        // (et/y/e/en/och/og/ja/și/и/i). Null locale falls back to EN+DE
+        // union — same protection legacy/single-site users already had.
+        $coordinatorStopwords = LanguageRegistry::coordinatorsFor($record->locale);
         // Get content words from title (skip stopwords + coordinators).
         $titleContentWords = array_filter($titleWords, fn ($w) => $w !== ''
             && ! TextNormalizer::isStopword($w)
@@ -947,21 +1009,15 @@ class SuggestionEngine
         // Pre-fix: the stem-fallback path returned raw cluster spans like
         // "and performance" with the boundary stopword intact, even though
         // findMatches consistently trims them. User-bug 2026-05-23.
-        [$trimmedAnchor, $anchorShift] = TextNormalizer::trimBoundaryStopwords($anchorText);
+        [$trimmedAnchor, $anchorShift] = TextNormalizer::trimBoundaryStopwords($anchorText, $titleLocale);
         $anchorText = $trimmedAnchor;
         $bestFirst = $bestFirst + $anchorShift;
         $spanLength = mb_strlen($anchorText);
 
-        // Additional language-agnostic boundary trim for coordinator
-        // conjunctions ("and", "und", "or", "oder", …) that are NOT in
-        // the active language's stopword list. Site-language=de + English
-        // article titles leaves "and" unfiltered above; this second pass
-        // strips boundary "and" / "or" regardless of language. User-bug
-        // 2026-05-23 (Cloudways smoke with DE setting + EN seed data).
-        static $coordBoundaryWords = [
-            'and', 'or', 'but', 'nor', 'yet', 'so',
-            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
-        ];
+        // Per-target-locale boundary trim for coordinator conjunctions
+        // ("and", "und", "et", "y", …) that are not in the active stopword
+        // list. PR #102 audit E2: was hardcoded EN+DE only.
+        $coordBoundaryWords = LanguageRegistry::coordinatorsFor($record->locale);
         $stripCoordPunct = fn (string $w): string => preg_replace('/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u', '', mb_strtolower($w));
         // Loop to peel multiple stacked coordinators if the cluster ever
         // surfaces something like "and or X".
@@ -1023,13 +1079,9 @@ class SuggestionEngine
         // "von" is the linking preposition between two title content
         // words. Coordinators do the opposite: they split.
         //
-        // Stopword list is the union of common English + German
-        // coordinators. POS-tagging would be cleaner but adds a heavy
-        // dependency we deliberately avoid in V1.
-        static $coordinationStopwords = [
-            'and', 'or', 'but', 'nor', 'yet', 'so',
-            'und', 'oder', 'aber', 'sondern', 'doch', 'sowie',
-        ];
+        // Per-target-locale list (PR #102 audit E2). POS-tagging would be
+        // cleaner but adds a heavy dependency we deliberately avoid in V1.
+        $coordinationStopwords = LanguageRegistry::coordinatorsFor($record->locale);
         $clusterWords = preg_split('/\s+/', trim($anchorText));
         $clusterWords = array_values(array_filter($clusterWords, fn ($w) => $w !== ''));
         $contentCount = 0;
@@ -1176,7 +1228,7 @@ class SuggestionEngine
      * Generate match phrases from a title.
      * Returns phrases sorted by length descending (longest first for greedy matching).
      */
-    public function generateMatchPhrases(string $title): array
+    public function generateMatchPhrases(string $title, ?string $locale = null): array
     {
         $normalized = TextNormalizer::normalize($title);
         $words = explode(' ', $normalized);
@@ -1186,14 +1238,14 @@ class SuggestionEngine
         $phrases[] = $normalized;
 
         // Title with leading stopwords stripped
-        $core = TextNormalizer::stripLeadingStopwords($words);
+        $core = TextNormalizer::stripLeadingStopwords($words, $locale);
 
         if ($core !== $normalized && str_word_count($core) >= $this->minPhraseWords) {
             $phrases[] = $core;
         }
 
         // Title with trailing stopwords stripped
-        $coreTail = TextNormalizer::stripTrailingStopwords($words);
+        $coreTail = TextNormalizer::stripTrailingStopwords($words, $locale);
 
         if ($coreTail !== $normalized && $coreTail !== $core && str_word_count($coreTail) >= $this->minPhraseWords) {
             $phrases[] = $coreTail;
@@ -1201,7 +1253,7 @@ class SuggestionEngine
 
         // Both leading and trailing stripped
         $coreWords = explode(' ', $core);
-        $coreBoth = TextNormalizer::stripTrailingStopwords($coreWords);
+        $coreBoth = TextNormalizer::stripTrailingStopwords($coreWords, $locale);
 
         if ($coreBoth !== $core && $coreBoth !== $coreTail && str_word_count($coreBoth) >= $this->minPhraseWords) {
             $phrases[] = $coreBoth;
