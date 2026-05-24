@@ -88,6 +88,27 @@ class InertiaPagesController extends CpController
 
         $resolvedLanguage = \Arturrossbach\Linkwise\NLP\LanguageRegistry::resolveWithSource();
 
+        // PR #102 audit C1 — flag a "Re-Run Scan Content" banner on the
+        // Overview when the install is multisite-enabled AND any record in
+        // the persisted index lacks a locale stamp. That combination means
+        // the index was built before the multilanguage track shipped (or by
+        // a partial reindex) and the SuggestionEngine's same-locale filter
+        // is silently passing through null-locale targets that should now
+        // be scoped. A single Scan Content run fixes it.
+        $multisiteReindexNeeded = false;
+        try {
+            if (\Statamic\Facades\Site::multiEnabled()) {
+                foreach ($records as $r) {
+                    if ($r->locale === null) {
+                        $multisiteReindexNeeded = true;
+                        break;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // Site facade unavailable in some test contexts — skip silently.
+        }
+
         return Inertia::render('linkwise::Overview', [
             'summary' => $data['summary'],
             'health' => $report->health(),
@@ -101,6 +122,7 @@ class InertiaPagesController extends CpController
                 'source' => $resolvedLanguage['source'],
                 'source_detail' => $resolvedLanguage['source_detail'],
             ],
+            'multisiteReindexNeeded' => $multisiteReindexNeeded,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
