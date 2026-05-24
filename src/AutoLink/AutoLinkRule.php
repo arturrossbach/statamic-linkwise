@@ -32,6 +32,14 @@ class AutoLinkRule
         // is on but THIS rule is experimental, leave it manual". 'follow_global'
         // is the 95% case — most rules just defer to the master switch.
         public readonly string $autoApplyOnSave = 'follow_global',
+        // V1.2 Cross-Tab-B — per-rule locale-scope. List of ISO-639-1 codes
+        // this rule should apply to (resolved via Entry's site->lang()).
+        // Empty array = match all sites (back-compat with pre-V1.2 rules
+        // that have no `locales` field in the JSON store). Validated +
+        // filtered at AutoLinkApplier level so the JSON store can carry
+        // unknown codes harmlessly; downstream uses LanguageRegistry to
+        // map.
+        public readonly array $locales = [],
     ) {}
 
     public static function create(array $data): self
@@ -58,6 +66,7 @@ class AutoLinkRule
             lastAppliedAt: $data['last_applied_at'] ?? null,
             lastAppliedLinksAdded: (int) ($data['last_applied_links_added'] ?? 0),
             autoApplyOnSave: self::normalizeAutoApply($data['auto_apply_on_save'] ?? null),
+            locales: self::normalizeLocales($data['locales'] ?? []),
         );
     }
 
@@ -77,6 +86,7 @@ class AutoLinkRule
             'last_applied_at' => $this->lastAppliedAt,
             'last_applied_links_added' => $this->lastAppliedLinksAdded,
             'auto_apply_on_save' => $this->autoApplyOnSave,
+            'locales' => $this->locales,
         ];
     }
 
@@ -110,12 +120,54 @@ class AutoLinkRule
             lastAppliedAt: $data['last_applied_at'] ?? null,
             lastAppliedLinksAdded: (int) ($data['last_applied_links_added'] ?? 0),
             autoApplyOnSave: self::normalizeAutoApply($data['auto_apply_on_save'] ?? null),
+            locales: self::normalizeLocales($data['locales'] ?? []),
         );
     }
 
     public function isExternal(): bool
     {
         return $this->targetEntryId === null;
+    }
+
+    /**
+     * Normalize the locales array — V1.2 Cross-Tab-B. Coerce non-string
+     * values and empty entries away; validation against the actually-
+     * indexed locales happens at the AutoLinkApplier layer (depends on
+     * runtime index state, can't be done at rule-construction time).
+     *
+     * @return list<string>
+     */
+    public static function normalizeLocales(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+        $cleaned = [];
+        foreach ($value as $v) {
+            if (! is_string($v)) continue;
+            $v = mb_strtolower(trim($v));
+            if ($v === '') continue;
+            $cleaned[$v] = true;
+        }
+        return array_keys($cleaned);
+    }
+
+    /**
+     * Whether this rule should apply to an entry with the given locale.
+     * Empty `locales` array = match all (back-compat with pre-V1.2 rules
+     * that have no `locales` field). Null entry-locale (single-site or
+     * legacy index record) passes too — same null-safe convention as the
+     * SuggestionEngine's same-locale filter.
+     */
+    public function matchesLocale(?string $entryLocale): bool
+    {
+        if (empty($this->locales)) {
+            return true;
+        }
+        if ($entryLocale === null) {
+            return true;
+        }
+        return in_array($entryLocale, $this->locales, true);
     }
 
     /**

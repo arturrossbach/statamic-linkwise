@@ -31,6 +31,7 @@
             :can-create="canCreate"
             :form-dirty="formDirty"
             :collections="data.collections || []"
+            :available-locales="data.available_locales || []"
             :auto-apply-on-save-enabled="data.auto_apply_on_save_enabled"
             :relationship-config="relationshipConfig"
             :relationship-item-data-url="relationshipItemDataUrl"
@@ -538,7 +539,7 @@ export default {
         },
 
         emptyRule() {
-            return { keyword: '', url: '', collections: [], once_per_post: true, skip_if_exists: false, case_sensitive: false, auto_apply_on_save: 'follow_global' };
+            return { keyword: '', url: '', collections: [], locales: [], once_per_post: true, skip_if_exists: false, case_sensitive: false, auto_apply_on_save: 'follow_global' };
         },
 
         openEntrySelector() {
@@ -588,6 +589,7 @@ export default {
                 keyword: rule.keyword,
                 url: rule.url,
                 collections: Array.isArray(rule.collections) ? [...rule.collections] : [],
+                locales: Array.isArray(rule.locales) ? [...rule.locales] : [],
                 once_per_post: rule.once_per_post,
                 skip_if_exists: rule.skip_if_exists,
                 case_sensitive: rule.case_sensitive,

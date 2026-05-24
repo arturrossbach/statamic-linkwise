@@ -370,9 +370,13 @@ class InertiaPagesController extends CpController
 
     // ─── Page: Auto-Linking ────────────────────────────────────────────
 
-    public function autolink(): \Inertia\Response
+    public function autolink(Request $request): \Inertia\Response
     {
         $records = $this->indexer->load();
+        // V1.2 Cross-Tab-B — surface availableLocales so RuleForm can render
+        // the per-rule locale multi-select. NOT a filter (rules themselves
+        // carry the scope, the page list shows all rules regardless).
+        $availableLocales = \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::availableLocales($records);
         $report = new LinkReport($records);
         $entries = $report->toArray()['entries'];
 
@@ -413,6 +417,7 @@ class InertiaPagesController extends CpController
             'autolinkData' => [
                 'rules' => $rulesArray,
                 'collections' => $collections,
+                'available_locales' => $availableLocales,
                 'auto_apply_on_save_enabled' => (bool) config('linkwise.auto_apply_on_save_enabled', false),
                 'urls' => [
                     'store' => cp_route('linkwise.autolink.store'),

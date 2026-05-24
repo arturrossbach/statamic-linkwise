@@ -75,11 +75,27 @@ class AutoLinkOnEntrySaveSubscriber
                 return;
             }
 
+            // V1.2 Cross-Tab-B — resolve entry locale via same chain the
+            // Indexer uses, to feed the rule's locale-scope filter.
+            $entryLocale = null;
+            try {
+                $site = $entry->site();
+                if ($site !== null) {
+                    $entryLocale = \Arturrossbach\Linkwise\NLP\LanguageRegistry::resolveFor(
+                        (string) ($site->lang() ?? '')
+                    );
+                }
+            } catch (\Throwable) {
+                // Single-site / malformed-fixture path — null leaves the
+                // rule's matchesLocale() pass-through.
+            }
+
             $eligibleRules = self::eligibleRulesForSave(
                 $this->manager->loadRules(),
                 $entryId,
                 (string) $entry->collectionHandle(),
                 $globalEnabled,
+                $entryLocale,
             );
 
             if (empty($eligibleRules)) {
@@ -137,6 +153,7 @@ class AutoLinkOnEntrySaveSubscriber
      *   - active=false → skip
      *   - rule targets the entry being saved → skip (no self-links)
      *   - rule has collection restriction and entry's collection isn't in it → skip
+     *   - rule has locale restriction (V1.2 B/F1) and entry's locale isn't in it → skip
      *   - tri-state autoApplyOnSave:
      *       'never'         → skip
      *       'always'        → fire (regardless of global)
@@ -150,8 +167,9 @@ class AutoLinkOnEntrySaveSubscriber
         string $entryId,
         string $entryCollection,
         bool $globalEnabled,
+        ?string $entryLocale = null,
     ): array {
-        return array_values(array_filter($rules, function ($r) use ($entryId, $entryCollection, $globalEnabled) {
+        return array_values(array_filter($rules, function ($r) use ($entryId, $entryCollection, $globalEnabled, $entryLocale) {
             if (! $r->active) {
                 return false;
             }
@@ -159,6 +177,14 @@ class AutoLinkOnEntrySaveSubscriber
                 return false;
             }
             if (! empty($r->collections) && ! in_array($entryCollection, $r->collections, true)) {
+                return false;
+            }
+            // V1.2 Cross-Tab-B — per-rule locale-scope. Same logic as the
+            // AutoLinkApplier preview/write filter, applied here to close
+            // the silent on-save path. A DE-only rule must not fire on
+            // EN entries even when the rule's keyword happens to appear
+            // in their content (loanwords etc.).
+            if (! $r->matchesLocale($entryLocale)) {
                 return false;
             }
 
