@@ -227,6 +227,48 @@ class SuggestionEngineLocaleScopingTest extends TestCase
         $this->assertEmpty($bridged, 'No ES anchor may bridge via "y": '.implode(' | ', $anchors));
     }
 
+    public function test_inbound_flow_respects_source_locale_via_override(): void
+    {
+        // User-bug 2026-05-24: opening Inbound-Suggestions modal on an EN
+        // target showed DE+NL sources whose translated bodies happened to
+        // contain the EN target title's words. The InboundEngine builds a
+        // $singleIndex containing only the target, then iterates source
+        // records OUTSIDE the index — so $index[$excludeEntryId] returns
+        // null and the same-locale filter passes everything. Fix: caller
+        // passes sourceLocaleOverride explicitly.
+        $target = $this->record('tgt', 'Docker Compose for Local PHP Development', 'en');
+        $singleIndex = ['tgt' => $target];
+
+        // EN source matching target title-stems → should pass (same locale).
+        $enSuggestions = $this->engine->suggest(
+            'We rely on Docker Compose for our development pipeline.',
+            $singleIndex,
+            'en-source-not-in-index',
+            sourceLocaleOverride: 'en',
+        );
+        $this->assertNotEmpty($enSuggestions, 'EN-locale source must be allowed to suggest EN-target.');
+
+        // DE source mentioning "Docker Compose" → must be filtered out even
+        // though target title contains the same words. This is the bug case
+        // before the fix.
+        $deSuggestions = $this->engine->suggest(
+            'Wir nutzen Docker Compose in unserer Entwicklung intensiv.',
+            $singleIndex,
+            'de-source-not-in-index',
+            sourceLocaleOverride: 'de',
+        );
+        $this->assertEmpty($deSuggestions, 'DE-locale source must NOT surface EN-target via the override path.');
+
+        // NL source same shape.
+        $nlSuggestions = $this->engine->suggest(
+            'Wij gebruiken Docker Compose voor lokale ontwikkeling.',
+            $singleIndex,
+            'nl-source-not-in-index',
+            sourceLocaleOverride: 'nl',
+        );
+        $this->assertEmpty($nlSuggestions, 'NL-locale source must NOT surface EN-target via the override path.');
+    }
+
     public function test_a1_title_localizable_false_uses_origin_locale_for_stemming(): void
     {
         // PR #102 audit A1 — DE-localization of an EN-origin with
