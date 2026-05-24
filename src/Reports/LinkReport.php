@@ -221,6 +221,7 @@ class LinkReport
                 'title' => $record->title,
                 'url' => $record->url,
                 'collection' => $record->collection,
+                'locale' => $record->locale,
                 'inbound_count' => $inbound,
                 'outbound_count' => count($validOutbound),
                 'outbound_links' => $validOutbound,
