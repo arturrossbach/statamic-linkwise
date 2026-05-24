@@ -59,20 +59,44 @@ class ActivityController extends CpController
             $itemsByEntry[$key][] = $item;
         }
 
+        // Pre-compute a snapshot-recorded title lookup so deleted entries can
+        // still render with their write-time title instead of a raw UUID.
+        // LinkInsertCommand (post-2026-05-24) stores source_entry_title +
+        // target_entry_title on every appendWrittenItem; older snapshots
+        // pre-date this and fall through to the legacy Entry::find path.
+        $snapshotTitlesById = [];
+        foreach ($snap['items'] ?? [] as $item) {
+            if (! is_array($item)) continue;
+            if (! empty($item['source_entry_id']) && ! empty($item['source_entry_title'])) {
+                $snapshotTitlesById[$item['source_entry_id']] = $item['source_entry_title'];
+            }
+            if (! empty($item['target_entry_id']) && ! empty($item['target_entry_title'])) {
+                $snapshotTitlesById[$item['target_entry_id']] = $item['target_entry_title'];
+            }
+        }
+
         $entries = [];
         foreach ($snap['entry_ids'] ?? [] as $entryId) {
-            $title = $entryId;
             $editUrl = null;
             $collection = null;
+            $isDeleted = false;
             try {
                 $entry = Entry::find($entryId);
                 if ($entry) {
                     $title = $entry->get('title') ?? $entryId;
                     $collection = $entry->collectionHandle();
                     $editUrl = cp_route('collections.entries.edit', [$collection, $entryId]);
+                } else {
+                    // Entry no longer exists. Prefer the snapshot-recorded
+                    // title (write-time capture) over the bare UUID, which
+                    // was the legacy fallback and looked like a bug to users.
+                    $isDeleted = true;
+                    $title = $snapshotTitlesById[$entryId] ?? '(deleted entry)';
                 }
             } catch (\Throwable) {
                 // Best-effort — fall back to ID-only display.
+                $title = $snapshotTitlesById[$entryId] ?? '(deleted entry)';
+                $isDeleted = true;
             }
             // Enrich items with target-entry titles where the URL points to
             // a Statamic entry. The drawer otherwise shows opaque "entry: abc123de…"
@@ -115,6 +139,7 @@ class ActivityController extends CpController
                 'title' => $title,
                 'collection' => $collection,
                 'edit_url' => $editUrl,
+                'is_deleted' => $isDeleted,
                 'status' => $statuses[$entryId] ?? 'unknown',
                 'items' => $resolvedItems,
             ];
