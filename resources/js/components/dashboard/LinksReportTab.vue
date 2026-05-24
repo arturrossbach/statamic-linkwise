@@ -163,11 +163,21 @@
                         :class="{ 'bg-red-50 dark:bg-red-900/10': entry.is_orphaned }"
                     >
                         <td class="break-words">
-                            <div class="flex items-center gap-1.5">
+                            <div class="flex items-center gap-1.5 flex-wrap">
                                 <span v-if="entry.is_orphaned" class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" v-tooltip="'Orphaned — no inbound links'"></span>
                                 <a :href="entry.edit_url" target="_blank" class="cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 break-words">
                                     {{ entry.title }}
                                 </a>
+                                <!-- V1.2 Cross-Tab-G — title-inherited hint. Renders when
+                                     the title's locale differs from the entry's body locale
+                                     (i.e. blueprint declares title localizable=false and
+                                     this entry is a localization of an origin in another
+                                     language). Italic + muted so it doesn't dominate. -->
+                                <span
+                                    v-if="entry.title_locale && entry.locale && entry.title_locale !== entry.locale"
+                                    class="text-[10px] italic text-amber-600 dark:text-amber-400"
+                                    v-tooltip="'Title inherited from ' + entry.title_locale + ' origin (title field is not localizable in the blueprint)'"
+                                >(inherited {{ entry.title_locale }})</span>
                             </div>
                         </td>
                         <td class="text-gray-500 dark:text-gray-400">
