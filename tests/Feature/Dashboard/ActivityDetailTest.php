@@ -183,12 +183,15 @@ class ActivityDetailTest extends TestCase
         ], $statuses);
     }
 
-    public function test_activity_detail_falls_back_to_entry_id_when_entry_lookup_fails(): void
+    public function test_activity_detail_falls_back_to_deleted_label_when_entry_lookup_fails(): void
     {
-        // Synthetic IDs aren't in the Stache → `Entry::find()` returns null
-        // → controller's try/catch persists `title = entryId` and leaves
-        // `edit_url = null`. Pins the deleted-entry render path (drawer
-        // shows "{entryId} (deleted)" in the list, ID-only in detail).
+        // Synthetic IDs aren't in the Stache → `Entry::find()` returns null.
+        // Post-2026-05-24 (user-bug from multilang smoke): the controller no
+        // longer falls back to the raw UUID — it surfaces a literal
+        // '(deleted entry)' label + is_deleted=true flag so the drawer can
+        // render a muted "deleted" badge instead of an opaque hash. The
+        // OPTIONAL snapshot-stored title path is exercised in the next test;
+        // this test pins the empty-snapshot case.
         $spy = $this->bindSnapshotSpy();
         $spy->shouldReceive('get')->andReturn($this->baseSnapshot([
             'entry_ids' => ['nonexistent-entry-uuid'],
@@ -199,7 +202,8 @@ class ActivityDetailTest extends TestCase
 
         $entry = $response->json('entries.0');
         $this->assertSame('nonexistent-entry-uuid', $entry['id']);
-        $this->assertSame('nonexistent-entry-uuid', $entry['title'], 'Fallback title must be the ID');
+        $this->assertSame('(deleted entry)', $entry['title'], 'Fallback title must be a human-readable label, not the raw UUID');
+        $this->assertTrue($entry['is_deleted'], 'is_deleted flag must be true for unresolvable entries');
         $this->assertNull($entry['edit_url'], 'edit_url must stay null when entry resolution fails');
         $this->assertNull($entry['collection']);
     }
