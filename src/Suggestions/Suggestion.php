@@ -17,6 +17,11 @@ class Suggestion
         public readonly bool $contextTruncatedEnd = false,
         public readonly string $matchType = '',
         public readonly string $matchReason = '',
+        // V1.2 Cross-Tab-E — target's ISO locale. Surfaces as a badge in
+        // the Outbound-Modal so the editor can confirm same-locale-
+        // filter actually scoped correctly. Null = single-site / legacy
+        // record (badge hides).
+        public readonly ?string $targetLocale = null,
     ) {}
 
     public function toArray(): array
@@ -34,6 +39,7 @@ class Suggestion
             'context_truncated_end' => $this->contextTruncatedEnd,
             'match_type' => $this->matchType,
             'match_reason' => $this->matchReason,
+            'target_locale' => $this->targetLocale,
         ];
     }
 }

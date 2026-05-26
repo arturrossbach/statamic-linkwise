@@ -27,6 +27,12 @@ class AutoLinkController extends CpController
             'auto_apply_on_save' => 'in:follow_global,always,never',
             'collections' => 'array|max:100',
             'collections.*' => 'string|max:80',
+            // V1.2 Cross-Tab-B — per-rule locale-scope. Empty array =
+            // match all sites (back-compat default). Values are ISO-639-1
+            // codes; validation against indexed locales happens at
+            // AutoLinkRule::normalizeLocales (lowercase + dedup).
+            'locales' => 'array|max:20',
+            'locales.*' => 'string|max:8',
         ]);
 
         $data['keyword'] = trim($data['keyword']);
@@ -91,6 +97,9 @@ class AutoLinkController extends CpController
             'collections' => 'array|max:100',
             'collections.*' => 'string|max:80',
             'active' => 'boolean',
+            // V1.2 Cross-Tab-B — per-rule locale-scope. See store() comment.
+            'locales' => 'array|max:20',
+            'locales.*' => 'string|max:8',
         ]);
 
         $rule = $this->manager->updateRule($id, $data);

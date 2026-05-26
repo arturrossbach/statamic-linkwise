@@ -222,6 +222,12 @@ class LinkReport
                 'url' => $record->url,
                 'collection' => $record->collection,
                 'locale' => $record->locale,
+                // V1.2 Cross-Tab-G — title's origin locale. When title field
+                // declares `localizable: false`, Statamic returns the
+                // inherited Origin title here, and EntryRecord::$titleLocale
+                // carries the Origin's locale. Frontend renders an
+                // "(inherited)" hint when this differs from $locale.
+                'title_locale' => $record->titleLocale,
                 'inbound_count' => $inbound,
                 'outbound_count' => count($validOutbound),
                 'outbound_links' => $validOutbound,
