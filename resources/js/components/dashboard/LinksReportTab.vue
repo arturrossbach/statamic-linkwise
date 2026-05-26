@@ -171,7 +171,7 @@
                             </div>
                         </td>
                         <td class="text-gray-500 dark:text-gray-400">
-                            {{ entry.collection }}
+                            {{ entry.collection }}<span v-if="entry.locale" class="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ entry.locale }}</span>
                         </td>
                         <td class="text-center">
                             <div class="inline-flex items-center gap-1">
