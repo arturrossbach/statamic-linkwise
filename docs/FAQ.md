@@ -33,7 +33,10 @@ Yes. Linkwise indexes content in Peak Cards, Bard custom sets, accordions, and a
 
 ---
 
-## Multilang / Multisite (V1.2)
+## Multilingual content (V1.2)
+
+> **Multisite ≠ Multilingual.** Multisite means you have ≥2 Sites in `sites.yaml` (which can all run in the same language — multi-domain strategy). Multilingual means content exists in ≥2 different languages, typically via Multisite where each Site has its own `lang:` declared. Linkwise's locale features only activate when the index has ≥2 distinct locales.
+
 
 ### How does Linkwise know which language an entry is in?
 
@@ -51,7 +54,7 @@ Content-based language auto-detection is on the V2 roadmap.
 
 The filter hides automatically when the persisted index has fewer than 2 distinct locales. Common reasons:
 - Single-site install (intended)
-- Multisite set up but Scan Content hasn't run since adding the second site
+- Multilingual set up but Scan Content hasn't run since adding the second-language site
 - The site you added has zero indexed entries (collection not in `linkwise.collections` config)
 
 Run **Scan Content** and check Overview → "Entries Indexed" — if you see per-locale chips there, the filter will appear on Links Report.
@@ -172,7 +175,7 @@ No. Background jobs use `exec()` directly — no queue worker required. Statamic
 
 Statamic session expired. Reload the page; if still white, navigate to `/cp` directly and re-login. Linkwise's frontend is bundled with Statamic's CP — when the auth-middleware drops `sessionExpiry` from the Inertia props, the entire CP crashes on a Vue destructure. Not a Linkwise bug; standard Statamic behavior after long idle.
 
-### After upgrading to V1.2 the Overview shows a "Multisite detected — index needs refresh" banner.
+### After upgrading to V1.2 the Overview shows a "Multilingual content detected — index needs refresh" banner.
 
 That means your persisted index contains records from before V1.2 (no locale stamp). Click **Scan Content** once — the indexer re-stamps every record with its site's locale. Banner disappears.
 

@@ -10,10 +10,12 @@ _No unreleased changes._
 
 ## [1.2.0] — 2026-05-26
 
-The Multilang/Multisite release. Linkwise now scopes Suggestions, Auto-Link
+The Multilingual-content release. Linkwise now scopes Suggestions, Auto-Link
 Rules, URL-Changes, and most UI surfaces to the entry's site `lang:`
-declaration. Single-site installs see no behavior change — every multilang
+declaration. Single-site or single-language installs see no behavior change — every multilingual
 feature hides itself when the index carries fewer than two distinct locales.
+
+_Note: "multisite" and "multilingual" are not synonyms. Multisite = multiple Sites configured in `sites.yaml`. Multilingual = content in ≥2 languages. The V1.2 features below activate on multilingual content, not on multi-domain-same-language setups._
 
 ### What's new
 
@@ -45,7 +47,7 @@ feature hides itself when the index carries fewer than two distinct locales.
   and an entry is a localization of an origin in another language,
   the Links Report shows an italic "(inherited en)" hint so editors
   know the title is foreign-language.
-- **Multisite re-index banner** on Overview. Surfaces when persisted
+- **Multilingual re-index banner** on Overview. Surfaces when persisted
   records lack locale stamps (pre-1.2 indices). One Scan Content
   upgrades them.
 - **`linkwise:seed-multilingual`** command. Creates origin-linked

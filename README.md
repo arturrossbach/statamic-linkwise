@@ -92,9 +92,11 @@ not marketing claims. If your language is not in this list, the runtime
 falls back to English defaults; you can verify behaviour with a local
 scan before licensing.
 
-### Multisite + per-locale scoping (V1.2+)
+### Multilingual content (V1.2+)
 
-On Statamic-multisite installs, Linkwise auto-detects each entry's
+> _Multisite ≠ multilingual. Multisite means multiple Sites in `sites.yaml` (can all share a language for multi-domain setups). Multilingual means content in ≥2 different languages — typically via Multisite where each Site declares its own `lang:`. The features below kick in when the index actually carries ≥2 distinct locales._
+
+On Statamic-multisite installs with multiple content languages, Linkwise auto-detects each entry's
 content language via `$site->lang()` and:
 
 - **Scopes Suggestions per-site.** A DE-source entry only suggests DE-target entries. EN sources don't surface DE targets and vice versa. Auto-routing of `statamic://entry::<uuid>` to the current-site localization is handled by Statamic core; Linkwise's filter prevents cross-locale suggestions from ever being generated.

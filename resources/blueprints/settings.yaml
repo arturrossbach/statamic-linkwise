@@ -5,16 +5,14 @@ sections:
       - handle: language
         field:
           type: select
-          display: 'Content language (fallback)'
+          display: 'Single-site content language'
           clearable: true
           instructions: |
-            Drives stop-word filtering, stemming, and keyword extraction. Leave empty to auto-detect from Statamic's site locale. "Confident" languages support inflected matching (plurals, conjugations); "Limited" languages match exact word forms only.
+            Drives stop-word filtering, stemming, and keyword extraction on single-site installs. Pick the language your content is written in. "Confident" languages support inflected matching (plurals, conjugations); "Limited" languages match exact word forms only. Leave empty to auto-detect from Statamic's site locale.
 
-            **Single-site installs**: this is the primary content-language source. Pick the language your content is written in.
+            **Multilingual installs (multisite with ≥2 different `lang:` declarations) can ignore this field.** Linkwise reads each entry's site `lang:` directly and stems per-entry — the per-site declaration in `resources/sites.yaml` wins. This field is only a fallback for the edge case where a site has `locale:` set but no `lang:` declared, which is extremely rare in modern Statamic.
 
-            **Multisite installs**: this setting is essentially inactive. Linkwise reads each entry's site `lang:` declaration directly and stems per-entry. The only edge case it covers is a site that has `locale:` but no `lang:` declared in `sites.yaml` — extremely rare in modern Statamic. If your sites.yaml declares `lang:` on every site (the default since Statamic 5), this field has no effect on your suggestion quality.
-
-            _Affects the NLP pipeline on single-site installs — run **Scan Content** (header button) after changing this for the new language to take effect._
+            _Affects the NLP pipeline — run **Scan Content** (header button) after changing this for the new language to take effect._
           options:
             en: 'English (Confident)'
             de: 'German (Confident)'

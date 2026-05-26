@@ -16,7 +16,7 @@
         <div v-if="multisiteReindexNeeded" class="mb-4 p-4 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60">
             <div class="flex items-start gap-3">
                 <div class="flex-1 text-sm">
-                    <p class="font-medium text-amber-900 dark:text-amber-100 mb-1">Multisite detected — index needs a refresh</p>
+                    <p class="font-medium text-amber-900 dark:text-amber-100 mb-1">Multilingual content detected — index needs a refresh</p>
                     <p class="text-amber-800 dark:text-amber-200/90">Some entries were indexed before per-site locale tagging shipped. Run <strong>Scan Content</strong> once so cross-locale suggestion filtering applies to every entry.</p>
                 </div>
                 <button
