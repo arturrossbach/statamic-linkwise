@@ -238,7 +238,7 @@
                  who hits a bug picks whichever fits — we still get the report.
                  Visible on every Linkwise tab AFTER the tab content; deliberately
                  understated so it doesn't compete with the data. -->
-            <div class="text-xs text-gray-400 dark:text-gray-500 text-center mt-12 mb-4 select-none">
+            <div class="text-xs text-gray-400 dark:text-gray-500 text-center mt-12 mb-2 select-none">
                 Need help?
                 <a :href="githubIssueUrl" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Open issue</a>
                 <span class="opacity-50 mx-1">·</span>
@@ -248,6 +248,19 @@
                 <span class="opacity-50 mx-1">·</span>
                 <a href="#" @click.prevent="confirmDebugExportWithLogs" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Download diagnostic ZIP</a>
             </div>
+
+            <!-- Permanent license/disclaimer line. Onboarding-Card-version
+                 (line ~131) is only shown on first-visit pre-scan; once the
+                 user has indexed content the empty-state disappears and so
+                 does the disclaimer. For commercial-product legal cover the
+                 customer must see the AS-IS/liability cap regardless of state,
+                 so we mirror the same text here at the bottom of every tab.
+                 Deliberately tiny + muted — informational, not aggressive. -->
+            <p class="text-[10px] text-gray-400 dark:text-gray-500 text-center mb-4 max-w-md mx-auto leading-relaxed select-none">
+                By using Linkwise you accept the
+                <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/LICENSE.md" target="_blank" rel="noopener" class="hover:underline">license terms</a>
+                — including the AS-IS warranty disclaimer and liability limited to the license fee paid. You are responsible for content backups; every bulk operation is persisted to <code class="text-[10px]">storage/linkwise/bulk-snapshots/</code> for forensic recovery.
+            </p>
         </div>
 
         <!-- Debug-export "with logs" confirmation. Default download path is
