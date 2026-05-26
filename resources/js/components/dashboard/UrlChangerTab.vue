@@ -526,6 +526,13 @@ export default {
                                 anchor_text: occ.anchor_text,
                                 context: occ.context || '',
                                 matched_url: occ.matched_url,
+                                // V1.2-I — resolved target-entry title for
+                                // internal hrefs. UrlReplacer::processEntry
+                                // sets these for statamic://entry::<uuid>
+                                // matches; the Current-URL cell renders
+                                // the title prominently when present.
+                                matched_url_title: occ.matched_url_title || null,
+                                matched_url_target_id: occ.matched_url_target_id || null,
                                 field: occ.field,
                                 field_type: occ.field_type,
                                 occurrence_index: occ.occurrence_index,
