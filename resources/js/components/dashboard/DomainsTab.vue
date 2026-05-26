@@ -11,6 +11,12 @@
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5 leading-relaxed">
                         <strong class="text-gray-700 dark:text-gray-300">Set a rel attribute</strong> per domain (Nofollow / Sponsored / UGC) and Linkwise applies it automatically to every link pointing to that domain when the page is rendered. Useful for affiliate, sponsored, or untrusted-source links across many entries at once.
                     </p>
+                    <!-- V1.2 Cross-Tab-F — sprach-agnostisch note. Only renders
+                         on multisite installs (passed via prop) so single-site
+                         CPs don't get a noise-line. -->
+                    <p v-if="isMultisite" class="text-xs text-gray-400 dark:text-gray-500 mt-1.5 italic">
+                        Domains are sprach-agnostisch — the list aggregates across all sites. Locale filtering is intentionally absent here since a broken external URL is broken in every locale.
+                    </p>
                 </div>
                 <HelpIcon tooltip="Domain attributes are stored in storage/linkwise/domain-attributes.json and applied via Linkwise's Bard link mark — no Bard content is rewritten." />
             </div>
@@ -237,6 +243,9 @@ export default {
 
     props: {
         domains: { type: Array, required: true },
+        // V1.2 Cross-Tab-F — true on multisite installs so the sprach-
+        // agnostisch caption renders. Single-site CPs see no extra note.
+        isMultisite: { type: Boolean, default: false },
         saveUrl: { type: String, required: true },
         exportUrl: { type: String, default: '' },
         rebuildUrl: { type: String, default: '' },

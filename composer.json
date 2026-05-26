@@ -24,7 +24,9 @@
     "support": {
         "issues": "https://github.com/arturrossbach/statamic-linkwise/issues",
         "source": "https://github.com/arturrossbach/statamic-linkwise",
-        "email": "linkwise.support@gmail.com"
+        "email": "linkwise.support@gmail.com",
+        "docs": "https://github.com/arturrossbach/statamic-linkwise/blob/master/README.md",
+        "changelog": "https://github.com/arturrossbach/statamic-linkwise/blob/master/CHANGELOG.md"
     },
     "require": {
         "php": "^8.2",

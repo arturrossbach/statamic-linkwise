@@ -96,6 +96,11 @@
                             </span>
                         </li>
                     </ol>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 max-w-lg mx-auto text-center mt-4">
+                        Running a multilingual site? V1.2 added per-locale filtering, per-rule locale-scope, and locale badges. See the
+                        <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/docs/FAQ.md#multilang--multisite-v12" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">FAQ → Multilang section</a>
+                        for the walkthrough.
+                    </p>
 
                     <div class="text-center">
                         <Button v-if="!rebuilding" @click="rebuildIndex" variant="primary" text="Scan Now" />
@@ -115,9 +120,16 @@
                             Need help getting set up?
                             <a href="https://github.com/arturrossbach/statamic-linkwise#readme" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Read the docs</a>
                             ·
+                            <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/docs/FAQ.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">FAQ</a>
+                            ·
+                            <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/CHANGELOG.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Release notes</a>
+                            ·
                             <a href="https://github.com/arturrossbach/statamic-linkwise/issues/new?template=question.yml" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Ask on GitHub</a>
                             ·
                             <a href="mailto:linkwise.support@gmail.com?subject=Linkwise%20setup%20question" class="text-blue-600 dark:text-blue-400 hover:underline">Email support</a>
+                        </p>
+                        <p class="text-[10px] text-gray-400 dark:text-gray-500 mt-3 max-w-md mx-auto leading-relaxed">
+                            By using Linkwise you accept the <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/LICENSE.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 underline hover:no-underline">license terms</a> — AS-IS warranty disclaimer, liability limited to the license fee paid. You are responsible for content backups.
                         </p>
                     </div>
                 </div>
@@ -226,7 +238,7 @@
                  who hits a bug picks whichever fits — we still get the report.
                  Visible on every Linkwise tab AFTER the tab content; deliberately
                  understated so it doesn't compete with the data. -->
-            <div class="text-xs text-gray-400 dark:text-gray-500 text-center mt-12 mb-4 select-none">
+            <div class="text-xs text-gray-400 dark:text-gray-500 text-center mt-12 mb-2 select-none">
                 Need help?
                 <a :href="githubIssueUrl" target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Open issue</a>
                 <span class="opacity-50 mx-1">·</span>
@@ -236,6 +248,19 @@
                 <span class="opacity-50 mx-1">·</span>
                 <a href="#" @click.prevent="confirmDebugExportWithLogs" class="underline hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Download diagnostic ZIP</a>
             </div>
+
+            <!-- Permanent license/disclaimer line. Onboarding-Card-version
+                 (line ~131) is only shown on first-visit pre-scan; once the
+                 user has indexed content the empty-state disappears and so
+                 does the disclaimer. For commercial-product legal cover the
+                 customer must see the AS-IS/liability cap regardless of state,
+                 so we mirror the same text here at the bottom of every tab.
+                 Deliberately tiny + muted — informational, not aggressive. -->
+            <p class="text-xs text-gray-400 dark:text-gray-500 text-center mb-4 max-w-md mx-auto leading-relaxed select-none">
+                By using Linkwise you accept the
+                <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/LICENSE.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 underline hover:no-underline">license terms</a>
+                — AS-IS warranty disclaimer, liability limited to the license fee paid. You are responsible for content backups.
+            </p>
         </div>
 
         <!-- Debug-export "with logs" confirmation. Default download path is

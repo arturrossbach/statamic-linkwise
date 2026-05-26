@@ -108,6 +108,15 @@ class AutoLinkApplier
                 continue;
             }
 
+            // V1.2 Cross-Tab-B — per-rule locale scope. Empty rule.locales =
+            // match all (back-compat). Null entry-locale (single-site /
+            // legacy record) passes too. Closes audit F1: a DE-rule no
+            // longer fires on EN entries just because the keyword happens
+            // to appear in both languages.
+            if (! $rule->matchesLocale($record->locale)) {
+                continue;
+            }
+
             $result['entries_checked']++;
 
             // Skip self-referencing (entry linking to itself)

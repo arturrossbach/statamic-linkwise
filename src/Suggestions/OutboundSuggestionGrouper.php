@@ -63,6 +63,7 @@ class OutboundSuggestionGrouper
                     'target_entry_id' => $s->targetEntryId,
                     'target_title' => $s->targetTitle,
                     'target_collection' => $s->targetCollection,
+                    'target_locale' => $s->targetLocale,
                     'anchor_text' => $s->anchorText,
                     'score' => $s->score,
                     'sentence_context' => $s->sentenceContext,

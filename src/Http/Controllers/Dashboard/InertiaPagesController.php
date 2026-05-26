@@ -88,6 +88,22 @@ class InertiaPagesController extends CpController
 
         $resolvedLanguage = \Arturrossbach\Linkwise\NLP\LanguageRegistry::resolveWithSource();
 
+        // V1.2 Cross-Tab-C — per-locale entry breakdown for the Overview's
+        // headline stats card. Frontend renders "165 EN · 10 DE · 10 NL"
+        // chips under the total. Empty + single-locale indices return an
+        // empty breakdown so the chips don't render (single-site stays
+        // visually identical to pre-V1.2).
+        $localeBreakdown = [];
+        foreach ($records as $r) {
+            if ($r->locale === null) continue;
+            $localeBreakdown[$r->locale] = ($localeBreakdown[$r->locale] ?? 0) + 1;
+        }
+        if (count($localeBreakdown) < 2) {
+            $localeBreakdown = [];
+        } else {
+            ksort($localeBreakdown);
+        }
+
         // PR #102 audit C1 — flag a "Re-Run Scan Content" banner on the
         // Overview when the install is multisite-enabled AND any record in
         // the persisted index lacks a locale stamp. That combination means
@@ -123,6 +139,12 @@ class InertiaPagesController extends CpController
                 'source_detail' => $resolvedLanguage['source_detail'],
             ],
             'multisiteReindexNeeded' => $multisiteReindexNeeded,
+            'localeBreakdown' => $localeBreakdown,
+            // V1.2 multilang-polish: hide single-value "Content language: X"
+            // header on multilingual installs (per-entry stemming = no single
+            // global "content language"). Sites-based detection so it's
+            // accurate on fresh-install-pre-first-scan too.
+            'isMultilingual' => \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::isMultilingualBySites(),
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
@@ -357,8 +379,16 @@ class InertiaPagesController extends CpController
             }
         }
 
+        $isMultisite = false;
+        try {
+            $isMultisite = \Statamic\Facades\Site::multiEnabled();
+        } catch (\Throwable) {
+            // Facade missing in some test contexts — default false.
+        }
+
         return Inertia::render('linkwise::Domains', [
             'domains' => $domainsData,
+            'isMultisite' => $isMultisite,
             'saveUrl' => cp_route('linkwise.save-domain-attribute'),
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
@@ -370,9 +400,13 @@ class InertiaPagesController extends CpController
 
     // ─── Page: Auto-Linking ────────────────────────────────────────────
 
-    public function autolink(): \Inertia\Response
+    public function autolink(Request $request): \Inertia\Response
     {
         $records = $this->indexer->load();
+        // V1.2 Cross-Tab-B — surface availableLocales so RuleForm can render
+        // the per-rule locale multi-select. NOT a filter (rules themselves
+        // carry the scope, the page list shows all rules regardless).
+        $availableLocales = \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::availableLocales($records);
         $report = new LinkReport($records);
         $entries = $report->toArray()['entries'];
 
@@ -413,6 +447,7 @@ class InertiaPagesController extends CpController
             'autolinkData' => [
                 'rules' => $rulesArray,
                 'collections' => $collections,
+                'available_locales' => $availableLocales,
                 'auto_apply_on_save_enabled' => (bool) config('linkwise.auto_apply_on_save_enabled', false),
                 'urls' => [
                     'store' => cp_route('linkwise.autolink.store'),
@@ -597,6 +632,11 @@ class InertiaPagesController extends CpController
 
     public function urlChanger(Request $request): \Inertia\Response
     {
+        // V1.2 Cross-Tab-D — surface availableLocales so the URL Changer
+        // form can render the "Apply to: All sites / <locale>" select.
+        $records = $this->indexer->load();
+        $availableLocales = \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::availableLocales($records);
+
         $domainReport = new DomainReport($this->indexer);
         // Frontend expects `[{domain: 'example.com'}, ...]` (it accesses
         // `d.domain` in the autocomplete). Returning plain strings crashed
@@ -615,6 +655,7 @@ class InertiaPagesController extends CpController
                 'apply_cancel_url' => cp_route('linkwise.url-changer.apply-cancel'),
             ],
             'domains' => $domains,
+            'availableLocales' => $availableLocales,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),

@@ -17,6 +17,11 @@ class InboundSuggestion
         public readonly bool $contextTruncatedEnd = false,
         public readonly string $matchType = '',
         public readonly string $matchReason = '',
+        // V1.2 Cross-Tab-E — source's ISO locale. Surfaces in the
+        // Modal-header + per-row badge so the editor can confirm the
+        // same-locale-filter actually worked. Null = single-site /
+        // legacy record (badge hides).
+        public readonly ?string $sourceLocale = null,
     ) {}
 
     public function toArray(): array
@@ -34,6 +39,7 @@ class InboundSuggestion
             'context_truncated_end' => $this->contextTruncatedEnd,
             'match_type' => $this->matchType,
             'match_reason' => $this->matchReason,
+            'source_locale' => $this->sourceLocale,
         ];
     }
 
@@ -64,6 +70,7 @@ class InboundSuggestion
             contextTruncatedEnd: (bool) ($data['context_truncated_end'] ?? false),
             matchType: isset($data['match_type']) && is_string($data['match_type']) ? $data['match_type'] : '',
             matchReason: isset($data['match_reason']) && is_string($data['match_reason']) ? $data['match_reason'] : '',
+            sourceLocale: isset($data['source_locale']) && is_string($data['source_locale']) && $data['source_locale'] !== '' ? $data['source_locale'] : null,
         );
     }
 }

@@ -27,13 +27,18 @@ class UrlChangerController extends CpController
         $request->validate([
             'search' => 'nullable|string|max:2048',
             'mode' => 'string|in:smart,exact',
+            // V1.2 Cross-Tab-D — optional ISO-639-1 code to restrict the
+            // preview to entries on the matching site. Empty/missing = all
+            // sites = today's behavior.
+            'locale' => 'nullable|string|max:8',
         ]);
 
         $this->replacer->setMode($request->input('mode', 'smart'));
         // Laravel's ConvertEmptyStringsToNull middleware turns "" into null
         // before validation. The replacer signature requires string, so coalesce.
         $search = $request->input('search') ?? '';
-        $result = $this->replacer->preview($search, '');
+        $localeFilter = $request->input('locale') ?: null;
+        $result = $this->replacer->preview($search, '', $localeFilter);
 
         // Add edit_url and content hash for each entry
         foreach ($result['entries'] as &$entry) {

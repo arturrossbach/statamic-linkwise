@@ -1,7 +1,7 @@
 <template>
     <LinkwiseLayout active-tab="urlchanger" page-title="Linkwise — URL Changer" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
         <!-- :key="renderKey" — universal post-bulk remount (Klasse-10). -->
-        <UrlChangerTab ref="urlChanger" :key="renderKey" :data="urlChangerData" :domains="domains" :initial-search="initialSearch" />
+        <UrlChangerTab ref="urlChanger" :key="renderKey" :data="urlChangerData" :domains="domains" :initial-search="initialSearch" :available-locales="availableLocales" />
     </LinkwiseLayout>
 </template>
 
@@ -21,6 +21,7 @@ export default {
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },
         initialSearch: { type: String, default: '' },
+        availableLocales: { type: Array, default: () => [] },
     },
 
     data() {
