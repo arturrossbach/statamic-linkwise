@@ -20,7 +20,7 @@ Linkwise does not transmit data from your installation to the author or any thir
 
 The author's total cumulative liability under this License, whether in contract, tort, or otherwise, shall not exceed the amount you paid for the Linkwise license.
 
-The above limitation does **not** apply to: (a) damages caused by the author's intent or gross negligence, (b) damages resulting from injury to life, body, or health, or (c) other liability that cannot be excluded under mandatory applicable law (in particular § 309 No. 7 BGB under German jurisdiction).
+The above limitation does not apply to liability that mandatory applicable law prohibits us from limiting — in particular for intent, gross negligence, or injury to life or health (§ 309 Nr. 7 BGB).
 
 You are responsible for maintaining backups of your Statamic content. Linkwise persists forensic snapshots of every bulk operation under `storage/linkwise/bulk-snapshots/` for incident reference, but the author is not liable for content loss caused by user error, third-party software conflicts, or hosting-environment issues.
 
