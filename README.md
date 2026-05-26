@@ -5,6 +5,7 @@
 Built for **Statamic 6** with Inertia + native UI components. No external services. No telemetry. Your link data stays on your server.
 
 📖 **Documentation:** [linkwise.arturrossbach.de](https://linkwise.arturrossbach.de) *(deploying)*
+❓ **FAQ:** [docs/FAQ.md](docs/FAQ.md) — common questions answered up front
 🛒 **Marketplace:** [statamic.com/addons/arturrossbach/statamic-linkwise](https://statamic.com/addons/arturrossbach/statamic-linkwise) *(submitting)*
 
 ---

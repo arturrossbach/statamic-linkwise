@@ -19,9 +19,11 @@ sections:
           instructions: |
             Drives stop-word filtering, stemming, and keyword extraction. Leave empty to auto-detect from Statamic's site locale. "Confident" languages support inflected matching (plurals, conjugations); "Limited" languages match exact word forms only.
 
-            **On multisite installs**, each entry is automatically scoped to its own site's `lang` declaration — Linkwise stems and filters per-entry. This setting becomes the fallback used only when a site has no `lang:` declaration in `resources/sites.yaml`. Single-site installs use it as the primary language source.
+            **Single-site installs**: this is the primary content-language source. Pick the language your content is written in.
 
-            _Affects the NLP pipeline — run **Scan Content** (header button) after changing this for the new language to take effect._
+            **Multisite installs**: this setting is essentially inactive. Linkwise reads each entry's site `lang:` declaration directly and stems per-entry. The only edge case it covers is a site that has `locale:` but no `lang:` declared in `sites.yaml` — extremely rare in modern Statamic. If your sites.yaml declares `lang:` on every site (the default since Statamic 5), this field has no effect on your suggestion quality.
+
+            _Affects the NLP pipeline on single-site installs — run **Scan Content** (header button) after changing this for the new language to take effect._
           options:
             en: 'English (Confident)'
             de: 'German (Confident)'
@@ -161,7 +163,14 @@ sections:
         field:
           type: toggle
           display: Prevent Two-Way Linking
-          instructions: "If entry A links to entry B, don't suggest linking B to A. _Run **Scan Content** after changing this so the Links Report counts reflect the new filter._"
+          instructions: |
+            If entry A already links to entry B, don't suggest linking B → A.
+
+            **Why this exists**: reciprocal links are a known SEO anti-pattern. Google's link-equity model gives less weight to A↔B link pairs because they look like exchange-link schemes. Enable this if you're optimising for link-equity distribution across a content cluster.
+
+            Leave OFF if your site is small enough that mutual references are a natural editorial signal (most sites). Default off.
+
+            _Run **Scan Content** after changing this so the Links Report counts reflect the new filter._
           default: false
           width: 50
 
@@ -243,7 +252,19 @@ sections:
         field:
           type: textarea
           display: Custom Stopwords
-          instructions: "Additional stopwords to filter out (one per line). These are added to the language defaults. _Affects keyword extraction at index-time — run **Scan Content** after changing this for the new stopwords to take effect._"
+          instructions: |
+            Additional words Linkwise should treat as filler (one per line). Added on top of the language's built-in stopwords + frequency-list.
+
+            **Why this exists**: every site has its own filler vocabulary the global lists can't predict. A tech blog about "agile" doesn't want "agile" surfacing in every keyword match. A brand-focused site doesn't want their own brand name auto-extracted as a link anchor on every entry.
+
+            **Typical entries**:
+            - Your brand/company name (avoids self-anchoring everywhere)
+            - Industry jargon that appears in every post but isn't link-worthy ("strategy", "approach", "solution")
+            - Recurring author names if multi-author bylines pollute keyword extraction
+
+            Leave empty if the default lists work for your content (most sites). Lowercase, one per line.
+
+            _Affects keyword extraction at index-time — run **Scan Content** after changing this for the new stopwords to take effect._
           placeholder: |
             yourcompany
             brandname

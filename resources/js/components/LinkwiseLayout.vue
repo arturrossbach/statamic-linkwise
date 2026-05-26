@@ -96,6 +96,11 @@
                             </span>
                         </li>
                     </ol>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 max-w-lg mx-auto text-center mt-4">
+                        Running a multilingual site? V1.2 added per-locale filtering, per-rule locale-scope, and locale badges. See the
+                        <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/docs/FAQ.md#multilang--multisite-v12" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">FAQ → Multilang section</a>
+                        for the walkthrough.
+                    </p>
 
                     <div class="text-center">
                         <Button v-if="!rebuilding" @click="rebuildIndex" variant="primary" text="Scan Now" />
@@ -114,6 +119,8 @@
                         <p class="text-xs text-gray-500 dark:text-gray-400">
                             Need help getting set up?
                             <a href="https://github.com/arturrossbach/statamic-linkwise#readme" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Read the docs</a>
+                            ·
+                            <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/docs/FAQ.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">FAQ</a>
                             ·
                             <a href="https://github.com/arturrossbach/statamic-linkwise/issues/new?template=question.yml" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Ask on GitHub</a>
                             ·
