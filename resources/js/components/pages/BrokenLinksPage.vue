@@ -1,5 +1,16 @@
 <template>
     <LinkwiseLayout active-tab="broken" page-title="Linkwise — Broken Links" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
+        <!-- V1.2 locale-filter — applied at the broken_links level via the
+             controller's `?locale=` filter, the filtered list arrives in
+             brokenData already-trimmed. This widget just lets the user
+             change the active scope. -->
+        <div v-if="availableLocales && availableLocales.length > 0" class="mb-4 flex justify-end">
+            <LocaleFilter
+                :available="availableLocales"
+                :current="activeLocale"
+                @update="onLocaleChange"
+            />
+        </div>
         <!-- :key="renderKey" — universal post-bulk-completion remount.
              Klasse-10 applied broadly (User-Smoke 2026-05-21). -->
         <BrokenLinksTab :key="renderKey" :data="brokenData" :checking="checking" :check-progress="checkProgress" :initial-entry-filter="initialEntryFilter" :apply-url="applyUrl" :ignore-url="ignoreUrl" :unignore-url="unignoreUrl" :bulk-unlink-url="bulkUnlinkUrl" :bulk-unlink-status-url="bulkUnlinkStatusUrl" :bulk-unlink-cancel-url="bulkUnlinkCancelUrl" :export-url="exportUrl" :entry-hashes="entryHashes" @check-links="checkLinks" />
@@ -9,15 +20,18 @@
 <script>
 import LinkwiseLayout from '../LinkwiseLayout.vue';
 import BrokenLinksTab from '../dashboard/BrokenLinksTab.vue';
+import LocaleFilter from '../LocaleFilter.vue';
 import { bulkState } from '../../services/bulkOperationService.js';
 import { router as inertiaRouter } from '@statamic/cms/inertia';
 
 export default {
-    components: { LinkwiseLayout, BrokenLinksTab },
+    components: { LinkwiseLayout, BrokenLinksTab, LocaleFilter },
 
     props: {
         brokenData: { type: Object, required: true },
         entryHashes: { type: Object, default: () => ({}) },
+        availableLocales: { type: Array, default: () => [] },
+        activeLocale: { default: null }, // type omitted — null is "all", see LocaleFilter.vue
         applyUrl: { type: String, default: '' },
         ignoreUrl: { type: String, default: '' },
         unignoreUrl: { type: String, default: '' },
@@ -81,6 +95,23 @@ export default {
     },
 
     methods: {
+        // V1.2 locale-filter — drive via URL query, see LinksPage.vue for
+        // the same pattern + rationale.
+        onLocaleChange(locale) {
+            const url = new URL(window.location.href);
+            if (locale) {
+                url.searchParams.set('locale', locale);
+            } else {
+                url.searchParams.delete('locale');
+            }
+            // See LinksPage.vue for the preserveState+renderKey rationale.
+            inertiaRouter.visit(url.pathname + url.search, {
+                preserveScroll: true,
+                preserveState: true,
+                onSuccess: () => { this.renderKey++; },
+            });
+        },
+
         autoCheckFromQuery() {
             const params = new URLSearchParams(window.location.search);
             return params.get('auto_check') === '1';

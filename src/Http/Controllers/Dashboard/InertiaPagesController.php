@@ -134,6 +134,14 @@ class InertiaPagesController extends CpController
     public function links(Request $request): \Inertia\Response
     {
         $records = $this->indexer->load();
+
+        // V1.2 locale-filter: apply `?locale=de` before LinkReport so the
+        // table-level counts (entries.length, inbound/outbound aggregations
+        // produced inside LinkReport) reflect the filtered scope. Filter is
+        // null-safe — when no `?locale=` is set, all records pass.
+        $filterState = \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::apply($records, $request);
+        $records = $filterState['filteredRecords'];
+
         $report = new LinkReport($records);
         $data = $report->toArray();
 
@@ -249,6 +257,8 @@ class InertiaPagesController extends CpController
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
             'indexLastBuiltAt' => $this->indexer->getIndexLastBuiltAt(),
             'initialOrphaned' => (bool) $request->query('orphaned'),
+            'availableLocales' => $filterState['availableLocales'],
+            'activeLocale' => $filterState['activeLocale'],
         ] + StaleCheckPresenter::buildProps($this->indexer));
     }
 
@@ -257,11 +267,31 @@ class InertiaPagesController extends CpController
     public function broken(Request $request): \Inertia\Response
     {
         $records = $this->indexer->load();
+
+        // V1.2 locale-filter: applied at the broken_links level after
+        // BrokenLinkReport runs, since BrokenLinkReport itself reads its
+        // own JSON store (not the entry index). Filter strategy: compute
+        // the allowed post_id set from filtered records, then trim
+        // broken_links to those whose post_id is in the set.
+        $filterState = \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::apply($records, $request);
+        $allowedPostIds = $filterState['activeLocale'] !== null
+            ? array_fill_keys(array_keys($filterState['filteredRecords']), true)
+            : null;
+
         $report = new LinkReport($records);
         $entries = $report->toArray()['entries'];
 
         $brokenReport = new BrokenLinkReport;
         $brokenData = $brokenReport->toArray();
+
+        if ($allowedPostIds !== null) {
+            $brokenData['broken_links'] = array_values(array_filter(
+                $brokenData['broken_links'],
+                fn ($bl) => isset($allowedPostIds[$bl['post_id']]),
+            ));
+            // Keep metadata in sync — broken_count should match what the user sees.
+            $brokenData['metadata']['broken_count'] = count($brokenData['broken_links']);
+        }
 
         foreach ($brokenData['broken_links'] as &$brokenLink) {
             $entryData = collect($entries)->firstWhere('id', $brokenLink['post_id']);
@@ -296,6 +326,8 @@ class InertiaPagesController extends CpController
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
             'exportUrl' => cp_route('linkwise.broken-links.export'),
             'initialEntryFilter' => $request->query('entry', ''),
+            'availableLocales' => $filterState['availableLocales'],
+            'activeLocale' => $filterState['activeLocale'],
         ] + StaleCheckPresenter::buildProps($this->indexer));
     }
 
