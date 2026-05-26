@@ -4,10 +4,9 @@
 
 Built for **Statamic 6** with Inertia + native UI components. No external services. No telemetry. Your link data stays on your server.
 
-📖 **Documentation:** [linkwise.arturrossbach.de](https://linkwise.arturrossbach.de) *(deploying)*
 ❓ **FAQ:** [docs/FAQ.md](docs/FAQ.md) — common questions answered up front
 📝 **Release notes:** [CHANGELOG.md](CHANGELOG.md) — what changed in each version
-🛒 **Marketplace:** [statamic.com/addons/arturrossbach/statamic-linkwise](https://statamic.com/addons/arturrossbach/statamic-linkwise) *(submitting)*
+🛒 **Marketplace:** [statamic.com/addons/arturrossbach/linkwise](https://statamic.com/addons/arturrossbach/linkwise) *(submitting)*
 
 ---
 
@@ -77,9 +76,11 @@ Linkwise locally, point it at your actual content, and verify that
 - suggestions feel relevant for your editorial workflow,
 - performance is acceptable on your corpus size.
 
-Only when you're ready to deploy on a public site does the per-site
-license activate. Test locally first; the language compatibility matrix
-below tells you which kind of behaviour to expect.
+Only when you're ready to deploy on a public site does the per-installation
+license activate. **One Linkwise license covers one Statamic installation
+— regardless of how many languages, sub-domains, or production domains
+that installation serves.** Test locally first; the language compatibility
+matrix below tells you which kind of behaviour to expect.
 
 ---
 
@@ -160,7 +161,7 @@ plural and conjugated forms won't match a base-form rule.
 
 | Language   | Reason                                                                    |
 |------------|---------------------------------------------------------------------------|
-| Arabic / Hebrew | RTL + tokenization not implemented (V1.1 candidates)                |
+| Arabic / Hebrew | RTL + tokenization not implemented (future roadmap)                 |
 | Chinese    | No space-based word boundaries — needs jieba/ICU tokenizer                |
 | Japanese   | No space-based word boundaries — needs MeCab                              |
 | Korean     | No space-based word boundaries                                            |
@@ -175,8 +176,6 @@ can't silently configure something that won't work.
 ## Configuration
 
 All settings are configurable via the Statamic CP under **Settings → Linkwise**, or via `config/linkwise.php` after `php artisan vendor:publish --tag=linkwise-config`.
-
-For production deployment notes (cache driver, server configuration, long-running bulks), see the [documentation](https://linkwise.arturrossbach.de/).
 
 ---
 
@@ -198,7 +197,7 @@ Apply auto-link rules to thousands of entries, check links for broken status, re
 
 Open a [GitHub issue](https://github.com/arturrossbach/statamic-linkwise/issues). The Control Panel's **Help → Download diagnostic ZIP** attaches the privacy-safe runtime info we need.
 
-For commercial support: see [LICENSE.md](./LICENSE.md).
+For commercial support: linkwise.support@gmail.com
 
 ---
 
