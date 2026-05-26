@@ -22,7 +22,7 @@ Find broken links, surface internal linking opportunities, manage `rel` attribut
 
 ### What you get
 
-- **🔗 Smart suggestion engine** — surfaces internal-linking opportunities through title matches (with stemming), editor-defined custom keywords, and auto-extracted TF-IDF keywords from content. Per-locale scoping on multilingual installs (V1.2+).
+- **🔗 Suggestion engine** — surfaces internal-linking opportunities through title matches (with stemming), editor-defined custom keywords, and auto-extracted TF-IDF keywords from content. Per-locale scoping on multilingual installs (V1.2+).
 - **🧱 Works with Peak + any Replicator setup** — indexes content in Peak Cards, Bard custom sets, accordions, and any addon that stores text in nested fields.
 - **⚡ Auto-Link Rules** — keyword → URL with case-sensitivity, collection scoping, once-per-post enforcement, per-locale scope, and auto-apply-on-save.
 - **🔍 Broken-Link Finder** — smart retry + error classification, inline edit / ignore / unlink from the table.
@@ -103,7 +103,7 @@ Recommended sequence (highest impact first):
 
 1. **Overview tab** — full dashboard with metrics + multilang chips visible. Sells the "complete workflow" idea.
 2. **Links Report** — table with inbound/outbound counts + locale column. Sells the data depth.
-3. **Suggestion Modal** — inbound or outbound modal with locale badges visible. Sells the smart-engine angle.
+3. **Suggestion Modal** — inbound or outbound modal with locale badges visible. Shows the suggestion-engine's match-type breakdown.
 4. **Auto-Link Rule form** — locales: scope field + collection scope + once-per-post toggle visible. Sells the editorial control angle.
 5. **URL Changer preview** — diff table with context column showing real paragraph snippets. Sells the safe-bulk angle.
 
