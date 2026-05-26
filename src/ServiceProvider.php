@@ -72,6 +72,26 @@ class ServiceProvider extends AddonServiceProvider
             __DIR__.'/../config/linkwise.php' => config_path('linkwise.php'),
         ], 'linkwise-config');
 
+        // V1.2 multilingual UX polish: hide the "Single-site content language"
+        // settings field on installs that already declare ≥2 distinct `lang:`
+        // values in sites.yaml — the per-site declaration is authoritative
+        // there, so the global fallback field is dead config that just
+        // confuses multilingual editors. Override the container binding that
+        // Statamic's AddonServiceProvider::bootSettingsBlueprint set up via
+        // YAML::file()->parse(); ours runs in bootAddon() which fires AFTER
+        // parent::boot(), so the binding exists. Fail-safe: detection errors
+        // fall back to showing the field (visible-but-irrelevant > missing-
+        // and-confusing). Power-users can still override via
+        // config/linkwise.php after `vendor:publish --tag=linkwise-config`.
+        $binding = 'statamic.addons.'.$this->getAddon()->slug().'.settings_blueprint';
+        if ($this->app->bound($binding)) {
+            $this->app->extend($binding, function ($blueprint) {
+                return is_array($blueprint)
+                    ? \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::stripLanguageFieldIfMultilingual($blueprint)
+                    : $blueprint;
+            });
+        }
+
         // Dev-mode-only: ship a "BARD" badge per entry-row in CP tables so
         // the developer can visually pick Bard entries vs Markdown ones
         // when testing field-type-specific code paths. Production users
