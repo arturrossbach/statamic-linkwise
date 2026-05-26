@@ -25,6 +25,7 @@
             :key="renderKey"
             :entries="entries"
             :collections="collections"
+            :available-locales="availableLocales"
             :suggestion-counts-url="suggestionCountsUrl"
             :apply-url="applyUrl"
             :inbound-suggestions-base-url="inboundSuggestionsBaseUrl"

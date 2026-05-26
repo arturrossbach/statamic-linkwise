@@ -181,7 +181,7 @@
                             </div>
                         </td>
                         <td class="text-gray-500 dark:text-gray-400">
-                            {{ entry.collection }}<span v-if="entry.locale" class="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ entry.locale }}</span>
+                            {{ entry.collection }}<span v-if="entry.locale && hasMultipleLocales" class="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ entry.locale }}</span>
                         </td>
                         <td class="text-center">
                             <div class="inline-flex items-center gap-1">
@@ -325,6 +325,13 @@ export default {
         rebuildUrl: { type: String, default: '' },
         indexLastBuiltAt: { type: String, default: null },
         initialOrphaned: { type: Boolean, default: false },
+        // V1.2.1 — gate the per-row locale badge so it only renders on
+        // installs that actually have ≥2 distinct locales in the index.
+        // Single-site / single-language installs see no badge (clean +
+        // no "EN" confusion when the user explicitly set Linkwise's
+        // content language to something else for stemming purposes).
+        // Same threshold the LocaleFilter widget already uses.
+        availableLocales: { type: Array, default: () => [] },
     },
 
     data() {
@@ -502,6 +509,15 @@ export default {
     },
 
     computed: {
+        // V1.2.1 — controls whether the per-row locale badge renders.
+        // Same gate the LocaleFilter widget uses (≥2 distinct locales).
+        // Single-site / same-language-multisite installs return false →
+        // badge hidden → no confusing "EN" tags on rows when the locale
+        // info is redundant.
+        hasMultipleLocales() {
+            return Array.isArray(this.availableLocales) && this.availableLocales.length >= 2;
+        },
+
         // Days since the index was last built. Null if unknown.
         indexAgeDays() {
             if (!this.indexLastBuiltAt) return null;
