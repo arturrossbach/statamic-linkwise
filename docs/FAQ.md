@@ -29,6 +29,16 @@ Yes. Linkwise indexes content in Peak Cards, Bard custom sets, accordions, and o
 
 > **Multisite ≠ Multilingual.** Multisite means ≥2 Sites in `sites.yaml` (which can share a language for multi-domain strategy). Multilingual means content in ≥2 different languages. Linkwise's locale features only activate when the index has ≥2 distinct locales.
 
+### Which languages does Linkwise support?
+
+**Confident** (full NLP pipeline — stemmer + stopwords + inflected matching): English, German, French, Spanish, Italian, Dutch, Portuguese, Swedish, Danish, Norwegian, Finnish, Romanian, Russian, Catalan.
+
+**Limited** (stopwords only, exact-match auto-link): Hungarian, Polish, Czech, Slovak, Slovenian, Croatian, Bulgarian, Ukrainian, Latvian, Lithuanian, Estonian, Irish, Greek, Turkish.
+
+**Not supported:** Arabic, Hebrew, Chinese, Japanese, Korean, Thai, Vietnamese — RTL or non-space-tokenization not yet implemented.
+
+See the [README language tiers section](https://github.com/arturrossbach/statamic-linkwise#language-support) for the full matrix.
+
 ### How does Linkwise know which language an entry is in?
 
 It reads `$site->lang()` from Statamic. On single-site installs the global **Single-site content language** setting in **Settings → Linkwise** is the fallback. Linkwise does not auto-detect from the entry's text — site config wins.
@@ -51,7 +61,7 @@ No. The same-locale filter blocks them at generation time. If you need a manual 
 
 ### What's the difference between Auto-Link Rules and Suggestions?
 
-**Rules** = automated. "Every time `Datenbank` appears, link to entry X" — fires on entry save (if enabled) or on demand via "Apply".
+**Rules** = automated. "Every time `pricing` appears, link to entry X" — fires on entry save (if enabled) or on demand via "Apply".
 
 **Suggestions** = curated. Linkwise proposes link opportunities; editor reviews each one. Day-to-day editorial tool; Rules are for systematic keyword-to-URL automation.
 
@@ -127,7 +137,7 @@ Your persisted index contains records from before V1.2 (no locale stamp). Click 
 ### Suggestions modal shows entries that look unrelated.
 
 Two common causes:
-1. **TF-IDF mid-frequency junk** — keywords like "richtige", "funktioniert" can survive stopword filtering. Add them to **Settings → Custom Stopwords**.
+1. **TF-IDF mid-frequency junk** — generic filler words like "really", "actually", "various" can survive stopword filtering. Add them to **Settings → Custom Stopwords**.
 2. **Pre-V1.2 entries** missing locale stamps. Run Scan Content.
 
 ### The Locale-Filter dropdown disappeared.
