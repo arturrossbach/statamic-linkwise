@@ -12,14 +12,14 @@ Built for **Statamic 6** with Inertia + native UI components. No external servic
 
 ## Features
 
-- **🔗 Inbound + Outbound Suggestions** — Smart suggestion engine that finds linking opportunities across title matches, custom keywords, and content similarity.
+- **🔗 Inbound + Outbound Suggestions** — Smart suggestion engine that finds linking opportunities through title matches (with stemming), editor-defined custom keywords, and auto-extracted TF-IDF keywords from content.
 - **🧱 Works with Peak + any Replicator setup** — Indexes content in Peak Cards, Bard custom sets, accordions, and any addon that stores text in nested fields.
 - **⚡ Auto-Linking** — Keyword → URL rules with case-sensitivity, collection scoping, once-per-post enforcement, and auto-apply-on-save.
 - **🔍 Broken-Link Finder** — Smart retry + error classification, inline edit / ignore / unlink from the table.
 - **🔄 URL Changer** — Bulk URL replacement that's safe against concurrent edits.
 - **🌐 Domain Manager** — Set `rel="nofollow"`, `"sponsored"`, `"ugc"` per external domain. Applied automatically to every link.
 - **📊 Target Keywords** — Auto-extracted content keywords + custom keywords per entry, with an exclude block-list.
-- **📋 Dashboard** — 7 tabs (Overview, Links Report, Broken Links, Domains, Auto-Linking, Target Keywords, URL Changer) with CSV export.
+- **📋 Dashboard** — 7 tabs: Overview, Links Report, Broken Links, Domains, Auto-Linking, Target Keywords, URL Changer. CSV export on Links Report, Broken Links, Domains, and Auto-Linking.
 
 ## Installation
 

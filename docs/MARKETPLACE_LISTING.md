@@ -22,14 +22,14 @@ Find broken links, surface internal linking opportunities, manage `rel` attribut
 
 ### What you get
 
-- **🔗 Smart suggestion engine** — surfaces internal-linking opportunities across title matches, custom keywords, and content similarity. Per-locale scoping on multilingual installs (V1.2+).
+- **🔗 Smart suggestion engine** — surfaces internal-linking opportunities through title matches (with stemming), editor-defined custom keywords, and auto-extracted TF-IDF keywords from content. Per-locale scoping on multilingual installs (V1.2+).
 - **🧱 Works with Peak + any Replicator setup** — indexes content in Peak Cards, Bard custom sets, accordions, and any addon that stores text in nested fields.
 - **⚡ Auto-Link Rules** — keyword → URL with case-sensitivity, collection scoping, once-per-post enforcement, per-locale scope, and auto-apply-on-save.
 - **🔍 Broken-Link Finder** — smart retry + error classification, inline edit / ignore / unlink from the table.
 - **🔄 URL Changer** — bulk URL replacement that's safe against concurrent edits, with locale-restricted apply option.
 - **🌐 Domain Manager** — set `rel="nofollow"`, `"sponsored"`, `"ugc"` per external domain. Applied automatically to every link.
 - **📊 Target Keywords** — auto-extracted content keywords + custom keywords per entry, with exclude block-list.
-- **📋 7-Tab Dashboard** — Overview, Links Report, Broken Links, Domains, Auto-Linking, Target Keywords, URL Changer. CSV export everywhere.
+- **📋 7-Tab Dashboard** — Overview, Links Report, Broken Links, Domains, Auto-Linking, Target Keywords, URL Changer. CSV export on the four data-heavy tabs (Links Report, Broken Links, Domains, Auto-Linking).
 
 ### Built for Statamic 6
 
