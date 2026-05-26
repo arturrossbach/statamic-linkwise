@@ -128,6 +128,9 @@
                             ·
                             <a href="mailto:linkwise.support@gmail.com?subject=Linkwise%20setup%20question" class="text-blue-600 dark:text-blue-400 hover:underline">Email support</a>
                         </p>
+                        <p class="text-[10px] text-gray-400 dark:text-gray-500 mt-3 max-w-md mx-auto leading-relaxed">
+                            By using Linkwise you accept the <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/LICENSE.md" target="_blank" rel="noopener" class="hover:underline">license terms</a> — including the AS-IS warranty disclaimer and liability limited to the license fee paid. You are responsible for content backups; Linkwise persists every bulk operation to <code class="text-[10px]">storage/linkwise/bulk-snapshots/</code> for forensic recovery.
+                        </p>
                     </div>
                 </div>
             </Card>
