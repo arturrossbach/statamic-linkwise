@@ -110,6 +110,22 @@
                 />
             </div>
 
+            <!-- V1.2 Cross-Tab-B — per-rule locale restriction. Only renders
+                 when the index actually carries 2+ locales (single-site or
+                 single-locale-content installs don't need this). Empty
+                 selection = match all sites (back-compat). -->
+            <div v-if="availableLocales.length > 0">
+                <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    Limit to languages
+                    <span class="text-gray-400">(optional — empty applies to all sites)</span>
+                </label>
+                <MultiSelect
+                    v-model="newRule.locales"
+                    :options="availableLocales"
+                    label="All languages"
+                />
+            </div>
+
             <!-- Options. once_per_post is enforced=true for V1 (SEO best practice; multi-link
                  deferred). skip_if_exists removed (BardLinkInserter never overwrites). -->
             <div class="flex items-center gap-4 flex-wrap">
@@ -183,6 +199,7 @@ export default {
         canCreate: { type: Boolean, default: false },
         formDirty: { type: Boolean, default: false },
         collections: { type: Array, default: () => [] },
+        availableLocales: { type: Array, default: () => [] },
         autoApplyOnSaveEnabled: { type: Boolean, default: false },
         relationshipConfig: { type: Object, required: true },
         relationshipItemDataUrl: { type: String, required: true },

@@ -113,11 +113,22 @@ class ContextExtractor
             }
         }
 
-        // Snap to word boundaries
+        // Snap to word boundaries — ONLY when $start currently lands mid-word.
+        // Bug 2026-05-26: previously this branch always advanced $start to
+        // the next space if any space existed between $start and $offset.
+        // After clampToParagraph anchored $start on a "\n"+1 paragraph
+        // boundary, that snap discarded the entire pre-anchor leading
+        // sentence ("Vorgestellt: getestete Ausrüstung" collapsed to just
+        // "getestete Ausrüstung"). The char immediately before $start tells
+        // us whether $start is mid-word: only snap if it is.
         if ($start > 0) {
-            $spacePos = mb_strpos($text, ' ', $start);
-            if ($spacePos !== false && $spacePos < $offset) {
-                $start = $spacePos + 1;
+            $charBefore = mb_substr($text, $start - 1, 1);
+            $isMidWord = $charBefore !== ' ' && $charBefore !== "\n" && $charBefore !== "\t";
+            if ($isMidWord) {
+                $spacePos = mb_strpos($text, ' ', $start);
+                if ($spacePos !== false && $spacePos < $offset) {
+                    $start = $spacePos + 1;
+                }
             }
         }
 

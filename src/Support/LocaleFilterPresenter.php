@@ -4,6 +4,7 @@ namespace Arturrossbach\Linkwise\Support;
 
 use Arturrossbach\Linkwise\Indexer\EntryRecord;
 use Illuminate\Http\Request;
+use Statamic\Facades\Site;
 
 /**
  * Builds the locale-filter props every multilang-aware tab pushes into
@@ -88,6 +89,66 @@ class LocaleFilterPresenter
         $list = array_keys($locales);
         sort($list);
         return $list;
+    }
+
+    /**
+     * Sites-based multilang detection — independent of any index state.
+     * Returns true when sites.yaml declares ≥2 distinct `lang:` values.
+     *
+     * Distinct from availableLocales() which is INDEX-based: this one
+     * reflects the static install configuration regardless of whether
+     * the index has been built yet, which matters for any UI surface
+     * that must render correctly on a fresh-install-pre-first-scan.
+     * Currently used to hide the "Single-site content language"
+     * settings field on multilingual installs where it does not apply.
+     *
+     * Same-lang multisite (e.g. 5 EN-only domains for geo/SEO) returns
+     * false — only one distinct language, so the global content-
+     * language field is still relevant.
+     *
+     * Fail-safe: any exception (Site facade not bootable, malformed
+     * sites.yaml) returns false, which keeps the field visible.
+     * Visible-but-irrelevant is better UX than missing-and-confusing.
+     */
+    public static function isMultilingualBySites(): bool
+    {
+        try {
+            $distinctLangs = Site::all()
+                ->map(fn ($site) => $site->lang())
+                ->filter() // strip null/empty
+                ->unique()
+                ->count();
+
+            return $distinctLangs >= 2;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Strip the "Single-site content language" field from the Linkwise
+     * settings blueprint array IF the install is multilingual-by-sites.
+     * Pure function — no side effects, easily testable.
+     *
+     * Called from ServiceProvider::bootAddon() inside the container's
+     * settings_blueprint binding-override closure. Extracted as static
+     * so we can pin the filter logic without going through Statamic's
+     * Addon-binding plumbing (which doesn't exist in Orchestra Testbench).
+     */
+    public static function stripLanguageFieldIfMultilingual(array $blueprint): array
+    {
+        if (! self::isMultilingualBySites()) {
+            return $blueprint;
+        }
+
+        if (isset($blueprint['sections']['general']['fields']) && is_array($blueprint['sections']['general']['fields'])) {
+            $blueprint['sections']['general']['fields'] = array_values(array_filter(
+                $blueprint['sections']['general']['fields'],
+                fn ($f) => ($f['handle'] ?? null) !== 'language',
+            ));
+        }
+
+        return $blueprint;
     }
 
     /**

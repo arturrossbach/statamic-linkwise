@@ -8,6 +8,104 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 _No unreleased changes._
 
+## [1.2.0] — 2026-05-26
+
+The Multilingual-content release. Linkwise now scopes Suggestions, Auto-Link
+Rules, URL-Changes, and most UI surfaces to the entry's site `lang:`
+declaration. Single-site or single-language installs see no behavior change — every multilingual
+feature hides itself when the index carries fewer than two distinct locales.
+
+_Note: "multisite" and "multilingual" are not synonyms. Multisite = multiple Sites configured in `sites.yaml`. Multilingual = content in ≥2 languages. The V1.2 features below activate on multilingual content, not on multi-domain-same-language setups._
+
+### What's new
+
+- **Same-locale Suggestion filter.** A DE-source entry's Inbound and
+  Outbound modals only surface DE-target candidates. EN sources don't
+  see DE targets and vice versa. Per-source-locale stemmer + stopwords
+  close the cross-language mismatch from the PR #100 saga at the
+  source. Single-site / legacy-record entries (locale=null) pass through
+  unchanged.
+- **Per-Auto-Link-Rule locale scope.** New "Limit to languages"
+  multi-select in the Rule editor. Empty = match all sites (back-compat
+  for pre-1.2 rules). Filter fires on the apply path AND on the
+  on-entry-save subscriber so a DE-only rule never silently writes
+  links into EN entries when the editor saves.
+- **Per-locale URL Changer.** Search-form "Apply to" selector restricts
+  domain migrations to a single site. Plus: bare-UUID search now finds
+  internal links without requiring the `statamic://entry::` prefix, and
+  the Current-URL column resolves internal hrefs to entry titles
+  instead of opaque UUIDs.
+- **Locale-Filter widget** on Links Report and Broken Links. Native
+  `<select>` matching the existing Collection-filter visual pattern.
+  URL-state persisted so refresh + browser-back work.
+- **Locale badges** in Suggestion modals (Inbound + Outbound) and in
+  the Links Report Collection cell. Lowercase ISO code, hidden when
+  the entry has no locale stamp.
+- **Per-locale entry-count chips** on the Overview's "Entries Indexed"
+  card. "185 entries / 165 en · 10 de · 10 nl".
+- **Inherited-title hint.** When a blueprint declares `title: { localizable: false }`
+  and an entry is a localization of an origin in another language,
+  the Links Report shows an italic "(inherited en)" hint so editors
+  know the title is foreign-language.
+- **Multilingual re-index banner** on Overview. Surfaces when persisted
+  records lack locale stamps (pre-1.2 indices). One Scan Content
+  upgrades them.
+- **`linkwise:seed-multilingual`** command. Creates origin-linked
+  EN/DE/NL translation triplets for local smoke testing.
+- **FAQ doc** ([`docs/FAQ.md`](docs/FAQ.md)). 9-section reference
+  covering Getting Started, Multilang, Auto-Linking, Suggestions,
+  Performance, Hosting, Troubleshooting, Licensing, and Data/Privacy.
+  Linked from the onboarding welcome screen and the README header.
+
+### What's changed
+
+- **`linkwise.language` Settings field renamed** to "Content language
+  (fallback)" with instructions explaining its role per install-type.
+  On modern multisite installs (sites with `lang:` declared), this
+  field is essentially inactive — Linkwise reads each entry's site
+  lang directly.
+- **Coordinator-stopword list extended** to all 14 CONFIDENT-tier
+  languages (FR/ES/IT/NL/PT/SV/DA/NO/FI/RO/RU/CA in addition to
+  EN/DE). Grammar-reference-derived, not native-speaker validated —
+  report edge cases via GitHub Issues for a one-line patch.
+- **Activity Log entry resolution** is forensically richer.
+  `BulkSnapshotStore::appendWrittenItem` captures source + target
+  titles at write time so the drawer can render readable labels
+  ("(deleted entry)" fallback) instead of raw UUIDs when entries are
+  removed between bulk-completion and viewing.
+- **`localizable: false` on title/body fields** is now respected by the
+  Indexer. Pre-1.2 the indexer would stem inherited foreign-language
+  text with this entry's locale; now it stamps `titleLocale` separately
+  so the SuggestionEngine stems with the right language.
+
+### What's fixed
+
+- **Cross-locale leak in Inbound modal.** The Inbound code path built
+  a single-target `$index` for the engine, which made `$index[$excludeEntryId]`
+  null and bypassed the same-locale filter. Source locale now passes
+  explicitly via `sourceLocaleOverride`.
+- **`generateMatchPhrases` + `trimBoundaryStopwords`** were globally
+  scoped, so a DE-title in an EN-default install left "die" / "der"
+  dangling on anchor boundaries. Both now take an explicit locale.
+- **`$site->lang()` instead of `$site->shortLocale()`** as the source
+  for entry-locale stamping. Catches the Swiss-DE pattern (`locale:
+  en_US` for date format + `lang: de` for content).
+
+### Notes
+
+- **Coordinator-list community-validation** (FR/ES/IT/NL/PT/SV/DA/NO/FI/RO/RU/CA)
+  is hand-curated from grammar references; please open an issue if
+  you spot a false-reject in your language. Documented as
+  `feedback_known_fragility_coordinators` for tracking.
+- **Audit doc**: full code-level rationale lives in
+  [`docs/MULTISITE_AUDIT.md`](docs/MULTISITE_AUDIT.md). UX gap
+  inventory + V1.3 roadmap in [`docs/POST_MULTILANG_GAPS.md`](docs/POST_MULTILANG_GAPS.md).
+- **V1.3 deferred items** (per audit triage): Modal-Persist after
+  Bulk, Origin-Group-Inheritance for Custom Keywords + Excluded
+  Entries, per-Site `linkwise.collections` override, per-locale
+  Stopwords, Activity-Log locale-filter (needs snapshot-schema-bump),
+  Auto-Link Rules locale-aware Stemming (F2).
+
 ## [1.1.0] — 2026-05-22
 
 First post-launch release. Bundles the Cloudways production-smoke fixes,

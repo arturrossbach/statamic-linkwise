@@ -7,13 +7,22 @@
                 <span v-if="brokenLastChecked">
                     <span v-if="indexLastBuiltAt"> · </span>Last link check {{ relativeTime(brokenLastChecked) }}
                 </span>
-                <span v-if="resolvedLanguage">
+                <span v-if="resolvedLanguage && !isMultilingual">
                     <span v-if="indexLastBuiltAt || brokenLastChecked"> · </span>Content language: <strong class="text-gray-700 dark:text-gray-300">{{ resolvedLanguage.name }}</strong>
                     <span v-if="resolvedLanguage.source === 'auto-detected'" class="text-amber-700 dark:text-amber-400" v-tooltip="resolvedLanguage.source_detail">
                         (auto-detected)
                     </span>
                     <span v-else-if="resolvedLanguage.source === 'fallback'" class="text-amber-700 dark:text-amber-400" v-tooltip="resolvedLanguage.source_detail">
                         (fallback)
+                    </span>
+                </span>
+                <!-- V1.2 multilang-polish: per-entry stemming hint on
+                     multilingual installs. Replaces the single-value
+                     Content-language line which would be misleading. -->
+                <span v-else-if="isMultilingual && hasLocaleBreakdown">
+                    <span v-if="indexLastBuiltAt || brokenLastChecked"> · </span>Content language: <strong class="text-gray-700 dark:text-gray-300">per-entry</strong>
+                    <span class="text-gray-500 dark:text-gray-400" v-tooltip="'Linkwise detects each entry\'s language from its site `lang:` declaration. Stemming and stopwords apply per-entry — there is no single global content language on multilingual installs.'">
+                        (auto-detected)
                     </span>
                 </span>
             </div>
@@ -89,6 +98,21 @@
                     <div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Entries Indexed</div>
                         <div class="text-2xl font-bold mt-1 text-gray-900 dark:text-gray-100">{{ summary.total_entries }}</div>
+                        <!-- V1.2 Cross-Tab-C — per-locale breakdown chips.
+                             Only renders when the controller emitted a
+                             non-empty `localeBreakdown` (multisite + ≥2
+                             distinct locales in the index). Single-site
+                             stays visually unchanged. -->
+                        <div v-if="hasLocaleBreakdown" class="mt-1.5 flex flex-wrap items-center gap-1">
+                            <span
+                                v-for="(count, code) in localeBreakdown"
+                                :key="code"
+                                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                            >
+                                <span class="font-semibold text-gray-700 dark:text-gray-300">{{ count }}</span>
+                                <span>{{ code }}</span>
+                            </span>
+                        </div>
                     </div>
                     <div class="flex items-center gap-1">
                         <HelpIcon tooltip="Total entries tracked by Linkwise. Click to open the Links Report." />
@@ -339,9 +363,26 @@ export default {
         // actually using, especially when the user left the language
         // setting empty and Linkwise auto-detected from Statamic's locale.
         resolvedLanguage: { type: Object, default: null },
+        // V1.2 Cross-Tab-C — locale → count map. Empty/missing on single-
+        // site installs (the controller returns [] when the index has
+        // fewer than 2 distinct locales). Sorted by locale-code at the
+        // controller layer; frontend respects iteration order.
+        localeBreakdown: { type: Object, default: () => ({}) },
+        // V1.2 multilang-polish: hide single-value Content-language header
+        // on installs with ≥2 distinct `lang:` declarations in sites.yaml.
+        // The per-locale chips under "Entries Indexed" already convey the
+        // multi-language truth; a single "Content language: English" line
+        // is misleading on multilingual sites (Linkwise stems per-entry).
+        isMultilingual: { type: Boolean, default: false },
     },
 
     emits: ['navigate'],
+
+    computed: {
+        hasLocaleBreakdown() {
+            return this.localeBreakdown && Object.keys(this.localeBreakdown).length > 0;
+        },
+    },
 
     data() {
         return {

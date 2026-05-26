@@ -204,7 +204,23 @@ class UrlMatcher
         }
 
         if (str_starts_with($href, 'statamic://') || str_starts_with($search, 'statamic://')) {
-            return str_starts_with($search, 'statamic://') && $href === $search;
+            // Full statamic:// form: exact match.
+            if (str_starts_with($search, 'statamic://')) {
+                return $href === $search;
+            }
+            // Bare-UUID search: User typed just the entry UUID without the
+            // statamic://entry:: prefix. User-Smoke 2026-05-26 — the
+            // search-input was rejecting the natural shape ("paste a UUID
+            // and find the entry"). Match when href is the canonical entry-
+            // ref form for that UUID. Tolerates trimmed whitespace from
+            // copy-paste.
+            $trimmed = trim($search);
+            if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $trimmed)) {
+                return $href === 'statamic://entry::'.$trimmed;
+            }
+            // Otherwise: statamic:// hrefs are opaque to smart-match domain
+            // logic — refuse.
+            return false;
         }
 
         $searchDomain = UrlHelper::extractDomain($search);
