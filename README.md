@@ -6,14 +6,14 @@ Built for **Statamic 6** with Inertia + native UI components. No external servic
 
 ❓ **FAQ:** [docs/FAQ.md](docs/FAQ.md) — common questions answered up front
 📝 **Release notes:** [CHANGELOG.md](CHANGELOG.md) — what changed in each version
-🛒 **Marketplace:** [statamic.com/addons/arturrossbach/linkwise](https://statamic.com/addons/arturrossbach/linkwise) *(submitting)*
+🛒 **Marketplace:** [statamic.com/addons/arturrossbach/linkwise](https://statamic.com/addons/arturrossbach/linkwise)
 
 ---
 
 ## Features
 
-- **🔗 Inbound + Outbound Suggestions** — Smart suggestion engine that finds linking opportunities through title matches (with stemming), editor-defined custom keywords, and auto-extracted TF-IDF keywords from content.
-- **🧱 Works with Peak + any Replicator setup** — Indexes content in Peak Cards, Bard custom sets, accordions, and any addon that stores text in nested fields.
+- **🔗 Inbound + Outbound Suggestions** — Suggestion engine that finds linking opportunities through title matches (with stemming), editor-defined custom keywords, and auto-extracted TF-IDF keywords from content.
+- **🧱 Works with Peak and other Replicator-based addons** — Indexes content in Peak Cards, Bard custom sets, accordions, and other fieldtypes that store text in standard Statamic field structures.
 - **⚡ Auto-Linking** — Keyword → URL rules with case-sensitivity, collection scoping, once-per-post enforcement, and auto-apply-on-save.
 - **🔍 Broken-Link Finder** — Smart retry + error classification, inline edit / ignore / unlink from the table.
 - **🔄 URL Changer** — Bulk URL replacement that's safe against concurrent edits.
@@ -51,17 +51,7 @@ instead of debugging a hanging "Scan Content" button. Single-entry
 actions (creating individual links from the entry editor, custom
 target keywords) continue to work even without `exec()`.
 
-**Verified working:**
-- Managed Statamic-friendly hosts: Cloudways, Laravel Forge,
-  Ploi, RunCloud, Server Pilot
-- Self-managed VPS / cloud servers: DigitalOcean, Hetzner, AWS,
-  IONOS Cloud Compute
-- German shared hosts that enable `exec`: All-Inkl, HostEurope,
-  Strato (Hosting Pro)
-
-**Known restricted (Linkwise CP banner will appear):**
-- IONOS / 1&1 Basic Webhosting tariffs
-- Bluehost and most US-budget shared hosts with default PHP hardening
+Cheap shared-hosting plans often disable these PHP functions; managed Statamic-friendly hosts and self-managed VPS / cloud servers normally have them enabled. If you're unsure, check `phpinfo()` for the `disable_functions` directive or ask your provider before deploying.
 
 ---
 
@@ -110,66 +100,15 @@ Single-site installs see **no UI differences** — every multilang surface hides
 
 For the full per-tab UX inventory + V1.3 roadmap, see [`docs/POST_MULTILANG_GAPS.md`](docs/POST_MULTILANG_GAPS.md). For the code-level audit + design rationale, see [`docs/MULTISITE_AUDIT.md`](docs/MULTISITE_AUDIT.md).
 
-### Language Quality Tiers
+### Language tiers
 
-Coordinator-stopwords (the "don't bridge two stems via `und` / `et` / `y`" anchor-quality filter) are explicitly hand-curated for **English + German** and grammar-reference-derived for the other 12 CONFIDENT-tier languages. The latter are not native-speaker validated; if you spot a false-reject ("Linkwise refused an anchor I expected to see") in FR / ES / IT / NL / PT / SV / DA / NO / FI / RO / RU / CA, please [open an issue](https://github.com/arturrossbach/statamic-linkwise/issues) — fixes ship within days.
+**Full pipeline** — stemming, stopwords, and inflected-form matching: English, German, French, Spanish, Italian, Dutch, Portuguese, Swedish, Danish, Norwegian, Finnish, Romanian, Russian, Catalan.
 
-### Confident (14 languages)
+**Stopwords only** — no stemmer, so auto-link matches exact word forms (plurals and conjugations don't fold together): Hungarian, Polish, Czech, Slovak, Slovenian, Croatian, Bulgarian, Ukrainian, Latvian, Lithuanian, Estonian, Irish, Greek, Turkish.
 
-Snowball stemmer + curated [stopwords-iso](https://github.com/stopwords-iso/stopwords-iso)
-list + Western sentence punctuation. Auto-link rules canonicalize
-inflected forms (`Datenbank` matches `Datenbanken`, `bibliothèque`
-matches `bibliothèques`). Equivalent quality to English content.
+**Not currently supported**: Arabic, Hebrew, Chinese, Japanese, Korean, Thai, Vietnamese.
 
-| Language   | Stemmer       | Stop-words |
-|------------|---------------|------------|
-| English    | Snowball EN   | 1298       |
-| German     | Snowball DE   |  620       |
-| French     | Snowball FR   |  691       |
-| Spanish    | Snowball ES   |  732       |
-| Italian    | Snowball IT   |  632       |
-| Dutch      | Snowball NL   |  413       |
-| Portuguese | Snowball PT   |  560       |
-| Swedish    | Snowball SV   |  418       |
-| Danish     | Snowball DA   |  170       |
-| Norwegian  | Snowball NO   |  221       |
-| Finnish    | Snowball FI   |  847       |
-| Romanian   | Snowball RO   |  434       |
-| Russian    | Snowball RU   |  559       |
-| Catalan    | Snowball CA   | (curated)  |
-
-### Limited (14 languages)
-
-Stop-words list available, but **no Snowball stemmer** (or a known
-edge case Linkwise doesn't yet handle). Auto-link is exact-match —
-plural and conjugated forms won't match a base-form rule.
-
-| Language        | Reason                                                        |
-|-----------------|---------------------------------------------------------------|
-| Hungarian       | No Snowball stemmer                                           |
-| Polish          | No Snowball stemmer                                           |
-| Czech / Slovak  | No Snowball stemmer                                           |
-| Slovenian       | No Snowball stemmer                                           |
-| Croatian        | No Snowball stemmer                                           |
-| Bulgarian       | No Snowball stemmer                                           |
-| Ukrainian       | No Snowball stemmer (Cyrillic)                                |
-| Latvian / Lithuanian / Estonian / Irish | No Snowball stemmer            |
-| Greek           | Greek `;` not yet recognised as a sentence boundary           |
-| Turkish         | Dotted/dotless-i lowercase rules not handled                  |
-
-### Not supported
-
-| Language   | Reason                                                                    |
-|------------|---------------------------------------------------------------------------|
-| Arabic / Hebrew | RTL + tokenization not implemented (future roadmap)                 |
-| Chinese    | No space-based word boundaries — needs jieba/ICU tokenizer                |
-| Japanese   | No space-based word boundaries — needs MeCab                              |
-| Korean     | No space-based word boundaries                                            |
-| Thai       | No space-based word boundaries                                            |
-| Vietnamese | Diacritic-based syllable structure complicates tokenization               |
-
-The Settings UI hard-blocks selecting a "not supported" language so you
-can't silently configure something that won't work.
+The Settings UI only lists supported languages, so you cannot accidentally configure something that won't work.
 
 ---
 
