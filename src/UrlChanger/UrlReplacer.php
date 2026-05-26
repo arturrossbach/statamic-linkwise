@@ -468,6 +468,35 @@ class UrlReplacer
                 $occ['context'] = $ctx['text'] ?? '';
             }
         }
+        unset($occ);
+
+        // User-Smoke 2026-05-26: internal `statamic://entry::<uuid>` hrefs
+        // were rendered as raw UUIDs in the Current-URL column. The
+        // ActivityController solves this exact problem by enriching link-
+        // items with `target_entry_title` via Entry::find lookup; mirror
+        // that pattern here so the URL Changer preview reads "Edit the
+        // Datenbank Optimierung entry" instead of an opaque hash. Cached
+        // per UUID inside the same entry-walk so a Bard field with 10
+        // links to the same target costs one lookup, not ten.
+        $internalTitleCache = [];
+        foreach ($entryResult['occurrences'] as &$occ) {
+            $url = (string) ($occ['matched_url'] ?? '');
+            if (! str_starts_with($url, 'statamic://entry::')) continue;
+            $targetId = substr($url, strlen('statamic://entry::'));
+            if (! isset($internalTitleCache[$targetId])) {
+                try {
+                    $tgt = \Statamic\Facades\Entry::find($targetId);
+                    $internalTitleCache[$targetId] = $tgt ? ($tgt->get('title') ?? $targetId) : null;
+                } catch (\Throwable) {
+                    $internalTitleCache[$targetId] = null;
+                }
+            }
+            if ($internalTitleCache[$targetId] !== null) {
+                $occ['matched_url_title'] = $internalTitleCache[$targetId];
+                $occ['matched_url_target_id'] = $targetId;
+            }
+        }
+        unset($occ);
 
         return $entryResult;
     }

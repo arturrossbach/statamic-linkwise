@@ -182,7 +182,16 @@
                             <!-- Anchor cell removed (header dropped above) —
                                  anchor is highlighted inside the Context. -->
                             <td class="text-xs text-gray-400 dark:text-gray-500 max-w-xs" v-html="highlightAnchor(match.context, match.anchor_text)"></td>
-                            <td class="text-xs text-gray-500 dark:text-gray-400 break-all overflow-hidden">{{ match.matched_url }}</td>
+                            <td class="text-xs text-gray-500 dark:text-gray-400 break-all overflow-hidden">
+                                <!-- Internal hrefs render the resolved entry title (V1.2-I).
+                                     Falls back to raw href when Entry::find returned null
+                                     (deleted target) so the user sees what was matched. -->
+                                <template v-if="match.matched_url_title">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">{{ match.matched_url_title }}</span>
+                                    <span class="block text-[10px] text-gray-400 dark:text-gray-500 font-mono">{{ match.matched_url }}</span>
+                                </template>
+                                <span v-else>{{ match.matched_url }}</span>
+                            </td>
                             <td>
                                 <Input
                                     v-model="match.new_url"
