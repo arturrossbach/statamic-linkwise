@@ -6,6 +6,7 @@ Built for **Statamic 6** with Inertia + native UI components. No external servic
 
 📖 **Documentation:** [linkwise.arturrossbach.de](https://linkwise.arturrossbach.de) *(deploying)*
 ❓ **FAQ:** [docs/FAQ.md](docs/FAQ.md) — common questions answered up front
+📝 **Release notes:** [CHANGELOG.md](CHANGELOG.md) — what changed in each version
 🛒 **Marketplace:** [statamic.com/addons/arturrossbach/statamic-linkwise](https://statamic.com/addons/arturrossbach/statamic-linkwise) *(submitting)*
 
 ---

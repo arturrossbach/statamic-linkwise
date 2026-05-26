@@ -122,6 +122,8 @@
                             ·
                             <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/docs/FAQ.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">FAQ</a>
                             ·
+                            <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/CHANGELOG.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Release notes</a>
+                            ·
                             <a href="https://github.com/arturrossbach/statamic-linkwise/issues/new?template=question.yml" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Ask on GitHub</a>
                             ·
                             <a href="mailto:linkwise.support@gmail.com?subject=Linkwise%20setup%20question" class="text-blue-600 dark:text-blue-400 hover:underline">Email support</a>
