@@ -38,6 +38,7 @@
             :domains-count="domainsCount"
             :resolved-language="resolvedLanguage"
             :locale-breakdown="localeBreakdown"
+            :is-multilingual="isMultilingual"
             @navigate="navigateToTab"
         />
     </LinkwiseLayout>
@@ -62,6 +63,7 @@ export default {
         resolvedLanguage: { type: Object, default: null },
         multisiteReindexNeeded: { type: Boolean, default: false },
         localeBreakdown: { type: Object, default: () => ({}) },
+        isMultilingual: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },

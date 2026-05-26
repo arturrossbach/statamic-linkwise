@@ -7,13 +7,22 @@
                 <span v-if="brokenLastChecked">
                     <span v-if="indexLastBuiltAt"> · </span>Last link check {{ relativeTime(brokenLastChecked) }}
                 </span>
-                <span v-if="resolvedLanguage">
+                <span v-if="resolvedLanguage && !isMultilingual">
                     <span v-if="indexLastBuiltAt || brokenLastChecked"> · </span>Content language: <strong class="text-gray-700 dark:text-gray-300">{{ resolvedLanguage.name }}</strong>
                     <span v-if="resolvedLanguage.source === 'auto-detected'" class="text-amber-700 dark:text-amber-400" v-tooltip="resolvedLanguage.source_detail">
                         (auto-detected)
                     </span>
                     <span v-else-if="resolvedLanguage.source === 'fallback'" class="text-amber-700 dark:text-amber-400" v-tooltip="resolvedLanguage.source_detail">
                         (fallback)
+                    </span>
+                </span>
+                <!-- V1.2 multilang-polish: per-entry stemming hint on
+                     multilingual installs. Replaces the single-value
+                     Content-language line which would be misleading. -->
+                <span v-else-if="isMultilingual && hasLocaleBreakdown">
+                    <span v-if="indexLastBuiltAt || brokenLastChecked"> · </span>Content language: <strong class="text-gray-700 dark:text-gray-300">per-entry</strong>
+                    <span class="text-gray-500 dark:text-gray-400" v-tooltip="'Linkwise detects each entry\'s language from its site `lang:` declaration. Stemming and stopwords apply per-entry — there is no single global content language on multilingual installs.'">
+                        (auto-detected)
                     </span>
                 </span>
             </div>
@@ -359,6 +368,12 @@ export default {
         // fewer than 2 distinct locales). Sorted by locale-code at the
         // controller layer; frontend respects iteration order.
         localeBreakdown: { type: Object, default: () => ({}) },
+        // V1.2 multilang-polish: hide single-value Content-language header
+        // on installs with ≥2 distinct `lang:` declarations in sites.yaml.
+        // The per-locale chips under "Entries Indexed" already convey the
+        // multi-language truth; a single "Content language: English" line
+        // is misleading on multilingual sites (Linkwise stems per-entry).
+        isMultilingual: { type: Boolean, default: false },
     },
 
     emits: ['navigate'],

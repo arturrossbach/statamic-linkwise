@@ -140,6 +140,11 @@ class InertiaPagesController extends CpController
             ],
             'multisiteReindexNeeded' => $multisiteReindexNeeded,
             'localeBreakdown' => $localeBreakdown,
+            // V1.2 multilang-polish: hide single-value "Content language: X"
+            // header on multilingual installs (per-entry stemming = no single
+            // global "content language"). Sites-based detection so it's
+            // accurate on fresh-install-pre-first-scan too.
+            'isMultilingual' => \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::isMultilingualBySites(),
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
