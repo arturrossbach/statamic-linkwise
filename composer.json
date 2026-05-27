@@ -1,7 +1,7 @@
 {
     "name": "arturrossbach/statamic-linkwise",
     "type": "statamic-addon",
-    "description": "Intelligent internal linking assistant for Statamic — find broken links, suggest internal links, manage rel attributes, and bulk-replace URLs.",
+    "description": "Internal-linking and SEO toolkit for Statamic: broken-link checker, suggestion engine, rel-attribute control per domain, and bulk URL replacement.",
     "license": "proprietary",
     "keywords": [
         "statamic",
@@ -50,7 +50,7 @@
     "extra": {
         "statamic": {
             "name": "Linkwise",
-            "description": "Intelligent internal linking assistant for Statamic — find broken links, suggest internal links, manage rel attributes, and bulk-replace URLs."
+            "description": "Internal-linking and SEO toolkit for Statamic: broken-link checker, suggestion engine, rel-attribute control per domain, and bulk URL replacement."
         },
         "laravel": {
             "providers": [
