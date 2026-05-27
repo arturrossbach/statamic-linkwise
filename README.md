@@ -8,10 +8,10 @@
 
 ## Features
 
-- 🔗 **Suggestion engine.** Surfaces inbound and outbound link candidates per entry through title overlap (with language-aware stemming), editor-defined custom keywords, and TF-IDF content keywords. Catches relevance that bare title-search misses.
+- 🔗 **Suggestion engine.** Surfaces inbound and outbound link candidates per entry through title overlap (with language-aware stemming) and editor-defined custom keywords. Prioritises high-signal matches over a long list of noisy ones.
 - 🧱 **Indexes nested Replicator fields.** Peak Cards, Bard custom sets, accordions, and any addon that stores text in standard Statamic field structures, so suggestions cover the full body of every entry.
 - ⚡ **Auto-Link Rules.** Map a keyword to a URL with case-sensitivity, collection scoping, once-per-post enforcement, per-locale scope, and auto-apply on save. Apply retroactively across existing content with one click.
-- 🔍 **Broken-link finder.** Crawls every external link on your site, classifies the failure (timeout / 4xx / 5xx / DNS / SSL), and lets you fix, ignore, or unlink it inline. Discovery dates are preserved across re-scans.
+- 🔍 **Broken-link finder.** Crawls every external link on your site, classifies the failure (timeout, SSL error, connection failure, 4xx, 5xx), and lets you fix, ignore, or unlink it inline. Discovery dates are preserved across re-scans.
 - 🔄 **URL Changer.** Bulk-replace URLs across the entire site with locale-restricted apply. Conflict-safe against concurrent edits: skips entries that another editor modified mid-operation rather than overwriting them.
 - 🌐 **Domain Manager.** Set `rel="nofollow"`, `"sponsored"`, or `"ugc"` per external domain. The attribute applies on render to every existing and future link to that domain, with no Bard content rewritten.
 - 📊 **Custom Keywords.** Tell Linkwise which topics each entry should be a link target for, beyond what the title contains. Editor-curated keywords take priority over default title-matching, with TF-IDF auto-extraction as reference.

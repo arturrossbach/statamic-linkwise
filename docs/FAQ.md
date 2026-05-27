@@ -9,7 +9,7 @@ Quick answers for common situations. Not finding yours? [Open an issue](https://
 ### What does Linkwise actually do?
 
 Five things, inside the Control Panel:
-1. **Suggests internal links** based on title matches, custom keywords, and auto-extracted content keywords. Editors review and accept/skip.
+1. **Suggests internal links** based on title matches (stemmed) and custom keywords. Editors review and accept/skip.
 2. **Auto-Link Rules** — keyword → URL automation with per-locale scoping, collection limits, once-per-post enforcement.
 3. **Broken Link Finder** with retry, fix-from-table, bulk unlink.
 4. **URL Changer** — bulk-replace any URL across the site, safe against concurrent edits.
@@ -87,10 +87,21 @@ Never. If the anchor text is already wrapped in a link mark anywhere in the entr
 
 ### Why does Linkwise suggest an entry I don't think is relevant?
 
-Linkwise ranks via three signals: title-phrase match, custom keywords, auto-extracted content keywords (TF-IDF). Check the **Reason** badge in the modal — it tells you which signal fired. Cleanup paths:
-- Add the noise terms to **Settings → Custom Stopwords**
-- Add the noisy entry's keywords to the per-entry **Custom Excluded Keywords**
+By default Linkwise ranks via two signals: title matches (phrase, compound, and stem) and your custom keywords. Check the **Reason** badge in the modal — it tells you which one fired. Cleanup paths:
+- Add the noise terms to **Settings → Custom Stopwords** so they stop being tokenised
 - Add the entry to **Settings → Exclude Entries** so it's neither suggested nor suggesting
+
+### Why doesn't Linkwise build suggestions from every content keyword?
+
+By default Linkwise uses two signals: the target entry's **title** (stemmed, so plurals and inflections still match) and the **custom keywords** you set per entry. Auto-extracted content keywords (TF-IDF) are shown as a reference in the Custom Keywords tab and help pre-filter candidates, but they don't generate suggestions on their own.
+
+That's deliberate. Matching loose content keywords inside a sentence produces a lot of noise: generic terms fire on unrelated entries, and you'd spend more time dismissing junk than accepting good links. Linkwise prioritises signal over volume — fewer suggestions you can trust, not a long list to filter. (Content-keyword matching is opt-in via `linkwise.enable_keyword_matches` in config for users who want it.)
+
+### Why doesn't Linkwise offer "1,000 internal links in one click"?
+
+Because it would hurt your rankings. Cyrus Shepard's analysis of 23 million internal links found that anchor-text *diversity* correlates with better rankings — the same anchor pointing to the same target across dozens of pages reads as over-optimisation to search engines. One-click mass-linking inserts hundreds of uniform anchors without review, which is exactly the pattern that study flags as harmful.
+
+Linkwise works the other way. You review suggestions per target entry — accept several at once via the modal's multi-select, but each stays visible and the anchor text varies with its surrounding sentence. A little more deliberate, but your rankings don't pay for the time saved.
 
 ### Inbound vs. Outbound — what's the difference?
 
