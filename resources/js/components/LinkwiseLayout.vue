@@ -29,8 +29,10 @@
                                 <DropdownItem text="Statamic Discord" icon="social-discord-logo" @click="openDiscord" />
                                 <DropdownSeparator />
                                 <DropdownItem text="Download diagnostic ZIP" icon="download" @click="confirmDebugExportWithLogs" />
-                                <DropdownSeparator />
-                                <DropdownItem :text="`Linkwise ${linkwiseVersion}`" disabled />
+                                <template v-if="linkwiseVersion">
+                                    <DropdownSeparator />
+                                    <DropdownItem :text="`Linkwise ${linkwiseVersion}`" disabled />
+                                </template>
                             </DropdownMenu>
                         </Dropdown>
                     </div>
@@ -38,8 +40,21 @@
             </template>
         </Header>
 
-        <!-- Empty State: auto-scan on first visit -->
-        <div v-if="isEmpty" class="py-12">
+        <!--
+            Welcome / onboarding card. Gated PURELY on `isFirstRun` —
+            i.e. no Scan Content has ever finished. Shows on every tab so
+            a fresh install surfaces onboarding regardless of which tab
+            the editor lands on first (Sprint-0.B 2026-05-27). The moment
+            the first scan writes an index timestamp, `isFirstRun` flips
+            to false and the card disappears for good — it is strictly an
+            initial-setup affordance, not a recurring empty-state
+            (User-decision 2026-05-27).
+
+            `isEmpty` (tab-specific emptiness) deliberately does NOT gate
+            this card anymore; it only drives the legacy auto-scan in
+            mounted() for the "index exists but this tab has no rows" case.
+        -->
+        <div v-if="isFirstRun" class="py-12">
             <Card class="max-w-2xl mx-auto">
                 <div class="py-4 px-2">
                     <div class="text-center">
@@ -50,7 +65,7 @@
                         <h3 v-if="!rebuilding" class="text-lg font-medium text-gray-700 dark:text-gray-300">Welcome to Linkwise</h3>
                         <h3 v-else class="text-lg font-medium text-gray-700 dark:text-gray-300">Scanning your content...</h3>
                         <p v-if="!rebuilding" class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-4 max-w-md mx-auto">
-                            Linkwise analyses your entries to discover internal-link opportunities. Here are the next steps to get the most out of it:
+                            Linkwise analyses your entries to discover internal-link opportunities.
                         </p>
                         <p v-else class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-4">
                             Analysing entries, extracting keywords, and mapping links. This may take a moment.
@@ -61,74 +76,54 @@
                     </div>
 
                     <!--
-                        First-run onboarding checklist. Replaces the
-                        previous one-line welcome message — too many
-                        editors didn't know which knob to turn first.
-                        Linked to docs.linkwise (planned) + the Settings
-                        page anchors so each step is a single click.
+                        "What's next?" — two concrete actions, no wizard.
+                        The Settings link below the actions is the
+                        opt-in escape hatch for editors who want to
+                        configure language/collections before the scan
+                        (95% don't need to: auto-detect handles it).
                     -->
-                    <ol v-if="!rebuilding" class="text-sm text-gray-600 dark:text-gray-400 max-w-lg mx-auto space-y-3 my-6 list-decimal list-inside">
-                        <li>
-                            <strong class="text-gray-700 dark:text-gray-300">Pick your Content Language.</strong>
-                            <span class="block ml-5 text-xs">
-                                Drives stemming + stopword filtering. Visit
-                                <a href="/cp/utilities/addon-settings/arturrossbach.statamic-linkwise" class="text-blue-600 dark:text-blue-400 hover:underline">Settings → Content Language</a>
-                                if Linkwise hasn't auto-detected it correctly.
-                            </span>
-                        </li>
-                        <li>
-                            <strong class="text-gray-700 dark:text-gray-300">Choose which Collections to index.</strong>
-                            <span class="block ml-5 text-xs">
-                                Leave empty to index all. If you have draft-collections that shouldn't appear in suggestions, exclude them in
-                                <a href="/cp/utilities/addon-settings/arturrossbach.statamic-linkwise" class="text-blue-600 dark:text-blue-400 hover:underline">Settings → Collections</a>.
-                            </span>
-                        </li>
-                        <li>
-                            <strong class="text-gray-700 dark:text-gray-300">Run your first Scan Content.</strong>
-                            <span class="block ml-5 text-xs">
-                                One-click below. Takes ~5–60 seconds depending on entry count.
-                            </span>
-                        </li>
-                        <li>
-                            <strong class="text-gray-700 dark:text-gray-300">Browse the Links Report.</strong>
-                            <span class="block ml-5 text-xs">
-                                See per-entry inbound/outbound link counts and click the Suggestion badges to add internal links.
-                            </span>
-                        </li>
-                    </ol>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 max-w-lg mx-auto text-center mt-4">
-                        Running a multilingual site? V1.2 added per-locale filtering, per-rule locale-scope, and locale badges. See the
-                        <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/docs/FAQ.md#multilang--multisite-v12" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">FAQ → Multilang section</a>
-                        for the walkthrough.
-                    </p>
+                    <div v-if="!rebuilding" class="max-w-lg mx-auto my-6">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">What's next?</h4>
+                        <ol class="text-sm text-gray-600 dark:text-gray-400 space-y-2 list-decimal list-inside">
+                            <li>
+                                Click <strong class="text-gray-700 dark:text-gray-300">Scan Now</strong> below to analyse your entries.
+                                <span class="text-xs text-gray-500 dark:text-gray-500">Depending on how many entries you have, this can take a little while.</span>
+                            </li>
+                            <li>
+                                Open the <strong class="text-gray-700 dark:text-gray-300">Links Report</strong> to see your internal-link map and click "Suggestions" badges to add links.
+                            </li>
+                        </ol>
+                        <p class="text-xs text-gray-500 dark:text-gray-500 mt-4">
+                            Optional:
+                            <a href="/cp/utilities/addon-settings/arturrossbach.statamic-linkwise" class="text-blue-600 dark:text-blue-400 hover:underline">Settings</a>
+                            — exclude draft collections or override the auto-detected content language.
+                        </p>
 
-                    <div class="text-center">
+                        <!--
+                            Help / docs links — moved into the main body as a
+                            vertical link list above the Scan Now button
+                            (User-decision 2026-05-27). Once the docs subdomain
+                            is live, swap the GitHub README href for the
+                            canonical docs URL.
+                        -->
+                        <div class="mt-6 pt-4 border-t border-gray-100 dark:border-gray-700/50">
+                            <p class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Need help getting set up?</p>
+                            <ul class="text-sm space-y-1.5">
+                                <li><a href="https://github.com/arturrossbach/statamic-linkwise#readme" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Read the docs</a></li>
+                                <li><a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/docs/FAQ.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">FAQ</a></li>
+                                <li><a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/CHANGELOG.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Release notes</a></li>
+                                <li><a href="https://github.com/arturrossbach/statamic-linkwise/issues/new?template=question.yml" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Ask on GitHub</a></li>
+                                <li><a href="mailto:linkwise.support@gmail.com?subject=Linkwise%20setup%20question" class="text-blue-600 dark:text-blue-400 hover:underline">Email support</a></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="text-center mt-8">
                         <Button v-if="!rebuilding" @click="rebuildIndex" variant="primary" text="Scan Now" />
                     </div>
 
-                    <!--
-                        Docs + support pointer. Most editors will return
-                        to this page on their first uncertain moment — a
-                        single visible link to the documentation site
-                        keeps the question funnel out of the support
-                        inbox. Once the docs subdomain is live, swap
-                        the GitHub README link below for the canonical
-                        docs URL.
-                    -->
                     <div v-if="!rebuilding" class="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700/50 text-center">
-                        <p class="text-xs text-gray-500 dark:text-gray-400">
-                            Need help getting set up?
-                            <a href="https://github.com/arturrossbach/statamic-linkwise#readme" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Read the docs</a>
-                            ·
-                            <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/docs/FAQ.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">FAQ</a>
-                            ·
-                            <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/CHANGELOG.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Release notes</a>
-                            ·
-                            <a href="https://github.com/arturrossbach/statamic-linkwise/issues/new?template=question.yml" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Ask on GitHub</a>
-                            ·
-                            <a href="mailto:linkwise.support@gmail.com?subject=Linkwise%20setup%20question" class="text-blue-600 dark:text-blue-400 hover:underline">Email support</a>
-                        </p>
-                        <p class="text-[10px] text-gray-400 dark:text-gray-500 mt-3 max-w-md mx-auto leading-relaxed">
+                        <p class="text-[10px] text-gray-400 dark:text-gray-500 max-w-md mx-auto leading-relaxed">
                             By using Linkwise you accept the <a href="https://github.com/arturrossbach/statamic-linkwise/blob/master/LICENSE.md" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 underline hover:no-underline">license terms</a> — AS-IS warranty disclaimer, liability limited to the license fee paid. You are responsible for content backups.
                         </p>
                     </div>
@@ -289,10 +284,6 @@ import { buildCompletionSignature, isCompletionStale } from '../services/bulkSig
 import { pickTerminalReload } from '../services/bulkTerminalReload.js';
 import { readString, writeString } from '../utils/safeStorage.js';
 
-// Hardcoded for V1 — wire from composer.json via route props once we tag a
-// release. Visible at the bottom of the dropdown to help support reproduce
-// version-specific issues.
-const LINKWISE_VERSION = '1.0.0-dev';
 const DEBUG_EXPORT_URL = '/cp/linkwise/debug-export';
 const DOCS_URL = 'https://github.com/arturrossbach/statamic-linkwise#readme';
 
@@ -314,17 +305,30 @@ export default {
     props: {
         activeTab: { type: String, required: true },
         pageTitle: { type: String, default: 'Linkwise' },
+        // Tab-specific empty-state: this tab has no data to show (e.g.
+        // BrokenLinks before a check ran). Distinct from `isFirstRun` —
+        // a tab can be empty even after the install has been used for
+        // a while (e.g. someone never ran Check Links).
         isEmpty: { type: Boolean, default: false },
+        // Install-wide first-run gate (Sprint-0.B onboarding-track
+        // 2026-05-27): true iff no Scan Content has ever finished.
+        // When true, ALL tabs render the Welcome card so the editor
+        // sees onboarding regardless of which tab they happen to land
+        // on first. Auto-disappears the moment the first scan writes
+        // an index timestamp — no manual dismiss flow needed.
+        isFirstRun: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },
     },
 
     computed: {
-        // Surface the bundled version string in the header dropdown — quickest
-        // way for support to ask "what version are you running?".
+        // Real installed version, shared into every page's Inertia props by
+        // StaleCheckPresenter::buildProps (sourced from Statamic's Addon
+        // registry → Composer metadata). Null when the addon can't be
+        // resolved — callers hide the version line rather than show a guess.
         linkwiseVersion() {
-            return LINKWISE_VERSION;
+            return this.$page?.props?.linkwiseVersion || null;
         },
 
         // Per-page support footer + Help dropdown both use these. The mailto
@@ -333,8 +337,11 @@ export default {
         // is constant so support emails group naturally in the inbox.
         supportMailto() {
             const subject = encodeURIComponent('Linkwise support');
+            const versionLine = this.linkwiseVersion
+                ? `Linkwise version: ${this.linkwiseVersion}\n\n`
+                : '';
             const body = encodeURIComponent(
-                `Linkwise version: ${LINKWISE_VERSION}\n\n` +
+                versionLine +
                 `What went wrong:\n\n\n` +
                 `What I expected:\n\n\n` +
                 `(Tip: attach your diagnostic ZIP — CP → Linkwise → Help → Download diagnostic ZIP)`,
@@ -559,8 +566,13 @@ export default {
         await this.pollBulkStatusOnce();
         this.startBulkStatusPolling();
 
-        // Auto-scan on first visit if nothing else is already running.
-        if (this.isEmpty && !bulkState.active) {
+        // Auto-scan only for the legacy empty-tab case (index exists but
+        // this tab has no rows). On a genuine first run we deliberately
+        // DON'T auto-scan: the Welcome card's "What's next?" guide tells
+        // the editor to click "Scan Now" themselves, so auto-starting
+        // would flash the guide for a frame and then bury it under the
+        // progress view (User-report 2026-05-27). Let them read it first.
+        if (this.isEmpty && !this.isFirstRun && !bulkState.active) {
             this.rebuildIndex();
         }
     },
@@ -730,6 +742,20 @@ export default {
                     return;
                 }
 
+                // Mark the scan as observed-running by THIS instance the
+                // moment dispatch succeeds. Without this, a fast scan (small
+                // or empty site) can flip straight to terminal `done` before
+                // any poll catches a non-terminal phase — pollBulkStatusOnce
+                // only sets seenRunning.scan inside the `!status.terminal`
+                // branch, so pickTerminalReload would see seenRunning.scan
+                // === false and return 'none', leaving the Welcome card
+                // stuck until a manual sidebar navigation refreshes the
+                // server-side isFirstRun prop (Bug 2026-05-27). Setting it
+                // here is loop-safe: the post-scan window.location.reload()
+                // re-initialises seenRunning.scan to false on the fresh page,
+                // so a re-poll of the now-stale `done` status won't re-fire.
+                this.seenRunning.scan = true;
+
                 // Trigger an immediate poll so the banner shows up without 1s lag.
                 this.pollBulkStatusOnce();
             } catch (error) {
@@ -832,14 +858,52 @@ export default {
                     return;
                 }
 
-                // Terminal phase. Clear heavy state, dedup completion toast.
+                // Terminal phase. Clear heavy state.
                 setHeavyState(null);
 
+                const tExtra = status.extra || {};
+
+                // ── Reload decision FIRST — decoupled from toast-dedup ──
+                //
+                // The reload must NOT sit behind the toast-dedup early-return
+                // below. `scan`'s completion signature isn't run-unique (no
+                // heartbeat, and the done-payload carries no current/total/
+                // message → every scan produces the identical signature
+                // `scan:done:0:0:`). Coupling the reload to that dedup meant
+                // the FIRST scan reloaded but every SUBSEQUENT scan matched
+                // the stored signature, hit `return`, and never reached
+                // pickTerminalReload — so the server-side `isFirstRun` prop
+                // stayed true client-side and the Welcome card got stuck
+                // until a manual sidebar navigation (Bug 2026-05-27).
+                //
+                // `seenRunning[kind]` still guards against stale-cache reload
+                // loops: it's set true only when THIS instance dispatched or
+                // observed the job running, and reset to false here before
+                // the reload so the fresh page's re-poll of the same 'done'
+                // returns 'none'.
+                const reloadAction = pickTerminalReload(status, this.seenRunning);
+                if (reloadAction !== 'none') {
+                    this.seenRunning[status.kind] = false;
+                    if (reloadAction === 'full') {
+                        // scan / check: hard reload refreshes ALL server-side
+                        // props (summary, staleCheck, index_built_at,
+                        // isFirstRun). The toast/banner for these kinds is
+                        // surfaced by the fresh page's post-reload poll, not
+                        // here (a hard reload would kill an in-flight toast
+                        // anyway).
+                        window.location.reload();
+                    } else if (reloadAction === 'partial') {
+                        inertiaRouter.reload({ preserveState: true, preserveScroll: true });
+                    }
+                    return;
+                }
+
+                // ── Toast + banner dedup (non-reloading kinds) ──
+                //
                 // Signature construction + stale detection are extracted to
                 // `services/bulkSignature.js` (Sprint 5 PR 3a). The 5+
                 // documented bugs in the kind-specific signature truth-table
                 // are pinned by `tests/Vue/services/bulkSignature.test.js`.
-                const tExtra = status.extra || {};
                 const signature = buildCompletionSignature(status);
                 const SEEN_KEY = 'linkwise:bulkToastShown';
                 if (readString(SEEN_KEY) === signature) return;
@@ -863,32 +927,6 @@ export default {
                 // recordCompletion writes to bulkState.lastCompletion (reactive
                 // shared) — the layout's `lastCompletion` computed picks it up.
                 recordCompletion(completionSnap);
-
-                // Terminal-reload decision is extracted to
-                // `services/bulkTerminalReload.js` (Sprint 5 PR 3b). The
-                // truth-table — including the `seenRunning` stale-cache
-                // guard against infinite reload loops — is pinned by
-                // `tests/Vue/services/bulkTerminalReload.test.js`.
-                //
-                // IMPORTANT ordering: clear `seenRunning[kind]` BEFORE
-                // calling reload(). Otherwise a re-poll of the same
-                // terminal status before the page actually navigates
-                // away would re-fire the helper → second reload → loop.
-                const reloadAction = pickTerminalReload(status, this.seenRunning);
-                if (reloadAction !== 'none') {
-                    this.seenRunning[status.kind] = false;
-                    if (reloadAction === 'full') {
-                        // scan / check: refresh server-side props (summary,
-                        // staleCheck, index_built_at) — needs a hard reload.
-                        window.location.reload();
-                    } else if (reloadAction === 'partial') {
-                        // inbound/outbound: Inertia partial reload preserves
-                        // the Vue tree so the success toast + completion-banner
-                        // survive (bug 2026-05-11: window.location.reload()
-                        // killed the toast mid-render).
-                        inertiaRouter.reload({ preserveState: true, preserveScroll: true });
-                    }
-                }
             } catch {
                 // transient errors — try again next tick
             }

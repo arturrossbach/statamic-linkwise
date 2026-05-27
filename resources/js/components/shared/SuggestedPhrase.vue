@@ -21,7 +21,7 @@
             <button
                 v-if="!disabled && hasChanged"
                 @click="$emit('reset')"
-                class="inline-flex items-center ml-1.5 px-1 py-0.5 rounded text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50"
+                class="inline-flex items-center ml-1.5 px-1 py-0.5 rounded text-xs font-medium text-amber-700 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50"
                 v-tooltip="'Reset to original suggestion'"
                 type="button"
             >↺ undo</button>

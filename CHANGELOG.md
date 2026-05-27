@@ -8,6 +8,79 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 _No unreleased changes._
 
+## [1.2.2] — 2026-05-27
+
+Polish and reliability release. No new features; all changes are fixes,
+UI improvements, and internal hardening.
+
+### Fixed
+
+- **Links Report:** Removed speculative "+3" inbound/outbound link-count
+  badges. The "3 links = good" threshold had no primary source and was
+  removed to avoid misleading SEO guidance. The `orphan` badge (0 inbound)
+  is retained — that threshold is Google-documented.
+- **AtomicJsonWriter:** Byte-exact write verification closes a silent-
+  truncation window (CR-H-3). Previously `!== false` did not catch partial
+  writes on near-full disks; the check now verifies `$written === $expectedBytes`
+  and logs an error on mismatch.
+
+### Improved
+
+- **Suggestion Modal:** New collapsible "What Google says about internal
+  links" guide. Every claim is a verbatim quote from Google Search Central
+  documentation — no invented thresholds or ranking promises. The guide is
+  mode-aware: inbound context shows the "every page you care about should
+  have a link" quote; outbound context shows the anchor-text guidance.
+- **Suggestion Modal:** Pre-flight observations panel surfaces anchor-
+  concentration warnings and generic-anchor signals before insertion, based
+  on measured facts from the current index.
+- **Broken Links:** Color-coded status badges per error type (red for 404 /
+  missing entry, yellow for timeout / SSL / redirect, orange for 403 /
+  server error). Fixed-pill indicator appears on resolved rows; edited URLs
+  show the original as struck-through.
+- **Layout:** Installed Linkwise version now shown in the Help dropdown,
+  sourced from the Statamic Addon registry. Null-safe — hides entirely on
+  dev path-repo installs where no version tag exists.
+- **Layout:** Onboarding modal now includes a step-by-step "What's next?"
+  guide and direct links to docs, FAQ, changelog, and support.
+
+### Refactored (internal — no behavior change)
+
+- `StaleCheckPresenter` extracted from `InertiaPagesController`. The stale-
+  check and exec-availability props are now built in one place and spread
+  into all 8 page renderers from there.
+- `SafeEntrySaver::load()` null-check contract formally documented in
+  phpdoc; callers' expected guard pattern pinned.
+
+### Tests
+
+- `AtomicJsonWriterTest` — pins byte-exact write, truncation detection,
+  and atomic-swap guarantee.
+- `SafeEntrySaverLoadContractTest` — pins null-entry contract for deleted /
+  never-existed entries.
+- `PhaseRegistryParityTest` — architecture parity: every registered phase
+  has a matching handler.
+- `InertiaRendererRequiredUrlPropsTest` — extended to cover all 8 page
+  renderers with 74 assertions.
+
+## [1.2.1] — 2026-05-26
+
+Marketplace submission release. No behavior changes.
+
+### Fixed
+
+- **Links Report:** Hide per-row locale badge on single-locale installs.
+
+### Docs / Listing
+
+- README rewritten: dropped unverified claims, aligned with Statamic
+  Marketplace submission requirements.
+- FAQ: English-only examples, accurate language-support list, removed
+  three pre-launch lies caught in audit.
+- Marketplace listing copy finalized.
+- LICENSE: minimized to supplemental terms, aligned with Statamic
+  Marketplace ToS.
+
 ## [1.2.0] — 2026-05-26
 
 The Multilingual-content release. Linkwise now scopes Suggestions, Auto-Link

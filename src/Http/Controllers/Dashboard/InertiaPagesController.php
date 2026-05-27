@@ -145,6 +145,12 @@ class InertiaPagesController extends CpController
             // global "content language"). Sites-based detection so it's
             // accurate on fresh-install-pre-first-scan too.
             'isMultilingual' => \Arturrossbach\Linkwise\Support\LocaleFilterPresenter::isMultilingualBySites(),
+            // First-run gate: no Scan Content has been executed yet —
+            // every page in the addon shows the Welcome screen instead
+            // of its empty-tab body so the editor sees onboarding on
+            // their first visit regardless of which tab they land on
+            // (Sprint-0.B onboarding-track 2026-05-27).
+            'isFirstRun' => $this->indexer->getIndexLastBuiltAt() === null,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
@@ -274,6 +280,12 @@ class InertiaPagesController extends CpController
             // standard X-CSRF-TOKEN header. POST = ignore, DELETE = unignore.
             'ignoreSuggestionUrl' => cp_route('linkwise.ignored-suggestions.ignore'),
             'unignoreSuggestionUrl' => cp_route('linkwise.ignored-suggestions.unignore'),
+            // First-run gate: no Scan Content has been executed yet —
+            // every page in the addon shows the Welcome screen instead
+            // of its empty-tab body so the editor sees onboarding on
+            // their first visit regardless of which tab they land on
+            // (Sprint-0.B onboarding-track 2026-05-27).
+            'isFirstRun' => $this->indexer->getIndexLastBuiltAt() === null,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
@@ -343,6 +355,12 @@ class InertiaPagesController extends CpController
             'checkLinksUrl' => cp_route('linkwise.check-links'),
             'checkLinksStatusUrl' => cp_route('linkwise.check-links.status'),
             'checkLinksCancelUrl' => cp_route('linkwise.check-links.cancel'),
+            // First-run gate: no Scan Content has been executed yet —
+            // every page in the addon shows the Welcome screen instead
+            // of its empty-tab body so the editor sees onboarding on
+            // their first visit regardless of which tab they land on
+            // (Sprint-0.B onboarding-track 2026-05-27).
+            'isFirstRun' => $this->indexer->getIndexLastBuiltAt() === null,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
@@ -390,6 +408,12 @@ class InertiaPagesController extends CpController
             'domains' => $domainsData,
             'isMultisite' => $isMultisite,
             'saveUrl' => cp_route('linkwise.save-domain-attribute'),
+            // First-run gate: no Scan Content has been executed yet —
+            // every page in the addon shows the Welcome screen instead
+            // of its empty-tab body so the editor sees onboarding on
+            // their first visit regardless of which tab they land on
+            // (Sprint-0.B onboarding-track 2026-05-27).
+            'isFirstRun' => $this->indexer->getIndexLastBuiltAt() === null,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
@@ -462,6 +486,12 @@ class InertiaPagesController extends CpController
                 ],
             ],
             'entries' => $entries,
+            // First-run gate: no Scan Content has been executed yet —
+            // every page in the addon shows the Welcome screen instead
+            // of its empty-tab body so the editor sees onboarding on
+            // their first visit regardless of which tab they land on
+            // (Sprint-0.B onboarding-track 2026-05-27).
+            'isFirstRun' => $this->indexer->getIndexLastBuiltAt() === null,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
@@ -531,6 +561,12 @@ class InertiaPagesController extends CpController
                     'max_keyword_length' => \Arturrossbach\Linkwise\Http\Controllers\TargetKeywordController::MAX_KEYWORD_LENGTH,
                 ],
             ],
+            // First-run gate: no Scan Content has been executed yet —
+            // every page in the addon shows the Welcome screen instead
+            // of its empty-tab body so the editor sees onboarding on
+            // their first visit regardless of which tab they land on
+            // (Sprint-0.B onboarding-track 2026-05-27).
+            'isFirstRun' => $this->indexer->getIndexLastBuiltAt() === null,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
@@ -607,6 +643,12 @@ class InertiaPagesController extends CpController
             // (User-Smoke 2026-05-17: "Could not scan content: HTTP
             // 404" on Activity tab only) — fix forces the prop into
             // the response, pin prevents regression.
+            // First-run gate: no Scan Content has been executed yet —
+            // every page in the addon shows the Welcome screen instead
+            // of its empty-tab body so the editor sees onboarding on
+            // their first visit regardless of which tab they land on
+            // (Sprint-0.B onboarding-track 2026-05-27).
+            'isFirstRun' => $this->indexer->getIndexLastBuiltAt() === null,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),
@@ -656,6 +698,12 @@ class InertiaPagesController extends CpController
             ],
             'domains' => $domains,
             'availableLocales' => $availableLocales,
+            // First-run gate: no Scan Content has been executed yet —
+            // every page in the addon shows the Welcome screen instead
+            // of its empty-tab body so the editor sees onboarding on
+            // their first visit regardless of which tab they land on
+            // (Sprint-0.B onboarding-track 2026-05-27).
+            'isFirstRun' => $this->indexer->getIndexLastBuiltAt() === null,
             'rebuildUrl' => cp_route('linkwise.rebuild-index'),
             'rebuildStatusUrl' => cp_route('linkwise.rebuild-index.status'),
             'rebuildCancelUrl' => cp_route('linkwise.rebuild-index.cancel'),

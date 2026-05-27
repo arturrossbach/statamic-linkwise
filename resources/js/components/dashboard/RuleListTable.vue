@@ -38,7 +38,7 @@
                     </td>
                     <td class="font-medium text-gray-900 dark:text-gray-100">
                         {{ rule.keyword }}
-                        <span v-if="!rule.active" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400" v-tooltip="'Ignored — skipped during Apply All and Apply Selected'">Ignored</span>
+                        <span v-if="!rule.active" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700" v-tooltip="'Ignored — skipped during Apply All and Apply Selected'">Ignored</span>
                     </td>
                     <td class="text-gray-500 dark:text-gray-400 text-xs break-all">
                         <span v-if="rule.target_entry_id" v-tooltip="rule.url">

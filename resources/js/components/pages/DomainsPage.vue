@@ -1,5 +1,5 @@
 <template>
-    <LinkwiseLayout active-tab="domains" page-title="Linkwise — Domains" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
+    <LinkwiseLayout active-tab="domains" page-title="Linkwise — Domains" :is-empty="false" :is-first-run="isFirstRun" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
         <!-- :key="renderKey" — universal post-bulk remount (Klasse-10). -->
         <DomainsTab :key="renderKey" :domains="domains" :is-multisite="isMultisite" :save-url="saveUrl" :export-url="exportUrl" :rebuild-url="rebuildUrl" :index-last-built-at="indexLastBuiltAt" @edit-domain="editDomain" />
     </LinkwiseLayout>
@@ -18,6 +18,7 @@ export default {
         domains: { type: Array, required: true },
         isMultisite: { type: Boolean, default: false },
         saveUrl: { type: String, required: true },
+        isFirstRun: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },

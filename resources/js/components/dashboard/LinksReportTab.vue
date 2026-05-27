@@ -8,10 +8,9 @@
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
                         Internal links help search engines discover and understand your content.
                         Every page should have <strong>at least 1 inbound internal link</strong> to avoid being an orphan page.
-                        Industry best practice recommends <strong>3+ internal outbound links</strong> per post.
                     </p>
                 </div>
-                <HelpIcon tooltip="Orphan pages (0 inbound links) are harder to crawl and index (Google Search Central). The 3+ outbound recommendation is an industry convention used by Yoast and Semrush." />
+                <HelpIcon tooltip="Orphan pages (0 inbound links) are harder to crawl and index. Google recommends every page be reachable via at least one internal link (Google Search Central)." />
             </div>
         </Card>
 
@@ -189,8 +188,7 @@
                                     {{ entry.inbound_count }}
                                 </button>
                                 <span v-else class="text-red-500 font-bold">0</span>
-                                <button v-if="entry.inbound_count === 0" @click="openSuggestModal('inbound', entry)" class="text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 cursor-pointer" v-tooltip="'Orphan page — click to find inbound link opportunities'">orphan</button>
-                                <button v-else-if="entry.inbound_count < 3" @click="openSuggestModal('inbound', entry)" class="text-xs px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50 cursor-pointer">add +{{ 3 - entry.inbound_count }}</button>
+                                <button v-if="entry.inbound_count === 0" @click="openSuggestModal('inbound', entry)" class="text-xs px-1 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200 cursor-pointer" v-tooltip="'Orphan page — click to find inbound link opportunities'">orphan</button>
                             </div>
                         </td>
                         <td class="text-center">
@@ -200,7 +198,6 @@
                                 </button>
                                 <span v-else>0</span>
                                 <span v-if="hasSelfLink(entry)" class="text-xs text-amber-500" v-tooltip="'Contains a self-link — wastes link equity'">⚠</span>
-                                <button v-if="entry.outbound_count < 3" @click="openSuggestModal('outbound', entry)" class="text-xs px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50 cursor-pointer">add +{{ 3 - entry.outbound_count }}</button>
                             </div>
                         </td>
                         <td class="text-center">
@@ -273,6 +270,7 @@
             :loading="suggestLoading"
             :inserting="inserting"
             :insert-progress="insertProgress"
+            :has-multiple-locales="hasMultipleLocales"
             :rebuild-url="rebuildUrl"
             :autolink-store-url="autolinkStoreUrl"
             :ignore-suggestion-url="ignoreSuggestionUrl"

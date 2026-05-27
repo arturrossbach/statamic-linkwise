@@ -78,7 +78,7 @@
             <!-- Conflict Banner (another editor modified an entry) -->
             <div
                 v-if="conflictBanner"
-                class="mb-3 px-4 py-3 rounded-lg border bg-yellow-50 border-yellow-300 text-yellow-900 dark:bg-yellow-900/20 dark:border-yellow-800/50 dark:text-yellow-200 flex items-start gap-3"
+                class="mb-3 px-4 py-3 rounded-lg border bg-yellow-50 border-yellow-300 text-yellow-700 flex items-start gap-3"
                 role="alert"
             >
                 <Icon name="warning" class="size-4 shrink-0 mt-0.5" />
@@ -98,7 +98,7 @@
             <!-- Bulk Unlink Progress/Result Banner -->
             <div
                 v-if="bulkProgress"
-                class="mb-3 px-4 py-3 rounded-lg border bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:border-blue-800/50 dark:text-blue-300 flex items-center gap-3"
+                class="mb-3 px-4 py-3 rounded-lg border bg-blue-50 border-blue-200 text-blue-700 flex items-center gap-3"
                 role="status"
                 aria-live="polite"
             >
@@ -262,7 +262,7 @@
                                 </template>
                                 <template v-else>
                                     <span v-if="link._fixed === 'fixed'" class="text-xs break-all">
-                                        <span v-if="link._originalUrl && link._originalUrl !== link.url" class="line-through text-gray-400 block">
+                                        <span v-if="link._originalUrl && link._originalUrl !== link.url" class="line-through text-gray-400 dark:text-gray-600 block">
                                             {{ truncateUrl(link._originalUrl) }}
                                         </span>
                                         <span class="inline-flex items-center">
@@ -282,11 +282,11 @@
                                             />
                                         </span>
                                     </span>
-                                    <span v-else-if="link._fixed === 'unlinked'" class="text-xs break-all line-through text-gray-400">
+                                    <span v-else-if="link._fixed === 'unlinked'" class="text-xs break-all line-through text-gray-400 dark:text-gray-600">
                                         {{ truncateUrl(link.url) }}
                                     </span>
                                     <span v-else>
-                                        <a :href="link.url" target="_blank" rel="noopener" class="text-gray-700 dark:text-gray-300 hover:underline break-all text-xs">
+                                        <a :href="link.url" target="_blank" rel="noopener" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline break-all text-xs">
                                             {{ truncateUrl(link.url) }}
                                         </a>
                                         <Button
@@ -312,7 +312,7 @@
                                 <span class="text-xs text-gray-500">{{ link.type }}</span>
                             </td>
                             <td class="text-center whitespace-nowrap">
-                                <span v-if="link._fixed" class="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                                <span v-if="link._fixed" class="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
                                     {{ link._fixed === 'unlinked' ? 'Unlinked' : 'Fixed' }}
                                 </span>
                                 <span v-else-if="link.ignored" class="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300 whitespace-nowrap">
@@ -434,14 +434,14 @@ const TYPE_FILTER_OPTIONS = [
 ];
 
 const STATUS_BADGE_CLASSES = {
-    not_found: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-    missing_entry: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-    timeout: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-    ssl_error: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-    connection_failed: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-    redirect: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-    forbidden: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
-    server_error: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+    not_found: 'bg-red-100 text-red-700',
+    missing_entry: 'bg-red-100 text-red-700',
+    timeout: 'bg-yellow-100 text-yellow-700',
+    ssl_error: 'bg-yellow-100 text-yellow-700',
+    connection_failed: 'bg-yellow-100 text-yellow-700',
+    redirect: 'bg-yellow-100 text-yellow-700',
+    forbidden: 'bg-orange-100 text-orange-700',
+    server_error: 'bg-orange-100 text-orange-700',
 };
 
 export default {
@@ -668,12 +668,12 @@ export default {
         bulkResultClasses() {
             if (!this.bulkResult) return '';
             if (this.bulkResult.skipped === 0) {
-                return 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-800/50 dark:text-green-300';
+                return 'bg-green-50 border-green-200 text-green-700';
             }
             if (this.bulkResult.succeeded === 0) {
-                return 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-800/50 dark:text-red-300';
+                return 'bg-red-50 border-red-200 text-red-700';
             }
-            return 'bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-900/20 dark:border-yellow-800/50 dark:text-yellow-300';
+            return 'bg-yellow-50 border-yellow-200 text-yellow-700';
         },
     },
 

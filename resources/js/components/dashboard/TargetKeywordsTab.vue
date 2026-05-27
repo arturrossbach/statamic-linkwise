@@ -66,7 +66,7 @@
                                 <span
                                     v-for="kw in entry.custom_keywords"
                                     :key="kw"
-                                    class="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400"
+                                    class="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700"
                                 >{{ kw }}</span>
                                 <button
                                     v-if="entry.custom_keywords.length === 0"

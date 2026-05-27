@@ -1,5 +1,5 @@
 <template>
-    <LinkwiseLayout active-tab="broken" page-title="Linkwise — Broken Links" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
+    <LinkwiseLayout active-tab="broken" page-title="Linkwise — Broken Links" :is-empty="false" :is-first-run="isFirstRun" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
         <!-- V1.2 locale-filter — applied at the broken_links level via the
              controller's `?locale=` filter, the filtered list arrives in
              brokenData already-trimmed. This widget just lets the user
@@ -41,6 +41,7 @@ export default {
         checkLinksUrl: { type: String, required: true },
         checkLinksStatusUrl: { type: String, required: true },
         checkLinksCancelUrl: { type: String, required: true },
+        isFirstRun: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },

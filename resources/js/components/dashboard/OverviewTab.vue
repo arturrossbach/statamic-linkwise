@@ -37,9 +37,9 @@
                 v-if="recommendations.length > 0"
                 :open="!recommendationsCollapsed"
                 @toggle="handleRecommendationsToggle"
-                class="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40"
+                class="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
             >
-                <summary class="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/60 rounded-md">
+                <summary class="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
                     {{ recommendations.length }} {{ recommendations.length === 1 ? 'recommendation' : 'recommendations' }}
                 </summary>
                 <div class="px-3 pb-3 pt-1 flex flex-col gap-2">
@@ -541,9 +541,9 @@ export default {
 
         badgeClass(status) {
             return {
-                'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400': status === 'great',
-                'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400': status === 'ok',
-                'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400': status === 'warning',
+                'bg-green-100 text-green-700': status === 'great',
+                'bg-yellow-100 text-yellow-700': status === 'ok',
+                'bg-red-100 text-red-700': status === 'warning',
             };
         },
 

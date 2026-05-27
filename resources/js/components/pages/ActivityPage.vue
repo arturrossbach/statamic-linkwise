@@ -3,6 +3,7 @@
         active-tab="activity"
         page-title="Linkwise — Activity Log"
         :is-empty="false"
+        :is-first-run="isFirstRun"
         :rebuild-url="rebuildUrl"
         :rebuild-status-url="rebuildStatusUrl"
         :rebuild-cancel-url="rebuildCancelUrl"
@@ -230,6 +231,7 @@ export default {
         detailUrl: { type: String, required: true },
         markRevertedUrl: { type: String, default: '' },
         revertEndpoints: { type: Object, default: () => ({}) },
+        isFirstRun: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },

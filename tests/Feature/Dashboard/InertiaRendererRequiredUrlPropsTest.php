@@ -204,6 +204,55 @@ class InertiaRendererRequiredUrlPropsTest extends TestCase
         $this->assertRendererCarriesUrlProps('linkwise.urlchanger');
     }
 
+    // ── isFirstRun sister-pin ───────────────────────────────────────────
+    //
+    // Sprint-0.B onboarding-track 2026-05-27: every Inertia page renderer
+    // must ship `isFirstRun` (boolean) so LinkwiseLayout can show the
+    // Welcome card on any tab during a fresh install, not just on
+    // Overview/Links when their tab-specific empty-state happens to fire.
+    //
+    // Wiring guarantee: setUp() mocks `getIndexLastBuiltAt()` to return
+    // null, so the expected value across all 8 renderers is `true`.
+    // If a renderer forgets the prop OR sends the wrong type, this fails
+    // the build before the front-end can silently fall through to the
+    // default-`false` and hide onboarding on first install.
+
+    public function test_all_renderers_carry_isfirstrun_boolean_prop(): void
+    {
+        foreach (array_keys(self::PAGE_PROPS) as $routeName) {
+            $response = $this
+                ->withHeader('X-Inertia', 'true')
+                ->withHeader('X-Inertia-Version', '')
+                ->get(route($routeName));
+
+            $response->assertStatus(200);
+            $props = $response->json('props');
+
+            $this->assertArrayHasKey(
+                'isFirstRun',
+                $props,
+                "Renderer for {$routeName} missing 'isFirstRun' prop — "
+                .'LinkwiseLayout cannot decide whether to show Welcome '
+                .'on this tab. Editor lands here on fresh install and '
+                .'sees an empty tab without any onboarding signal.',
+            );
+            $this->assertIsBool(
+                $props['isFirstRun'],
+                "Renderer for {$routeName} sent non-boolean 'isFirstRun' — "
+                .'Vue prop is `Boolean` so non-bool falls through to '
+                .'default-false and hides onboarding. Pass `=== null` '
+                .'comparison, not the raw timestamp.',
+            );
+            $this->assertTrue(
+                $props['isFirstRun'],
+                "Renderer for {$routeName} sent isFirstRun=false despite "
+                .'mocked `getIndexLastBuiltAt()`=null. Either the renderer '
+                .'wired the value off a different source or the source '
+                .'no longer matches `===null` semantics.',
+            );
+        }
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────
 
     /**

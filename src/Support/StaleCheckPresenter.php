@@ -68,6 +68,14 @@ class StaleCheckPresenter
                 'check_url' => cp_route('linkwise.check-links'),
                 'check_status_url' => cp_route('linkwise.check-links.status'),
             ],
+            // Real installed version for the Help-dropdown + support-email
+            // body. Sourced from Statamic's Addon registry (which reads
+            // Composer's installed metadata), NOT hardcoded — production
+            // returns the tag ("1.2.1"), local path-repo dev returns
+            // "dev-master". Null when the addon can't be resolved (defensive);
+            // the frontend then hides the version line entirely rather than
+            // showing a stale/fantasy number.
+            'linkwiseVersion' => self::resolveVersion(),
             'execAvailability' => [
                 'available' => $execCheck['exec_available'] && $execCheck['proc_open_available'],
                 'exec_available' => $execCheck['exec_available'],
@@ -80,5 +88,25 @@ class StaleCheckPresenter
                 )),
             ],
         ];
+    }
+
+    /**
+     * Resolve the installed addon version via Statamic's Addon registry.
+     *
+     * The marketplace id strips the `statamic-` prefix from the composer
+     * package name, so the registry key is `arturrossbach/linkwise` (NOT
+     * `arturrossbach/statamic-linkwise`). Returns null on any failure so
+     * the frontend can hide the version line rather than render a guess.
+     */
+    private static function resolveVersion(): ?string
+    {
+        try {
+            $addon = \Statamic\Facades\Addon::get('arturrossbach/linkwise');
+            $version = $addon?->version();
+
+            return is_string($version) && $version !== '' ? $version : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

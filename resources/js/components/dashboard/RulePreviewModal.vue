@@ -99,10 +99,10 @@
                                     <span v-else class="text-gray-300 dark:text-gray-600">—</span>
                                 </td>
                                 <td class="text-center whitespace-nowrap">
-                                    <span v-if="item.link_status === 'linked_to_target'" class="text-xs px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">Linked to target</span>
-                                    <span v-else-if="item.link_status === 'linked_elsewhere'" class="text-xs px-1.5 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400" v-tooltip="'Already linked to a different URL. Use the URL Changer to update it.'">Linked elsewhere</span>
+                                    <span v-if="item.link_status === 'linked_to_target'" class="text-xs px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Linked to target</span>
+                                    <span v-else-if="item.link_status === 'linked_elsewhere'" class="text-xs px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700" v-tooltip="'Already linked to a different URL. Use the URL Changer to update it.'">Linked elsewhere</span>
                                     <span v-else-if="item.link_status === 'not_insertable'" class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Keyword was found in plain text, but Bard cannot insert a link there — the text may span multiple nodes or sit inside a code block.'">Cannot insert</span>
-                                    <span v-else class="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">Would link</span>
+                                    <span v-else class="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Would link</span>
                                 </td>
                             </tr>
                         </tbody>

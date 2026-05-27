@@ -99,7 +99,7 @@
                                     </td>
                                     <td class="text-center whitespace-nowrap">
                                         <span class="text-xs text-gray-500">{{ item.type }}</span>
-                                        <span v-if="item.warning" class="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" v-tooltip="item.warning">!</span>
+                                        <span v-if="item.warning" class="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700" v-tooltip="item.warning">!</span>
                                     </td>
                                 </template>
                                 <template v-else>

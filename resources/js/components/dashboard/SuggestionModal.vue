@@ -10,6 +10,58 @@
                 </template>
             </p>
 
+            <!--
+                A — Educational guide. Collapsed by default (<details> — same
+                dark-mode-verified pattern as NotificationsAccordion /
+                OverviewTab recommendations). EVERY claim is a verbatim quote
+                from official Google Search Central documentation — no
+                invented statistics, no thresholds, no "Google penalises X".
+                Sources:
+                  - developers.google.com/search/docs/crawling-indexing/links-crawlable
+                  - developers.google.com/search/docs/essentials/spam-policies
+            -->
+            <details class="mb-3 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                <summary class="cursor-pointer select-none px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md">
+                    What Google says about internal links
+                </summary>
+                <div class="px-3 pb-3 pt-1 text-xs text-gray-600 dark:text-gray-400 space-y-2 leading-relaxed">
+                    <p>Linkwise surfaces opportunities; the guidance below is Google's, quoted so you can decide for yourself.</p>
+                    <template v-if="modal.mode === 'inbound'">
+                        <p><strong class="text-gray-700 dark:text-gray-300">On internal links:</strong> “Every page you care about should have a link from at least one other page on your site.”</p>
+                        <p><strong class="text-gray-700 dark:text-gray-300">On anchor text:</strong> it should be “descriptive, reasonably concise, and relevant to the page that it's on and to the page it links to,” and you should “resist the urge to cram every keyword” — keyword stuffing is “a violation of our spam policies.”</p>
+                        <p>You can edit any suggestion's phrase by double-clicking adjacent words before adding it.</p>
+                    </template>
+                    <template v-else>
+                        <p><strong class="text-gray-700 dark:text-gray-300">On anchor text:</strong> it should be “descriptive, reasonably concise, and relevant to the page that it's on and to the page it links to.”</p>
+                        <p><strong class="text-gray-700 dark:text-gray-300">On wording:</strong> “Write as naturally as possible, and resist the urge to cram every keyword” — keyword stuffing is “a violation of our spam policies.”</p>
+                        <p>You can edit any suggestion's phrase by double-clicking adjacent words before adding it.</p>
+                    </template>
+                    <p>Source: <a href="https://developers.google.com/search/docs/crawling-indexing/links-crawlable" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline">Google Search Central — Link best practices</a>.</p>
+                </div>
+            </details>
+
+            <!--
+                B — "Pre-flight observations" (inbound only). One combined
+                info box, each bullet a measured FACT + a hard-fact anchor:
+                  - anchor concentration → fact + Google "descriptive/varied"
+                  - generic anchor       → Google's OWN discouraged list (verbatim)
+                  - low match score      → Linkwise's OWN metric (labelled, not SEO)
+                No invented "harm" thresholds, no ranking claims, no Linkwise
+                prescription. Renders nothing when the list is empty (no
+                "all clear" theatre — that'd be an unprovable claim too).
+            -->
+            <Alert
+                v-if="inboundObservations.length > 0"
+                variant="info"
+                class="mb-3"
+            >
+                <p class="text-sm">
+                    <strong>{{ inboundObservations[0].count }} of {{ inboundObservations[0].total }}</strong>
+                    suggestions use the same anchor text “<strong>{{ inboundObservations[0].anchor }}</strong>”.
+                    Google recommends anchor text be “descriptive, reasonably concise, and relevant” — it makes no published statement about repeating one anchor across internal links specifically, so the call is yours. You can edit a row's phrase by double-clicking words.
+                </p>
+            </Alert>
+
             <div v-if="loading" class="py-8 text-center text-gray-400">
                 Loading suggestions...
             </div>
@@ -208,7 +260,7 @@
                                     <a v-if="s.source_edit_url" :href="s.source_edit_url" target="_blank" class="font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">{{ s.source_title }}</a>
                                     <span v-else class="font-medium text-gray-900 dark:text-gray-100">{{ s.source_title }}</span>
                                     <!-- V1.2 Cross-Tab-E — source locale badge. Hides on null/empty. -->
-                                    <span v-if="s.source_locale" class="ml-1 inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ s.source_locale }}</span>
+                                    <span v-if="s.source_locale && hasMultipleLocales" class="ml-1 inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ s.source_locale }}</span>
                                     <div class="text-xs text-gray-400">{{ s.source_collection }}</div>
                                     <div v-if="s._status === 'failed' && s._error" class="text-xs text-red-500 mt-1">{{ s._error }}</div>
                                 </td>
@@ -331,7 +383,7 @@
                                             <a v-if="selectedTarget(group)?.target_edit_url" :href="selectedTarget(group).target_edit_url" target="_blank" class="text-xs font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400">{{ selectedTarget(group)?.target_title }}</a>
                                             <span v-else class="text-xs font-medium text-gray-900 dark:text-gray-100">{{ selectedTarget(group)?.target_title }}</span>
                                             <!-- V1.2 Cross-Tab-E — target locale badge. -->
-                                            <span v-if="selectedTarget(group)?.target_locale" class="inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ selectedTarget(group)?.target_locale }}</span>
+                                            <span v-if="selectedTarget(group)?.target_locale && hasMultipleLocales" class="inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" v-tooltip="'Site locale'">{{ selectedTarget(group)?.target_locale }}</span>
                                             <button
                                                 v-if="group.targets.length > 1 && group._status === 'pending'"
                                                 @click="group._expanded = !group._expanded"
@@ -427,6 +479,13 @@ export default {
         loading: { type: Boolean, default: false },
         inserting: { type: Boolean, default: false },
         insertProgress: { type: String, default: '' },
+        // V1.2.1 single-locale badge gate, propagated from LinksReportTab
+        // (sister-bug fix 2026-05-27): the source/target locale badges must
+        // only render on genuinely multilingual installs (≥2 locales), same
+        // rule as LinksReportTab's per-row badge. Without this the badge
+        // showed an "EN" pill on single-locale sites — the exact v1.2.1
+        // complaint, never propagated to this modal.
+        hasMultipleLocales: { type: Boolean, default: false },
         rebuildUrl: { type: String, default: '' },
         autolinkStoreUrl: { type: String, default: '' },
         // Klasse-10 guarantee-stack 2026-05-22 — per-pair ignored
@@ -568,6 +627,69 @@ export default {
             return (this.modal.suggestions || [])
                 .filter(s => s._status === 'failed' && s._error)
                 .map(s => ({ title: s.source_title, error: s._error }));
+        },
+
+        /**
+         * "Pre-flight observations" for inbound suggestions — a combined set
+         * of FACTS about the suggestions in front of the user, each paired
+         * with a hard-fact anchor. No invented thresholds for "harm", no
+         * ranking-claims, no Linkwise prescription — every line is either a
+         * measured count or a verbatim Google quote. The user decides.
+         *
+         * Returns [] when nothing notable (the section then doesn't render —
+         * deliberately NO "all clear ✅", which would itself be an unprovable
+         * claim that the suggestions are good).
+         *
+         * Each entry: { key, kind: 'anchor'|'generic'|'confidence', ...data }.
+         */
+        inboundObservations() {
+            if (!this.modal || this.modal.mode !== 'inbound') return [];
+
+            // Actionable set = non-ignored suggestions the user could add.
+            const actionable = (this.modal.suggestions || []).filter(s => !s.is_ignored);
+            const total = actionable.length;
+            if (total === 0) return [];
+
+            const out = [];
+
+            // ── Anchor concentration (the ONLY observation) ──
+            // Measured fact. Comparison is trim + lowercase, NOT stemmed
+            // ("Kubernetes" vs "Kubernetes pods" stay distinct).
+            //
+            // Display threshold = top anchor repeats ≥3× AND is ≥25% of the
+            // actionable set. This is purely a "is it worth surfacing" UX
+            // choice, NOT an SEO-harm claim — no source gives a numeric
+            // danger point. A bare ≥2 fired on nearly every modal (anchors
+            // naturally repeat) and became noise; ≥3 + ≥25% catches genuine
+            // concentration (the "30 with the same anchor" case) while
+            // ignoring trivial doubles.
+            const groups = {};
+            for (const s of actionable) {
+                const key = String(s._anchor || '').trim().toLowerCase();
+                if (key === '') continue;
+                if (!groups[key]) groups[key] = { anchor: (s._anchor || '').trim(), count: 0 };
+                groups[key].count++;
+            }
+            let topAnchor = null;
+            for (const k in groups) {
+                if (!topAnchor || groups[k].count > topAnchor.count) topAnchor = groups[k];
+            }
+            if (topAnchor && topAnchor.count >= 3 && (topAnchor.count / total) >= 0.25) {
+                out.push({ key: 'anchor', kind: 'anchor', anchor: topAnchor.anchor, count: topAnchor.count, total });
+            }
+
+            // NOTE — two other observations were considered and DROPPED for
+            // honesty (2026-05-27):
+            //   - "Generic anchor" (Google's "click here"/"read more" list):
+            //     exact-match only (no AI), and Linkwise derives anchors from
+            //     content keywords, never generic phrases — verified 0 hits
+            //     across 864 suggestions. Narrow + structurally never fires.
+            //   - "Low match score": the engine's own min_score (default 0.4)
+            //     already filters weaker matches before they reach this modal
+            //     (min observed score 0.5), so the check was dead + redundant.
+            // Both removed rather than shipped as impressive-but-dead code.
+
+            return out;
         },
 
         sortedInbound() {
@@ -983,10 +1105,10 @@ export default {
 
         matchBadgeClass(type) {
             return {
-                title: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-                stem: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-                keyword: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-                custom: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+                title: 'bg-green-100 text-green-700',
+                stem: 'bg-green-100 text-green-700',
+                keyword: 'bg-blue-100 text-blue-700',
+                custom: 'bg-purple-100 text-purple-700',
             }[type] || 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400';
         },
     },

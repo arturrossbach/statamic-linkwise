@@ -1,5 +1,5 @@
 <template>
-    <LinkwiseLayout active-tab="keywords" page-title="Linkwise — Custom Keywords" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
+    <LinkwiseLayout active-tab="keywords" page-title="Linkwise — Custom Keywords" :is-empty="false" :is-first-run="isFirstRun" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
         <!-- :key="renderKey" — universal post-bulk remount (Klasse-10). -->
         <TargetKeywordsTab :key="renderKey" :data="keywordsData" />
     </LinkwiseLayout>
@@ -16,6 +16,7 @@ export default {
 
     props: {
         keywordsData: { type: Object, required: true },
+        isFirstRun: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },

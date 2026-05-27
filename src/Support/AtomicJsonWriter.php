@@ -64,6 +64,23 @@ class AtomicJsonWriter
         Log::warning(
             "[Linkwise] {$logTag}: rename() failed (cross-device or perms?); falling back to direct write — atomicity lost for this save",
         );
-        return file_put_contents($path, $json) !== false;
+
+        // CR-H-3 fix: previously `!== false` was the only check, which
+        // misses partial-write scenarios (file_put_contents on a disk
+        // about to run out of space can return a smaller-than-requested
+        // byte count without raising). Verify byte-exact match — a short
+        // write means the target file is truncated and the caller must
+        // not trust this save.
+        $written = file_put_contents($path, $json);
+        $expectedBytes = strlen($json);
+        if ($written === false || $written !== $expectedBytes) {
+            Log::error(
+                "[Linkwise] {$logTag}: fallback direct write produced truncated/failed output (wrote ".(is_int($written) ? (string) $written : 'false')." bytes of {$expectedBytes})",
+            );
+
+            return false;
+        }
+
+        return true;
     }
 }

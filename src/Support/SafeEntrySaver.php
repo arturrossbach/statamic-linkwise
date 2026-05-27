@@ -12,7 +12,13 @@ class SafeEntrySaver
     /**
      * Load an entry and capture its current state hash.
      *
-     * @return array{0: Entry, 1: string} [entry, hash]
+     * Contract: returns `[null, '']` when the entry does not exist
+     * (deleted between load and re-load, never existed, wrong locale).
+     * Callers MUST null-check $entry before using $hash — see
+     * RelinkService:97, BardLinkInserter:244/328/420, UrlReplacer:83 for
+     * the canonical pattern (`if (! $entry) { ... }`).
+     *
+     * @return array{0: ?Entry, 1: string} [entry-or-null, hash-or-empty-string]
      */
     public static function load(string $entryId): array
     {

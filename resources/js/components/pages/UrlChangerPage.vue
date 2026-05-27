@@ -1,5 +1,5 @@
 <template>
-    <LinkwiseLayout active-tab="urlchanger" page-title="Linkwise — URL Changer" :is-empty="false" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
+    <LinkwiseLayout active-tab="urlchanger" page-title="Linkwise — URL Changer" :is-empty="false" :is-first-run="isFirstRun" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
         <!-- :key="renderKey" — universal post-bulk remount (Klasse-10). -->
         <UrlChangerTab ref="urlChanger" :key="renderKey" :data="urlChangerData" :domains="domains" :initial-search="initialSearch" :available-locales="availableLocales" />
     </LinkwiseLayout>
@@ -17,6 +17,7 @@ export default {
     props: {
         urlChangerData: { type: Object, required: true },
         domains: { type: Array, default: () => [] },
+        isFirstRun: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },

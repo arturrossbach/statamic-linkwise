@@ -1,5 +1,5 @@
 <template>
-    <LinkwiseLayout active-tab="links" page-title="Linkwise — Links Report" :is-empty="!entries || entries.length === 0" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
+    <LinkwiseLayout active-tab="links" page-title="Linkwise — Links Report" :is-empty="!entries || entries.length === 0" :is-first-run="isFirstRun" :rebuild-url="rebuildUrl" :rebuild-status-url="rebuildStatusUrl" :rebuild-cancel-url="rebuildCancelUrl">
         <!-- V1.2 locale-filter — sits above the tab. Hides itself when
              the index has fewer than 2 locales (single-site or single-
              content-locale install). -->
@@ -68,6 +68,7 @@ export default {
         autolinkStoreUrl: { type: String, default: '' },
         ignoreSuggestionUrl: { type: String, default: '' },
         unignoreSuggestionUrl: { type: String, default: '' },
+        isFirstRun: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
         rebuildCancelUrl: { type: String, default: '' },
