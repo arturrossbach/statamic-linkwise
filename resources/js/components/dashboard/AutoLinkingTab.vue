@@ -51,6 +51,15 @@
                     placeholder="Search rules..."
                     class="text-sm border border-gray-300 dark:border-gray-700 dark:bg-gray-800 rounded-lg px-3 py-1.5 w-48"
                 />
+                <select
+                    v-if="(data.available_locales || []).length >= 2"
+                    v-model="localeFilter"
+                    aria-label="Filter by language"
+                    class="text-sm border border-gray-300 dark:border-gray-700 dark:bg-gray-800 rounded-lg px-2 py-1.5"
+                >
+                    <option value="">All languages</option>
+                    <option v-for="loc in (data.available_locales || [])" :key="loc" :value="loc">{{ loc }}</option>
+                </select>
                 <span class="text-xs text-gray-400">{{ filteredRules.length }} rule(s)</span>
             </div>
             <div class="flex flex-wrap items-center gap-2 gap-y-2">
@@ -132,6 +141,7 @@
              already knows previewModal.ruleId + the selection pools. -->
         <RulePreviewModal
             :preview-modal="previewModal"
+            :available-locales="data.available_locales || []"
             v-model:excluded-entry-ids="excludedEntryIds"
             v-model:selected-unlink-ids="selectedUnlinkIds"
             :unlinking-from-preview="unlinkingFromPreview"
@@ -220,6 +230,7 @@ export default {
             // User can switch to alphabetical via the Keyword column header.
             sortField: 'created_at',
             sortDirection: 'desc',
+            localeFilter: '',
             // Preview-modal view-state (sort field/direction + status filter)
             // lives inside RulePreviewModal.vue — see Sprint 5 PR 2e.
             applyingAll: false,
@@ -342,11 +353,19 @@ export default {
         },
 
         filteredRules() {
-            if (!this.searchQuery.trim()) return this.rules;
-            const q = this.searchQuery.toLowerCase();
-            return this.rules.filter(r =>
-                r.keyword.toLowerCase().includes(q) || r.url.toLowerCase().includes(q)
-            );
+            let rules = this.rules;
+            if (this.searchQuery.trim()) {
+                const q = this.searchQuery.toLowerCase();
+                rules = rules.filter(r =>
+                    r.keyword.toLowerCase().includes(q) || r.url.toLowerCase().includes(q)
+                );
+            }
+            if (this.localeFilter) {
+                rules = rules.filter(r =>
+                    !r.locales || r.locales.length === 0 || r.locales.includes(this.localeFilter)
+                );
+            }
+            return rules;
         },
 
         sortedRules() {

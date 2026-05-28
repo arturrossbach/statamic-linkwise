@@ -16,6 +16,15 @@
                             <option value="">All statuses</option>
                             <option v-for="opt in availablePreviewStatusOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                         </select>
+                        <select
+                            v-if="availablePreviewLocaleOptions.length >= 2"
+                            v-model="previewLocaleFilter"
+                            aria-label="Filter by language"
+                            class="text-sm border border-gray-300 dark:border-gray-700 dark:bg-gray-800 rounded-md px-2 py-1.5"
+                        >
+                            <option value="">All languages</option>
+                            <option v-for="loc in availablePreviewLocaleOptions" :key="loc" :value="loc">{{ loc }}</option>
+                        </select>
                         <p class="text-sm text-gray-500 dark:text-gray-400">
                             <strong :class="applyablePreviewCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'">{{ applyablePreviewCount }}</strong> will be linked<template v-if="applyablePreviewCount !== wouldLinkCount"> ({{ wouldLinkCount }} matching, {{ wouldLinkCount - applyablePreviewCount }} excluded)</template>,
                             {{ linkedToTargetCount }} linked to target,
@@ -166,6 +175,7 @@ export default {
         // Async progress flags — parent owns the lifecycle.
         unlinkingFromPreview: { type: Boolean, default: false },
         applyingPreview: { type: Boolean, default: false },
+        availableLocales: { type: Array, default: () => [] },
     },
 
     emits: [
@@ -182,6 +192,7 @@ export default {
             previewSortDirection: 'asc',
             // Single status filter for the Preview table. '' = no filter.
             previewStatusFilter: '',
+            previewLocaleFilter: '',
         };
     },
 
@@ -195,6 +206,7 @@ export default {
                 this.previewSortField = 'title';
                 this.previewSortDirection = 'asc';
                 this.previewStatusFilter = '';
+                this.previewLocaleFilter = '';
             }
         },
     },
@@ -219,6 +231,15 @@ export default {
             return PREVIEW_STATUS_OPTIONS.filter(o => presentStatuses.has(o.value));
         },
 
+        // Show locale dropdown only when items carry ≥2 distinct non-null locales.
+        availablePreviewLocaleOptions() {
+            const present = new Set();
+            for (const i of this.previewModal?.items || []) {
+                if (i.locale) present.add(i.locale);
+            }
+            return present.size >= 2 ? [...present].sort() : [];
+        },
+
         /**
          * Flat list for the Preview table. Applies user-chosen status filter, then
          * sort (previewSortField / previewSortDirection). Tie-breaker keeps
@@ -228,6 +249,9 @@ export default {
             let items = [...(this.previewModal?.items || [])];
             if (this.previewStatusFilter) {
                 items = items.filter(i => i.link_status === this.previewStatusFilter);
+            }
+            if (this.previewLocaleFilter) {
+                items = items.filter(i => i.locale === this.previewLocaleFilter);
             }
             const statusRank = { would_link: 0, linked_elsewhere: 1, not_insertable: 2, linked_to_target: 3 };
             const dir = this.previewSortDirection === 'asc' ? 1 : -1;

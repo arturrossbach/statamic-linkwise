@@ -182,6 +182,7 @@ class AutoLinkApplier
                         'id' => $record->id,
                         'title' => $record->title,
                         'collection' => $record->collection,
+                        'locale' => $record->locale,
                         'link_status' => $linkStatus,
                         'sentence_context' => $occurrences[0],
                     ];
