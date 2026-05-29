@@ -931,6 +931,11 @@ export default {
             const insertUrl = this.inboundInsertUrl;
             const entryHashes = { ...(this.suggestModal.entryHashes || {}) };
             const targetEntryId = this.suggestModal.entryId;
+            // S-5 (Code-Review 2026-05-29): capture the title BEFORE
+            // closeSuggestModal() nulls this.suggestModal. It was read after
+            // the close, so the cross-tab banner/toast always showed an empty
+            // entry name.
+            const entryTitle = this.suggestModal?.entryTitle || '';
 
             // Build the insertions payload. Each suggestion targets a
             // DIFFERENT source entry (the entry that should now contain a
@@ -970,7 +975,6 @@ export default {
             // in LinkwiseLayout picks up real progress + handles the terminal
             // toast + reload via the shared 'inboundinsert' kind. No more
             // frontend pseudo-bulk simulation.
-            const entryTitle = this.suggestModal?.entryTitle || '';
 
             try {
                 const response = await fetch(insertUrl, {
@@ -1030,6 +1034,9 @@ export default {
             const insertUrl = this.outboundInsertUrl;
             const entryId = this.suggestModal.entryId;
             const contentHash = this.suggestModal.contentHash || '';
+            // S-5 (Code-Review 2026-05-29): capture the title BEFORE
+            // closeSuggestModal() nulls this.suggestModal (was read after).
+            const outboundEntryTitle = this.suggestModal?.entryTitle || '';
             const insertions = groups.map(g => ({
                 target_entry_id: g._selectedTarget,
                 anchor_text: g._anchor,
@@ -1058,7 +1065,6 @@ export default {
             // returns 200 immediately. The unified bulk-status poller picks up
             // real progress under the 'outboundinsert' kind. Same UX surface
             // as DetailUnlink / Apply Rule / URL-Changer.
-            const outboundEntryTitle = this.suggestModal?.entryTitle || '';
 
             try {
                 const response = await fetch(insertUrl, {
