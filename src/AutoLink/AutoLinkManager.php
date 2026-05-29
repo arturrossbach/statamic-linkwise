@@ -58,9 +58,17 @@ class AutoLinkManager
 
         $data = array_values(array_map(fn (AutoLinkRule $r) => $r->toArray(), $rules));
 
-        file_put_contents(
+        // H-2 (Code-Review 2026-05-29): route through the shared atomic
+        // writer instead of raw file_put_contents(json_encode(...)). That
+        // raw form clobbered autolink-rules.json to 0 bytes when json_encode
+        // returned false (a malformed UTF-8 byte in a keyword) and was
+        // non-atomic (a kill mid-write truncated the store). AtomicJsonWriter
+        // guards json_encode === false and stages-then-renames, so a failed
+        // encode leaves the existing rule store intact.
+        \Arturrossbach\Linkwise\Support\AtomicJsonWriter::write(
             $this->getPath(),
-            json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            $data,
+            'AutoLinkManager::saveRules',
         );
     }
 
