@@ -84,6 +84,20 @@ class InertiaPagesController extends CpController
         $brokenReport = new BrokenLinkReport;
         $brokenData = $brokenReport->toArray();
 
+        // O-4: scope the broken-link count to the active locale, mirroring the
+        // Broken Links page (broken() trims broken_links to the filtered
+        // entries). Without this the Overview's broken count would disagree
+        // with the Broken Links page when a locale is selected — the same
+        // cross-locale confusion O-4 set out to remove.
+        $brokenCount = $brokenData['metadata']['broken_count'] ?? null;
+        if ($filterState['activeLocale'] !== null) {
+            $allowedPostIds = array_fill_keys(array_keys($filterState['filteredRecords']), true);
+            $brokenCount = count(array_filter(
+                $brokenData['broken_links'] ?? [],
+                fn ($bl) => isset($allowedPostIds[$bl['post_id']]),
+            ));
+        }
+
         $domainReport = new DomainReport($this->indexer);
 
         // Enrich most/least linked with edit_url so Overview cards are clickable
@@ -132,7 +146,7 @@ class InertiaPagesController extends CpController
         return Inertia::render('linkwise::Overview', [
             'summary' => $data['summary'],
             'health' => $report->health(),
-            'brokenCount' => $brokenData['metadata']['broken_count'] ?? null,
+            'brokenCount' => $brokenCount,
             'brokenLastChecked' => $brokenData['metadata']['last_checked'] ?? null,
             'indexLastBuiltAt' => $this->indexer->getIndexLastBuiltAt(),
             'domainsCount' => count($domainReport->toArray()),

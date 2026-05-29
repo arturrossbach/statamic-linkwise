@@ -8,6 +8,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 _No unreleased changes._
 
+## [1.3.0] — 2026-05-29
+
+### Added
+
+- **Overview — per-locale stats filter.** On multilingual installs the Overview
+  headline stats (entries, orphaned, most/least-linked, outbound, inbound
+  coverage, avg outbound, broken links) were computed across all languages at
+  once. A locale filter — the same one already on the Links and Broken Links
+  pages — now scopes every Overview stat to one language. "All languages" is
+  unchanged. The per-language entry-count chips under "Entries Indexed" now
+  render again (they had been invisible since 1.2.0 due to a UI bug).
+
 ## [1.2.3] — 2026-05-29
 
 Reliability release from a full-project code review. No new features — data-safety
