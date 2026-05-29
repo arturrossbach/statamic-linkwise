@@ -102,6 +102,34 @@ class AutoLinkController extends CpController
             'locales.*' => 'string|max:8',
         ]);
 
+        // L-1 (Code-Review 2026-05-29): mirror store()'s duplicate-keyword
+        // gate. Editing a rule's keyword to collide with another rule must
+        // 422 too — store() guards this, update() did not, so an edit could
+        // produce two rules competing for the same keyword with undefined
+        // precedence.
+        if (isset($data['keyword'])) {
+            $allRules = $this->manager->loadRules();
+            $existing = $allRules[$id] ?? null;
+            if ($existing !== null) {
+                $newKeyword = trim($data['keyword']);
+                $data['keyword'] = $newKeyword;
+                $effectiveCs = (bool) ($data['case_sensitive'] ?? $existing->caseSensitive);
+                // A rule never conflicts with itself — exclude it.
+                $others = array_filter($allRules, fn ($r) => $r->id !== $id);
+                $conflict = AutoLinkManager::findDuplicate($others, $newKeyword, $effectiveCs);
+                if ($conflict !== null) {
+                    $bothCs = $effectiveCs && $conflict->caseSensitive;
+                    $reason = $bothCs
+                        ? "A case-sensitive rule for \"{$newKeyword}\" already exists."
+                        : ($conflict->keyword === $newKeyword
+                            ? "A rule for \"{$newKeyword}\" already exists."
+                            : "A rule for \"{$conflict->keyword}\" already exists and is not case-sensitive — it already covers \"{$newKeyword}\". Enable case-sensitive on both rules to keep them separate.");
+
+                    return response()->json(['success' => false, 'error' => $reason], 422);
+                }
+            }
+        }
+
         $rule = $this->manager->updateRule($id, $data);
 
         if (! $rule) {
