@@ -8,6 +8,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 _No unreleased changes._
 
+## [1.2.3] — 2026-05-29
+
+Reliability release from a full-project code review. No new features — data-safety
+and correctness fixes plus two control-panel display fixes.
+
+### Fixed
+
+- **Data safety:** A malformed (invalid-UTF-8) byte in entry content can no
+  longer truncate the link index, indexer state, or auto-link rules to an empty
+  file. JSON writes now verify the payload encoded and reached disk in full
+  before replacing the existing file; on failure the previous file is kept.
+- **Indexing:** Saving a draft — or unpublishing an entry — no longer adds it to,
+  or leaves it in, the link index when the index is set to published entries only.
+  The incremental save path now matches a full Scan Content.
+- **Broken-link checker:** Far fewer false positives. Servers that reject `HEAD`
+  but serve `GET` fine (common behind WAFs/CDNs) are now confirmed with a `GET`
+  before being flagged, and a momentary timeout or connection error is no longer
+  cached as "broken" for 24 hours — the next scan re-checks it.
+- **Auto-link rules:** Editing a rule's keyword to one that already exists is now
+  rejected with a clear message, matching the check that already applied when
+  creating a rule.
+- **Links Report:** The completion toast for inbound/outbound link insertion now
+  shows the entry name instead of being blank.
+
 ## [1.2.2] — 2026-05-27
 
 Polish and reliability release. No new features; all changes are fixes,

@@ -124,39 +124,6 @@
                     </div>
                 </Alert>
 
-                <!-- S-4 (Code-Review 2026-05-29): revert-skipped entries are
-                     filtered OUT of sortedDetailEntries (they weren't written),
-                     but were rendered nowhere — the dedicated table above shows
-                     bulk_skipped, a distinct bucket. They silently vanished.
-                     Surface revert_skipped in its own table, analogous to the
-                     bulk-skipped one, using the existing (previously unused)
-                     hasSkippedDuringRevert / skippedDuringRevert computeds. -->
-                <Alert v-if="hasSkippedDuringRevert" variant="warning" class="mb-3">
-                    <p class="text-sm font-medium mb-2">
-                        ⚠ {{ skippedDuringRevert.length }} {{ skippedDuringRevert.length === 1 ? 'entry was' : 'entries were' }} skipped during {{ skippedScopeLabel }}. Their content is intact — Linkwise refused to overwrite them or couldn't locate the anchor.
-                    </p>
-                    <div class="overflow-x-auto">
-                        <table class="data-table w-full text-xs">
-                            <thead>
-                                <tr>
-                                    <th scope="col" class="text-left">Entry</th>
-                                    <th scope="col" class="text-left">Reason</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="row in skippedDuringRevert" :key="row.entry_id">
-                                    <td>
-                                        <a v-if="row.edit_url" :href="row.edit_url" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">{{ row.entry_title || row.entry_id }}</a>
-                                        <span v-else>{{ row.entry_title || '(deleted)' }}</span>
-                                        <span v-if="row.collection" class="ml-2 text-xs text-gray-400">{{ row.collection }}</span>
-                                    </td>
-                                    <td class="text-gray-600 dark:text-gray-400" v-html="formatSkipReason(row)"></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </Alert>
-
                 <!-- Operation summary header — surfaces the uniform parts of
                      the operation (anchor, target, search term) once at the
                      top, so the table doesn't have to repeat them per row.
