@@ -34,6 +34,24 @@ class EntryIndexSubscriber
                 return;
             }
 
+            // H-6 (Code-Review 2026-05-29): mirror buildIndex's status filter
+            // (EntryIndexer.php:59-60). The full scan skips unpublished entries
+            // when entry_status is 'published' (the default); handleSaved did
+            // not, so drafts polluted the index and a published→draft save left
+            // a stale published record behind. Drop any existing record on this
+            // path so the incremental index converges to the same state a full
+            // rescan would produce.
+            $statusFilter = config('linkwise.entry_status', 'published');
+            if ($statusFilter === 'published' && method_exists($entry, 'published') && ! $entry->published()) {
+                $records = $this->indexer->load();
+                if (isset($records[$entry->id()])) {
+                    unset($records[$entry->id()]);
+                    $this->indexer->save($records);
+                }
+
+                return;
+            }
+
             $records = $this->indexer->load();
             $previous = $records[$entry->id()] ?? null;
             $record = $this->indexer->indexEntry($entry);
