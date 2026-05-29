@@ -13,6 +13,7 @@ use Arturrossbach\Linkwise\Reports\LinkReport;
 use Arturrossbach\Linkwise\Support\BulkSnapshotStore;
 use Arturrossbach\Linkwise\Support\ContextExtractor;
 use Arturrossbach\Linkwise\Support\EntryFieldWalker;
+use Arturrossbach\Linkwise\Support\LocaleFilterPresenter;
 use Arturrossbach\Linkwise\Support\SafeEntrySaver;
 use Arturrossbach\Linkwise\Support\StaleCheckPresenter;
 use Arturrossbach\Linkwise\Support\TextExtractor;
@@ -56,10 +57,19 @@ class InertiaPagesController extends CpController
 
     // ─── Page: Overview ────────────────────────────────────────────────
 
-    public function index(): \Inertia\Response
+    public function index(Request $request): \Inertia\Response
     {
         $records = $this->indexer->load();
-        $report = new LinkReport($records);
+
+        // O-4 (2026-05-29): locale-filtered summary. The headline stats
+        // (orphaned_count / most_linked / least_linked / external_links /
+        // health) are computed on the ?locale-scoped subset, mirroring the
+        // Links page. ONLY the report sees the filtered records — the
+        // breakdown chips and the reindex flag below are install-wide aids
+        // computed on the FULL $records set. "All" (no ?locale) leaves
+        // behaviour byte-identical to pre-O-4.
+        $filterState = LocaleFilterPresenter::apply($records, $request);
+        $report = new LinkReport($filterState['filteredRecords']);
         $data = $report->toArray();
 
         $totalExternal = 0;
@@ -73,6 +83,20 @@ class InertiaPagesController extends CpController
 
         $brokenReport = new BrokenLinkReport;
         $brokenData = $brokenReport->toArray();
+
+        // O-4: scope the broken-link count to the active locale, mirroring the
+        // Broken Links page (broken() trims broken_links to the filtered
+        // entries). Without this the Overview's broken count would disagree
+        // with the Broken Links page when a locale is selected — the same
+        // cross-locale confusion O-4 set out to remove.
+        $brokenCount = $brokenData['metadata']['broken_count'] ?? null;
+        if ($filterState['activeLocale'] !== null) {
+            $allowedPostIds = array_fill_keys(array_keys($filterState['filteredRecords']), true);
+            $brokenCount = count(array_filter(
+                $brokenData['broken_links'] ?? [],
+                fn ($bl) => isset($allowedPostIds[$bl['post_id']]),
+            ));
+        }
 
         $domainReport = new DomainReport($this->indexer);
 
@@ -93,16 +117,10 @@ class InertiaPagesController extends CpController
         // chips under the total. Empty + single-locale indices return an
         // empty breakdown so the chips don't render (single-site stays
         // visually identical to pre-V1.2).
-        $localeBreakdown = [];
-        foreach ($records as $r) {
-            if ($r->locale === null) continue;
-            $localeBreakdown[$r->locale] = ($localeBreakdown[$r->locale] ?? 0) + 1;
-        }
-        if (count($localeBreakdown) < 2) {
-            $localeBreakdown = [];
-        } else {
-            ksort($localeBreakdown);
-        }
+        // O-4: computed on the FULL $records (install-wide nav aid), NOT the
+        // locale-filtered subset — scoping it would collapse to one locale
+        // and hide the chips exactly when a multilingual editor needs them.
+        $localeBreakdown = LocaleFilterPresenter::breakdown($records);
 
         // PR #102 audit C1 — flag a "Re-Run Scan Content" banner on the
         // Overview when the install is multisite-enabled AND any record in
@@ -128,7 +146,7 @@ class InertiaPagesController extends CpController
         return Inertia::render('linkwise::Overview', [
             'summary' => $data['summary'],
             'health' => $report->health(),
-            'brokenCount' => $brokenData['metadata']['broken_count'] ?? null,
+            'brokenCount' => $brokenCount,
             'brokenLastChecked' => $brokenData['metadata']['last_checked'] ?? null,
             'indexLastBuiltAt' => $this->indexer->getIndexLastBuiltAt(),
             'domainsCount' => count($domainReport->toArray()),
@@ -140,6 +158,9 @@ class InertiaPagesController extends CpController
             ],
             'multisiteReindexNeeded' => $multisiteReindexNeeded,
             'localeBreakdown' => $localeBreakdown,
+            // O-4: drive the per-locale summary filter, mirroring the Links page.
+            'availableLocales' => $filterState['availableLocales'],
+            'activeLocale' => $filterState['activeLocale'],
             // V1.2 multilang-polish: hide single-value "Content language: X"
             // header on multilingual installs (per-entry stemming = no single
             // global "content language"). Sites-based detection so it's

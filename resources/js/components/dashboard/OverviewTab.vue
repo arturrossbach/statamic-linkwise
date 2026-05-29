@@ -103,7 +103,7 @@
                              non-empty `localeBreakdown` (multisite + ≥2
                              distinct locales in the index). Single-site
                              stays visually unchanged. -->
-                        <div v-if="hasLocaleBreakdown" class="mt-1.5 flex flex-wrap items-center gap-1">
+                        <div v-if="showLocaleBreakdown" class="mt-1.5 flex flex-wrap items-center gap-1">
                             <span
                                 v-for="(count, code) in localeBreakdown"
                                 :key="code"
@@ -374,15 +374,13 @@ export default {
         // multi-language truth; a single "Content language: English" line
         // is misleading on multilingual sites (Linkwise stems per-entry).
         isMultilingual: { type: Boolean, default: false },
+        // O-4: active locale filter from the page ('de' etc.), null = "All".
+        // Hides the install-wide breakdown chips while the headline total is
+        // scoped to a single locale.
+        activeLocale: { default: null },
     },
 
     emits: ['navigate'],
-
-    computed: {
-        hasLocaleBreakdown() {
-            return this.localeBreakdown && Object.keys(this.localeBreakdown).length > 0;
-        },
-    },
 
     data() {
         return {
@@ -417,6 +415,22 @@ export default {
     },
 
     computed: {
+        // H-7 (Code-Review 2026-05-29): hasLocaleBreakdown previously lived
+        // in its OWN `computed:` block above this one — a duplicate object key
+        // that this block silently overwrote, so it was undefined since
+        // v1.2.0 and the breakdown chips never rendered. Merged here.
+        hasLocaleBreakdown() {
+            return this.localeBreakdown && Object.keys(this.localeBreakdown).length > 0;
+        },
+
+        // O-4: hide the install-wide chips while a locale filter is active —
+        // the headline total is then scoped to one locale, so showing the
+        // full cross-locale chips beside it ("10 total · 165 EN · 10 DE") is
+        // confusing. The filter widget already signals what's being viewed.
+        showLocaleBreakdown() {
+            return this.hasLocaleBreakdown && ! this.activeLocale;
+        },
+
         clickableCardClass() {
             return CLICKABLE_CARD_CLASS;
         },
