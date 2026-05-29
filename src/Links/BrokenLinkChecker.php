@@ -251,7 +251,14 @@ class BrokenLinkChecker
             // REV-BL-05. Skip when we couldn't compute a content_hash
             // (entry was deleted between index-load and walk) — caching
             // against an empty hash would never hit anyway.
-            if ($currentHash !== '') {
+            // B-1 (Code-Review 2026-05-29): never cache an entry whose scan
+            // hit a transient network failure (timeout / refused connection).
+            // Caching it would pin a possibly-working external link as broken
+            // for the full 24h TTL (no re-check until the entry content
+            // changes). The record still surfaces in THIS scan's result, but
+            // skipping the cache means the next scan re-verifies it — a real
+            // dead host keeps showing, a momentary blip self-heals.
+            if ($currentHash !== '' && ! $this->containsTransientError($entryBroken)) {
                 $this->scanCache->store($record->id, $currentHash, $entryBroken, $nowUnix);
             }
         }
@@ -371,8 +378,14 @@ class BrokenLinkChecker
             $response = $client->head($url);
             $status = $response->status();
 
-            // Some servers block HEAD, try GET
-            if ($status === 405 || $status === 403) {
+            // B-2 (Code-Review 2026-05-29): many servers are HEAD-hostile —
+            // they answer HEAD with 400/404/405/500/501 (WAFs, some CDNs,
+            // misconfigured nginx) while serving GET perfectly. HEAD is only a
+            // latency optimization; confirm ANY non-OK HEAD with an
+            // authoritative GET before classifying, so a HEAD-only quirk never
+            // produces a false broken link. (Was 405/403 only, which missed
+            // the common 404/400/5xx-on-HEAD class.)
+            if ($status >= 400) {
                 $response = $client->get($url);
                 $status = $response->status();
             }
@@ -453,6 +466,29 @@ class BrokenLinkChecker
         }
 
         return null;
+    }
+
+    /**
+     * Network-level failures that are likely transient — a momentary timeout
+     * or a refused/failed connection — as opposed to an authoritative HTTP
+     * status. checkUrl already retries before declaring these, so persisting
+     * them is reasonable, but caching them across scans is not: a working
+     * link would stay flagged broken for the full TTL.
+     */
+    protected const TRANSIENT_ERROR_TYPES = ['timeout', 'connection_failed'];
+
+    /**
+     * @param  BrokenLinkRecord[]  $records  This entry's broken-link set.
+     */
+    protected function containsTransientError(array $records): bool
+    {
+        foreach ($records as $record) {
+            if (in_array($record->errorType, self::TRANSIENT_ERROR_TYPES, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 }
