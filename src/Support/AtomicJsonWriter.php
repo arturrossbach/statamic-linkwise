@@ -43,11 +43,37 @@ class AtomicJsonWriter
      */
     public static function write(string $path, mixed $data, string $logTag): bool
     {
+        // H-1 (Code-Review 2026-05-29): json_encode returns false for
+        // unencodable data (malformed UTF-8 byte in entry content, recursion,
+        // depth limit). Guard BEFORE touching disk — otherwise
+        // file_put_contents($tmp, false) writes an empty string and returns
+        // 0 (not false), the `=== false` check below passes, rename() commits
+        // it, and the target index/state file is atomically clobbered to
+        // empty while write() reports success. Keep the previous file intact.
         $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        if ($json === false) {
+            Log::error(
+                "[Linkwise] {$logTag}: json_encode failed (".json_last_error_msg().") — target file left untouched",
+            );
+
+            return false;
+        }
+
         $tmp = $path.'.tmp.'.bin2hex(random_bytes(4));
 
-        if (@file_put_contents($tmp, $json) === false) {
-            Log::warning("[Linkwise] {$logTag}: could not write temp file {$tmp}");
+        // Byte-exact check on the staging write too (not just the fallback
+        // below): a short write to $tmp followed by a successful rename would
+        // otherwise atomically install a truncated file. file_put_contents
+        // returns the written byte count or false; anything other than the
+        // full length means the staging file is incomplete.
+        $tmpWritten = @file_put_contents($tmp, $json);
+        $expectedBytes = strlen($json);
+        if ($tmpWritten === false || $tmpWritten !== $expectedBytes) {
+            @unlink($tmp);
+            Log::warning(
+                "[Linkwise] {$logTag}: temp write incomplete (wrote ".(is_int($tmpWritten) ? (string) $tmpWritten : 'false')." bytes of {$expectedBytes}); target file left untouched",
+            );
+
             return false;
         }
 

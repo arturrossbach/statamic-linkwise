@@ -94,4 +94,37 @@ class AtomicJsonWriterTest extends TestCase
         $this->assertTrue($ok);
         $this->assertSame($newData, json_decode((string) file_get_contents($this->tmpPath), true));
     }
+
+    /**
+     * H-1 (Code-Review 2026-05-29): json_encode() can return false for
+     * unencodable data — most realistically a malformed UTF-8 byte that
+     * slipped into entry content. The writer must NOT clobber the target
+     * with an empty file in that case; it must return false and leave the
+     * previous (valid) file untouched.
+     *
+     * Empirically: json_encode(['x' => "\xB1\x31"]) === false, and
+     * file_put_contents($tmp, false) writes '' and returns 0 (NOT false),
+     * so a `=== false` guard alone misses it. Before the fix this test
+     * fails twice: write() returns true AND the seeded file is wiped.
+     */
+    public function test_write_with_unencodable_data_returns_false_and_keeps_existing_file(): void
+    {
+        // Seed a valid existing payload — the live index/state file.
+        $original = '{"valid":"data"}';
+        file_put_contents($this->tmpPath, $original);
+
+        // Malformed UTF-8 → json_encode returns false (no INVALID_UTF8 flag).
+        $bad = ['x' => "\xB1\x31"];
+        $ok = AtomicJsonWriter::write($this->tmpPath, $bad, 'PinTest');
+
+        $this->assertFalse($ok, 'unencodable data must return false');
+        $this->assertSame(
+            $original,
+            file_get_contents($this->tmpPath),
+            'existing valid file must be left untouched — never clobbered to empty',
+        );
+
+        // And no orphan staging file is left behind.
+        $this->assertSame([], glob($this->tmpPath.'.tmp.*') ?: []);
+    }
 }
