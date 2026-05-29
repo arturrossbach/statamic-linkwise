@@ -143,4 +143,53 @@ class LocaleFilterPresenterTest extends TestCase
         $this->assertNull($result['activeLocale']);
         $this->assertCount(2, $result['filteredRecords']);
     }
+
+    // ── O-4: breakdown() — Overview headline-stats chips ──────────────
+
+    public function test_breakdown_returns_per_locale_counts_sorted(): void
+    {
+        $records = [
+            'a' => $this->record('a', 'en'),
+            'b' => $this->record('b', 'de'),
+            'c' => $this->record('c', 'en'),
+            'd' => $this->record('d', 'en'),
+            'e' => $this->record('e', 'de'),
+        ];
+
+        $this->assertSame(
+            ['de' => 2, 'en' => 3],
+            LocaleFilterPresenter::breakdown($records),
+        );
+    }
+
+    public function test_breakdown_is_empty_on_single_locale_index(): void
+    {
+        // < 2 distinct locales → chips don't render (single-site stays
+        // visually identical to pre-V1.2).
+        $records = [
+            'a' => $this->record('a', 'en'),
+            'b' => $this->record('b', 'en'),
+        ];
+
+        $this->assertSame([], LocaleFilterPresenter::breakdown($records));
+    }
+
+    public function test_breakdown_is_empty_for_empty_index(): void
+    {
+        $this->assertSame([], LocaleFilterPresenter::breakdown([]));
+    }
+
+    public function test_breakdown_ignores_null_locale_records(): void
+    {
+        // Legacy records without a locale stamp must not become a phantom
+        // bucket.
+        $records = [
+            'a' => $this->record('a', 'en'),
+            'b' => $this->record('b', 'de'),
+            'c' => $this->record('c', null),
+            'd' => $this->record('d', 'de'),
+        ];
+
+        $this->assertSame(['de' => 2, 'en' => 1], LocaleFilterPresenter::breakdown($records));
+    }
 }

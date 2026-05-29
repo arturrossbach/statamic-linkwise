@@ -9,6 +9,17 @@
         :rebuild-status-url="rebuildStatusUrl"
         :rebuild-cancel-url="rebuildCancelUrl"
     >
+        <!-- O-4 locale-filter — scopes the headline stats (orphaned /
+             most-linked / least-linked / external) to one locale, mirroring
+             the Links page. Hidden on single-locale installs. -->
+        <div v-if="availableLocales && availableLocales.length > 0" class="mb-4 flex justify-end">
+            <LocaleFilter
+                :available="availableLocales"
+                :current="activeLocale"
+                @update="onLocaleChange"
+            />
+        </div>
+
         <!-- PR #102 audit C1 — Multisite-reindex prompt. Surfaces when the
              persisted index still contains records without a locale stamp
              (i.e. built before the multilanguage track shipped). One Scan
@@ -40,6 +51,7 @@
             :resolved-language="resolvedLanguage"
             :locale-breakdown="localeBreakdown"
             :is-multilingual="isMultilingual"
+            :active-locale="activeLocale"
             @navigate="navigateToTab"
         />
     </LinkwiseLayout>
@@ -48,11 +60,12 @@
 <script>
 import LinkwiseLayout from '../LinkwiseLayout.vue';
 import OverviewTab from '../dashboard/OverviewTab.vue';
+import LocaleFilter from '../LocaleFilter.vue';
 import { bulkState } from '../../services/bulkOperationService.js';
 import { router as inertiaRouter } from '@statamic/cms/inertia';
 
 export default {
-    components: { LinkwiseLayout, OverviewTab },
+    components: { LinkwiseLayout, OverviewTab, LocaleFilter },
 
     props: {
         summary: { type: Object, default: null },
@@ -65,6 +78,10 @@ export default {
         multisiteReindexNeeded: { type: Boolean, default: false },
         localeBreakdown: { type: Object, default: () => ({}) },
         isMultilingual: { type: Boolean, default: false },
+        // O-4 locale-filter state (mirrors LinksPage). availableLocales
+        // empty → widget hidden; activeLocale null → "All".
+        availableLocales: { type: Array, default: () => [] },
+        activeLocale: { default: null },
         isFirstRun: { type: Boolean, default: false },
         rebuildUrl: { type: String, required: true },
         rebuildStatusUrl: { type: String, default: '' },
@@ -97,6 +114,24 @@ export default {
     },
 
     methods: {
+        // O-4 locale-filter — drive via URL query so it survives reload,
+        // browser-back and shareable links. Mirrors LinksPage.onLocaleChange:
+        // preserveState + renderKey bump refreshes the server props (scoped
+        // summary) without resetting the page.
+        onLocaleChange(locale) {
+            const url = new URL(window.location.href);
+            if (locale) {
+                url.searchParams.set('locale', locale);
+            } else {
+                url.searchParams.delete('locale');
+            }
+            inertiaRouter.visit(url.pathname + url.search, {
+                preserveScroll: true,
+                preserveState: true,
+                onSuccess: () => { this.renderKey++; },
+            });
+        },
+
         navigateToTab(tab, options = {}) {
             // 'rebuild' delegates to the Layout's rebuildIndex() — same code
             // path as the header "Scan Content" button. Keeps 409-handling +

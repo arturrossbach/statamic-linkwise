@@ -92,6 +92,40 @@ class LocaleFilterPresenter
     }
 
     /**
+     * Per-locale entry counts for the Overview's headline-stats chips
+     * (e.g. ['de' => 10, 'en' => 165]), sorted by locale code. Returns an
+     * empty array when fewer than 2 distinct locales are present — single-
+     * locale installs don't render the chips, keeping the card visually
+     * identical to pre-V1.2.
+     *
+     * O-4 (2026-05-29): MUST be computed on the FULL record set — it is an
+     * install-wide nav aid. Scoping it to a locale-filtered subset would
+     * collapse it to the one selected locale (< 2 → empty) and make the
+     * chips vanish exactly when a multilingual editor is using them.
+     * Extracted from the inline loop in InertiaPagesController::index so it
+     * has a unit-test seam.
+     *
+     * @param  array<string, EntryRecord>  $records
+     * @return array<string, int>
+     */
+    public static function breakdown(array $records): array
+    {
+        $counts = [];
+        foreach ($records as $r) {
+            if ($r->locale === null) {
+                continue;
+            }
+            $counts[$r->locale] = ($counts[$r->locale] ?? 0) + 1;
+        }
+        if (count($counts) < 2) {
+            return [];
+        }
+        ksort($counts);
+
+        return $counts;
+    }
+
+    /**
      * Sites-based multilang detection — independent of any index state.
      * Returns true when sites.yaml declares ≥2 distinct `lang:` values.
      *
