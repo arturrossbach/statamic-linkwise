@@ -4,8 +4,8 @@ Linkwise works out of the box — you only configure it to tune behaviour. There
 are **two ways**, and you can use either:
 
 - **Control Panel settings** — almost every option has a field on Linkwise's
-  settings page in the Control Panel. This is the quickest way to change
-  behaviour; nothing to deploy.
+  settings page in the Control Panel, at `/cp/addons/linkwise/settings`. This is
+  the quickest way to change behaviour; nothing to deploy.
 - **Config file** — publish `config/linkwise.php` to keep settings in your
   codebase (version-controlled and reviewable):
 
@@ -21,6 +21,28 @@ file only.
 This page is a guided tour of the settings that matter most, shown as config
 keys — each option that has a Control Panel field uses the **same name** there.
 The [Configuration Options](/reference/config-options) reference lists every key.
+
+## In the Control Panel
+
+Open Linkwise's settings at `/cp/addons/linkwise/settings`. Every option below
+also lives here, grouped into sections, with inline guidance on each field:
+
+- **General** — content language, which collections to index, target
+  collections, entry status, max outbound suggestions per entry, and
+  open-in-new-tab.
+- **Matching** — how strict title matching is (minimum phrase words, minimum
+  match score) and two-way-link prevention.
+- **Exclusions** — entries, collections, and titles to keep out of suggestions;
+  entries to ignore in the Orphaned report; and URL patterns the broken-link
+  checker should skip.
+- **Stopwords** — extra filler words to ignore on top of the language defaults.
+- **Auto-Linking** — the master switch that lets active rules apply on entry
+  save (see [Auto-Linking](/usage/auto-linking)).
+
+Hit **Save** and the change applies immediately. Fields that influence indexing
+or matching say so in their instructions — re-run **Scan Content** afterwards so
+the report counts catch up. Anything you set here overrides the matching key in
+`config/linkwise.php`.
 
 ## Language
 

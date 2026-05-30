@@ -470,7 +470,7 @@ class BulkPollingTest extends TestCase
 
     public function test_detail_unlink_async_clears_stale_terminal_status_before_dispatch(): void
     {
-        // Asymmetric-cleanup pin (advisor pre-merge gate flag, Phase A.2).
+        // Asymmetric-cleanup pin (pre-merge gate check, Phase A.2).
         // detailUnlinkAsync explicitly Cache::forget('linkwise:detailunlink:
         // status') + 'linkwise:detailunlink:cancel' BEFORE writing the new
         // status (now BulkJobsController::detailUnlinkAsync post-PR4).

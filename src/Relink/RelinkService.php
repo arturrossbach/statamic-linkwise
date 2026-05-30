@@ -25,7 +25,7 @@ use Statamic\Facades\Entry;
  *
  * The atomic command removes all four by doing both mutations on one
  * Entry instance and saving once. Same-target anchor expansion (the
- * advisor-flagged common case) trivially works because the old mark
+ * flagged common case) trivially works because the old mark
  * is genuinely removed from the in-memory tree before the new mark
  * is inserted — no Phase-A "original_href simulation" needed.
  *

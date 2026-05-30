@@ -5,7 +5,7 @@ import { buildCompletionSignature, isCompletionStale } from '@/services/bulkSign
  * Characterisation tests for the bulk-completion signature + stale-detection
  * helpers extracted from LinkwiseLayout.vue::pollBulkStatusOnce.
  *
- * Sprint 5 PR 3a-prep — pure-function test net. Per advisor pre-PR-review:
+ * Sprint 5 PR 3a-prep — pure-function test net. Per pre-PR review:
  * "Pin-Tests für Signature-Truth-Table — alle 6 Kinds + Regression-Cases".
  *
  * Every test case in `describe('regression cases')` corresponds to a real

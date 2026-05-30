@@ -28,7 +28,7 @@ use Statamic\Http\Controllers\CP\CpController;
  * cancel-URL lookup table here is the only inline coupling; it stays
  * inline because pickaxe history shows zero bugs where a new kind was
  * added to `JobLock::JOBS` and forgotten here. If that ever happens →
- * extract to `JobLock::cancelRouteFor()` (advisor pre-merge note).
+ * extract to `JobLock::cancelRouteFor()` (pre-merge note).
  *
  * Behaviour pinned by {@see \Arturrossbach\Linkwise\Tests\Feature\Dashboard\BulkPollingTest::test_bulk_status_aggregates_active_job_from_joblock_snapshot()}
  * + companion fallback test + bulk-clear tests.

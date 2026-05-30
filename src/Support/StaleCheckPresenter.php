@@ -16,7 +16,7 @@ use Arturrossbach\Linkwise\Links\BrokenLinkReport;
  * {@link LinkwiseLayout.vue} can render the "stale-check" banner regardless
  * of which tab is active. PR 5 will split those renderers into sub-controllers;
  * a stateless static helper avoids 8× DI plumbing for varying constructor
- * dep-sets (advisor recommendation — service over Trait/Base-Class).
+ * dep-sets (design recommendation — service over Trait/Base-Class).
  *
  * Three states modelled (grace window: 300 seconds):
  *  1. No index built yet               → is_stale = false

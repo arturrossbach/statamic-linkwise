@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Cache;
  * Characterisation tests for InboundSuggestionCache.
  *
  * Sprint 6 REV-IB-01 prep — neue Caching-Schicht braucht rigide
- * Pin-Tests vor Wire-In (advisor 2026-05-16):
+ * Pin-Tests vor Wire-In (review 2026-05-16):
  *   "neue Caching-Logik = neue Bug-Quelle (Stale-Cache-Drift,
  *    Invalidierung-Pfade). Plan dafür IB-01-prep mit Pin-Tests für
  *    Cache-Hit/Miss/Invalidierung bevor Code-Touch."

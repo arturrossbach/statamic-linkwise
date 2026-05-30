@@ -25,7 +25,7 @@ use Statamic\Http\Controllers\CP\CpController;
  * lives in the sibling {@see JobsAggregatorController} — different read-only
  * surface, different invariants. They share a sub-namespace, nothing else.
  *
- * Design constraint (advisor pre-merge flag): **no shared dispatchBulkJob helper.**
+ * Design constraint (pre-merge review): **no shared dispatchBulkJob helper.**
  * Each dispatch has its own asymmetric pre-dispatch surface — most notably
  * detailUnlinkAsync's `Cache::forget(:status)` (lines around the put-status
  * call) which the other three trios intentionally skip. bulkUnlink dispatches

@@ -7,7 +7,7 @@ import { mockRule } from '../__fixtures__/rules.js';
 /**
  * Characterisation pins for AutoLinkingTab.vue (1759 LOC god-component).
  *
- * Sprint 5 PR 2 Phase A — pre-refactor net. Per advisor pre-PR-review:
+ * Sprint 5 PR 2 Phase A — pre-refactor net. Per pre-PR review:
  * "Pin-Tests pro Interaktions-Paar, dann erst splitten."
  *
  * Memory `sprint5_frontend_pickup.md` flags three state-drift surfaces
@@ -357,7 +357,7 @@ describe('AutoLinkingTab (Phase A characterisation)', () => {
     // through the extract — they assert column headers + per-row data
     // marker + toggle-sort wiring + row-action dropdown wiring.
     //
-    // The advisor's "Charakterisierungs-Pins VOR Code-Touch" pflicht: pin
+    // The "Charakterisierungs-Pins VOR Code-Touch" pflicht: pin
     // what is, then refactor, then verify pins still green. Same pattern
     // as PR 2c's Render-Bridge prep (PR #25).
 

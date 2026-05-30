@@ -1,7 +1,7 @@
 /**
  * Shared rule fixture for Vitest pin / characterisation tests.
  *
- * Extracted in Sprint 5 PR 2e-prep (advisor-flagged in PR 2d) — the same
+ * Extracted in Sprint 5 PR 2e-prep (flagged in PR 2d) — the same
  * `mockRule` shape gets reused across PR 2e (RulePreviewModal pins) and the
  * upcoming LinksReport / BrokenLinks / Activity tab splits. Inlining the
  * 18-field literal per test file drifts; one canonical fixture doesn't.

@@ -14,7 +14,7 @@ use ReflectionMethod;
  * `statamic.cp.linkwise.urlchanger` which the test-routes file doesn't
  * register).
  *
- * Why `protected` stays after REV-DR-01 Phase B PR 3 (advisor note):
+ * Why `protected` stays after REV-DR-01 Phase B PR 3 (pre-merge note):
  * `deepLinkSearchFor` is controller-internal logic with a single caller
  * (activityDetail at line 224 of ActivityController). Unlike
  * StaleCheckPresenter (PR 2, cross-cutting across 8 renderers), this

@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * Characterisation tests for BrokenLinkScanCache.
  *
- * Sprint 6 REV-BL-05 prep — pure-class test net. Per advisor pre-PR-review:
+ * Sprint 6 REV-BL-05 prep — pure-class test net. Per pre-PR review:
  * "Cache-Invalidierungs-Strategie muss ähnlich rigid getestet werden wie
  * der bulkSignature-Truth-Table-Switch — sonst hast du eingehandelt was
  * du vermeiden wolltest."

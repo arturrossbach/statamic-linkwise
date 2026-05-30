@@ -238,7 +238,7 @@ class SafeEntrySaverTest extends TestCase
 
     public function test_normalize_then_coverage_check_no_false_positive_on_fragment_cleanup(): void
     {
-        // The advisor-flagged trap (2026-05-11): without normalizing $current,
+        // The flagged trap (2026-05-11): without normalizing $current,
         // ensureLinkCoveragePreserved false-positives when $current has
         // fragments and $entry has the merged form (Mark2's offset shifts
         // onto Mark1, validator interprets as Bug-B partial-overlap).

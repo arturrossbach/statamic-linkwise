@@ -102,7 +102,7 @@ class SafeEntrySaver
         // $current has pre-existing adjacent same-href fragments and the
         // merged $entry has them collapsed: the validator sees Mark2's
         // offset shift onto Mark1's and interprets the overlap as
-        // corruption (advisor-flagged trap, 2026-05-11). With both sides
+        // corruption (flagged trap, 2026-05-11). With both sides
         // normalized, the validator compares apples-to-apples in their
         // canonical form. The mutation on $current is safe — Statamic's
         // Entry instances from EntryFacade::find are isolated per call

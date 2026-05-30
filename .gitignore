@@ -18,6 +18,19 @@ docs/SISTER_AUDIT_2026_05_17.md
 /test-results
 docs/internal/
 
+# Internal planning, competitor research & audits — never public
+LINK-WHISPER-FEATURE-INVENTORY.md
+LINKBOSS-FEATURE-INVENTORY.md
+LINKWISE-V2-MASTER-PLAN.md
+V1X-POLISH-AUDIT.md
+MARKETPLACE_CHECKLIST.md
+SMOKE_QUEUE.md
+TAB-GAP-ANALYSIS.md
+NoteGPT_TRANSCRIPT_*.txt
+docs/MARKETPLACE_LISTING.md
+docs/MULTISITE_AUDIT.md
+docs/CODE_REVIEW_*.md
+
 # Frequency-Words raw lists — too large for the repo (3-5MB each × 9 langs).
 # Pre-stemmed JSONs (`resources/data/frequency-stems-*.json`) are checked in
 # as the runtime artifact. To rebuild from scratch:

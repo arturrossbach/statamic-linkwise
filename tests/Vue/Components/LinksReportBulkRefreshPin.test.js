@@ -20,7 +20,7 @@ import { bulkState } from '@/services/bulkOperationService.js';
  *
  * Without this pin, a future refactor (e.g. the deferred PR 4
  * LinksReportTab split) could silently drop the watcher and the bug
- * would resurface. Advisor pre-merge-flag: "Schreib den Pin (10 min)
+ * would resurface. pre-merge review: "Schreib den Pin (10 min)
  * vor Merge — das gibt dir auch Munition für deine Antwort".
  */
 describe('LinksReportTab — bulkState.lastCompletion watcher', () => {
