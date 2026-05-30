@@ -8,20 +8,20 @@ hero:
     actions:
         - theme: brand
           text: Get started
-          link: /guide/installation
+          link: /getting-started/installation
         - theme: alt
           text: View on GitHub
           link: https://github.com/arturrossbach/statamic-linkwise
 
 features:
     - icon: 🔗
-      title: Multi-tier suggestion engine
+      title: Suggestion engine
       details: >
-          Surfaces internal-link candidates in both directions — inbound and outbound — through four tiers in order. Title phrases, custom-keyword anchors, unordered stem clusters, then TF-IDF keyword overlap. Long news titles, descriptive blog titles, and short product titles each match through the tier they fit. Tunable thresholds, anchor-text editor built in.
+          Surfaces internal-link candidates in both directions — inbound and outbound. It matches on title phrases, your custom-keyword anchors, and stemmed title variants, so plurals and inflections still match. High-signal by design — tunable thresholds and a built-in anchor-text editor keep you in control of every link.
     - icon: 🧱
-      title: Reads the full content tree
+      title: Reads the structured content tree
       details: >
-          Most internal-linking tools see the page as flat HTML. Linkwise reads the structured tree — every Bard node, every Replicator set at any nesting depth, Peak Cards / Buttons / Accordions, and any addon's custom-field text. Same coverage on write — link insertions reach into nested sets, not just the top-level Bard. UUIDs, asset filenames, and config enums filtered out so noise stays out of anchor candidates.
+          Most internal-linking tools see the page as flat HTML. Linkwise reads the structured tree — every Bard node and every Replicator set at any nesting depth, including the cards and blocks of page-builder layouts, plus Markdown fields. Same coverage on write: insertions reach into nested sets, not just the top-level field. Plaintext fields (text / textarea) are left untouched by design — Linkwise only works where a link is a real link, never literal `[text](url)` syntax.
     - icon: ⚡
       title: Auto-Linking rules
       details: >
@@ -39,13 +39,13 @@ features:
       details: >
           Set rel="nofollow" / "sponsored" / "ugc" once per external domain. Applied at render time via a Bard mark extension — your stored content stays untouched, and changing a domain rule retroactively updates every existing link.
     - icon: 📊
-      title: Target Keywords
+      title: Custom keywords
       details: >
-          Per-entry custom keywords (brand terms, product synonyms, internal codenames) boost suggestion ranking on top of TF-IDF auto-extracted content keywords. CSV import/export for bulk seeding from existing keyword research.
+          Give an entry its own anchor terms — brand names, product synonyms, internal codenames — and Linkwise suggests links on those too, not just words from the title. CSV import/export for bulk seeding from existing keyword research.
     - icon: 🛡️
       title: Privacy by design
       details: >
-          All link data stays in storage/linkwise/ on your server. Zero telemetry, zero SaaS callbacks. Optional bring-your-own-key AI calls your OpenAI / Anthropic API directly from your server — Linkwise never sees the key or the embeddings.
+          All link data stays in storage/linkwise/ on your server. Zero telemetry, zero SaaS callbacks — Linkwise runs entirely on your own infrastructure, with no external services in the loop.
 ---
 
 <style>

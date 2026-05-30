@@ -7,6 +7,17 @@ export default defineConfig({
     cleanUrls: true,
     lastUpdated: true,
 
+    // Internal engineering docs + unreviewed marketing copy live under docs/
+    // but must never be built into the public site.
+    srcExclude: [
+        'ARCHITECTURE_REVIEW.md',
+        'CODE_REVIEW_*.md',
+        'SISTER_AUDIT_*.md',
+        'MULTISITE_AUDIT.md',
+        'MARKETPLACE_LISTING.md',
+        'internal/**',
+    ],
+
     head: [
         ['meta', { name: 'theme-color', content: '#10b981' }],
         ['meta', { property: 'og:type', content: 'website' }],
@@ -18,26 +29,56 @@ export default defineConfig({
         siteTitle: 'Linkwise',
 
         nav: [
-            { text: 'Guide', link: '/guide/installation', activeMatch: '/guide/' },
+            { text: 'Guide', link: '/getting-started/installation' },
+            { text: 'Reference', link: '/reference/config-options' },
+            { text: 'FAQ', link: '/faq' },
             {
-                text: 'v1.0',
+                text: 'Resources',
                 items: [
                     { text: 'Changelog', link: 'https://github.com/arturrossbach/statamic-linkwise/blob/master/CHANGELOG.md' },
-                    { text: 'License', link: 'https://github.com/arturrossbach/statamic-linkwise/blob/master/LICENSE.md' },
+                    { text: 'Editions & License', link: '/getting-started/editions' },
                     { text: 'Statamic Marketplace', link: 'https://statamic.com/addons' },
                 ],
             },
         ],
 
         sidebar: {
-            '/guide/': [
+            '/': [
                 {
-                    text: 'Introduction',
+                    text: 'Getting Started',
                     items: [
-                        { text: 'What is Linkwise?', link: '/guide/' },
-                        { text: 'Installation', link: '/guide/installation' },
-                        { text: 'Configuration', link: '/guide/configuration' },
-                        { text: 'FAQ', link: '/guide/faq' },
+                        { text: 'Editions', link: '/getting-started/editions' },
+                        { text: 'Installation', link: '/getting-started/installation' },
+                    ],
+                },
+                {
+                    text: 'Usage',
+                    items: [
+                        { text: 'Dashboard', link: '/usage/dashboard' },
+                        { text: 'Suggestions', link: '/usage/suggestions' },
+                        { text: 'Custom Keywords', link: '/usage/custom-keywords' },
+                        { text: 'Auto-Linking', link: '/usage/auto-linking' },
+                        { text: 'Broken Links', link: '/usage/broken-links' },
+                        { text: 'URL Changer', link: '/usage/url-changer' },
+                        { text: 'Domains', link: '/usage/domains' },
+                        { text: 'Activity Log', link: '/usage/activity-log' },
+                        { text: 'Multilingual', link: '/usage/multilingual' },
+                        { text: 'Configuration', link: '/usage/configuration' },
+                        { text: 'Permissions', link: '/usage/permissions' },
+                    ],
+                },
+                {
+                    text: 'Reference',
+                    items: [
+                        { text: 'Configuration Options', link: '/reference/config-options' },
+                        { text: 'Commands', link: '/reference/commands' },
+                    ],
+                },
+                {
+                    text: 'Help',
+                    items: [
+                        { text: 'FAQ', link: '/faq' },
+                        { text: 'Troubleshooting', link: '/troubleshooting' },
                     ],
                 },
             ],
