@@ -3,7 +3,7 @@ layout: home
 
 hero:
     name: Linkwise
-    text: Internal linking, fixed.
+    text: Find the internal links you're missing.
     tagline: Suggestion engine, broken-link finder, domain-level rel governance, and full-site URL rewrite — across every Bard, Replicator, and Markdown field on your Statamic site.
     actions:
         - theme: brand
