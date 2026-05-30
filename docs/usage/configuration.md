@@ -1,15 +1,26 @@
 # Configuration
 
-Linkwise works out of the box with no configuration. When you want to tune it,
-publish the config file:
+Linkwise works out of the box — you only configure it to tune behaviour. There
+are **two ways**, and you can use either:
 
-```bash
-php artisan vendor:publish --tag=linkwise-config
-```
+- **Control Panel settings** — almost every option has a field on Linkwise's
+  settings page in the Control Panel. This is the quickest way to change
+  behaviour; nothing to deploy.
+- **Config file** — publish `config/linkwise.php` to keep settings in your
+  codebase (version-controlled and reviewable):
 
-That writes `config/linkwise.php`. This page is a guided tour of the settings
-that matter most; the [Configuration Options](/reference/config-options)
-reference lists every key with its default.
+  ```bash
+  php artisan vendor:publish --tag=linkwise-config
+  ```
+
+When the same option is set in both places, **the Control Panel value wins** —
+CP settings are merged on top of the file at runtime. Only a couple of advanced
+options (the broken-link checker's `timeout` and `retries`) live in the config
+file only.
+
+This page is a guided tour of the settings that matter most, shown as config
+keys — each option that has a Control Panel field uses the **same name** there.
+The [Configuration Options](/reference/config-options) reference lists every key.
 
 ## Language
 
@@ -76,9 +87,3 @@ will not match `https://example.com/...`). See [Broken Links](/usage/broken-link
 ```php
 'open_in_new_tab' => false,   // add target="_blank" to inserted links
 ```
-
-## Where to change settings
-
-Everything above lives in `config/linkwise.php` and is committed with your
-codebase. A few behavioural settings are also exposed in the Control Panel under
-the Linkwise settings — those are merged on top of the file at runtime.

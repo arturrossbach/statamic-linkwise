@@ -4,6 +4,11 @@ Every setting in `config/linkwise.php`, with its default. Publish the file with
 `php artisan vendor:publish --tag=linkwise-config`. For a guided walk-through of
 the settings that matter most, see [Configuration](/usage/configuration).
 
+Most of these options also have a field on Linkwise's **Control Panel settings
+page** under the same name — and when set there, the Control Panel value
+overrides the file. The broken-link `timeout` / `retries` and the reserved keys
+at the bottom are config-file only.
+
 ## Language & text
 
 | Option | Default | Description |

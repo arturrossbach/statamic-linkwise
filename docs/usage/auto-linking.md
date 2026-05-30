@@ -38,8 +38,11 @@ Two safety guarantees matter:
 Auto-apply-on-save only happens when **both** switches are on: the global master
 switch *and* the rule's own flag.
 
+Flip the master switch on Linkwise's **Control Panel settings page** (the
+"auto-apply on save" toggle), or in the [config file](/usage/configuration):
+
 ```php
-'auto_apply_on_save_enabled' => true,   // master switch (config)
+'auto_apply_on_save_enabled' => true,   // master switch
 ```
 
 Then enable auto-apply per rule in the Control Panel. With the master switch off
