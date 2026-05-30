@@ -10,7 +10,7 @@ automation and CI.
 
 Rebuilds the content index — the same job as the **Scan Content** button. It
 reads your entries, builds the internal-link map, and extracts the data the
-[suggestion engine](/usage/suggestions) needs.
+[suggestion engine](/usage/links-report) needs.
 
 ```bash
 php artisan linkwise:index

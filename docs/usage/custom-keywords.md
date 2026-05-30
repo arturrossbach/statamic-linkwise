@@ -16,7 +16,7 @@ right link even when the title wouldn't match.
 You attach keywords to a **target** entry. When another entry's content contains
 one of those keywords, Linkwise suggests linking that text to the target — at a
 higher priority than the default title match. Custom-keyword matches are always
-on; they sit alongside [title matching](/usage/suggestions), not instead of it.
+on; they sit alongside [title matching](/usage/links-report), not instead of it.
 
 A few keywords per entry is the sweet spot — they're meant to fill gaps the title
 leaves, not to match everything.

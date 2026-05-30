@@ -54,8 +54,8 @@ export default defineConfig({
                 {
                     text: 'Usage',
                     items: [
-                        { text: 'Dashboard', link: '/usage/dashboard' },
-                        { text: 'Suggestions', link: '/usage/suggestions' },
+                        { text: 'Overview', link: '/usage/overview' },
+                        { text: 'Links Report', link: '/usage/links-report' },
                         { text: 'Custom Keywords', link: '/usage/custom-keywords' },
                         { text: 'Auto-Linking', link: '/usage/auto-linking' },
                         { text: 'Broken Links', link: '/usage/broken-links' },

@@ -3,7 +3,7 @@
 ## What does Linkwise do?
 
 It helps you manage internal and external links across a Statamic site:
-[suggests internal links](/usage/suggestions) in both directions,
+[suggests internal links](/usage/links-report) in both directions,
 [auto-links keywords](/usage/auto-linking) by rule, [finds broken external
 links](/usage/broken-links), rewrites URLs site-wide, and governs `rel`
 attributes per domain — across Bard, Replicator, and Markdown fields.
@@ -28,7 +28,7 @@ record a snapshot for reference. You stay in control of what changes.
 
 ## Does it insert links automatically?
 
-Only if you ask it to. [Suggestions](/usage/suggestions) are proposals you
+Only if you ask it to. [Suggestions](/usage/links-report) are proposals you
 review and insert by hand. [Auto-Linking](/usage/auto-linking) applies rules you
 define — and even then, applying on save is off by default and opt-in on two
 levels.
@@ -43,7 +43,7 @@ We tried broader keyword-similarity matching earlier and it produced too much
 low-quality noise — suggestions that looked plausible but weren't the link an
 editor actually wanted. High precision beats high volume for internal linking,
 so that approach was dropped. If you want a link Linkwise doesn't propose,
-[add a custom keyword](/usage/suggestions) to the target entry — that's the
+[add a custom keyword](/usage/links-report) to the target entry — that's the
 intended, reliable way to widen its matches.
 
 ## Is there AI / semantic matching?

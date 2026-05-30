@@ -6,7 +6,7 @@ content, now and going forward.
 
 ## What it does
 
-Where [Suggestions](/usage/suggestions) propose links for you to review,
+Where [Suggestions](/usage/links-report) propose links for you to review,
 Auto-Linking **applies** them by rule. It's built for the anchors you always
 want: product names, pillar pages, key landing pages.
 

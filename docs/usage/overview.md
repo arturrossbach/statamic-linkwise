@@ -1,6 +1,6 @@
-# Dashboard
+# Overview
 
-The **Overview** tab is Linkwise's home screen: a snapshot of your internal-link
+The Overview tab is Linkwise's home screen: a snapshot of your internal-link
 health and the jumping-off point for every other tool.
 
 ## What it does

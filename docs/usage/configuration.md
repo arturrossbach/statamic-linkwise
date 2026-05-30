@@ -52,7 +52,7 @@ title:
 'prevent_two_way' => false,
 ```
 
-These shape the [Suggestions](/usage/suggestions) engine: `min_phrase_words` and
+These shape the [Suggestions](/usage/links-report) engine: `min_phrase_words` and
 `min_score` set how strict title matching is, `max_suggestions` caps how many
 candidates appear per entry, and `prevent_two_way` stops Linkwise suggesting
 B → A when A already links to B.

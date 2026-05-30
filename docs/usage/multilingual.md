@@ -20,7 +20,7 @@ stats can be narrowed to one language so editors see only what's relevant to the
 - **Per-rule locale scope.** [Auto-Link rules](/usage/auto-linking) can be
   restricted to specific sites/languages.
 - **Locale filters.** The Links Report, Broken Links, Domains, and
-  [Dashboard](/usage/dashboard) all carry a language filter so every count and
+  [Overview](/usage/overview) all carry a language filter so every count and
   table can be scoped to one locale.
 
 ## Requirements

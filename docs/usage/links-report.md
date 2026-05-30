@@ -1,8 +1,8 @@
-# Suggestions
+# Links Report
 
-Suggestions are Linkwise's core: for any entry it proposes internal links you
-could add — in both directions — and lets you review and insert them without
-hand-editing content.
+The Links Report is Linkwise's core screen: for every entry it lists the
+internal-link **suggestions** Linkwise found — in both directions — and lets you
+review and insert them without hand-editing content.
 
 ## What it does
 
