@@ -7,8 +7,8 @@ addon — there is no free/pro split and no feature gating.
 
 Linkwise is a **one-time purchase per production installation** — no
 subscription. For the current price, see the
-[Statamic Marketplace listing](https://statamic.com/addons), which is the single
-source of truth for pricing.
+[Linkwise on the Statamic Marketplace](https://statamic.com/addons/arturrossbach/linkwise),
+which is the single source of truth for pricing.
 
 You buy and manage the license through the Marketplace, which also governs the
 purchase terms (license grant, refund window, AS-IS warranty). Linkwise adds a

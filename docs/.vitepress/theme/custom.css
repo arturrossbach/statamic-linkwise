@@ -1,0 +1,14 @@
+/* Screenshots in content pages: a consistent frame so the light-mode CP
+   captures read cleanly in both the light and dark docs themes. Rounded
+   corners + a theme-aware border + a soft shadow, applied to every image
+   inside the prose body (the home hero/logo lives outside .vp-doc and is
+   unaffected). */
+.vp-doc img {
+    border-radius: 10px;
+    border: 1px solid var(--vp-c-divider);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+}
+
+.dark .vp-doc img {
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}

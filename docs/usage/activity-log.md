@@ -31,7 +31,7 @@ relevant without growing without bound.
 2. Click **View entries** on any operation to open its detail — the full list of
    affected and skipped entries, with skip reasons.
 
-<!-- TODO screenshot: Activity Log — operation list + detail drawer -->
+![The Activity Log — a record of every bulk operation](/screenshots/activity-log.png)
 
 ## Settings
 

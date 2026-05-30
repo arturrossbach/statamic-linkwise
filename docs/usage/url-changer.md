@@ -41,7 +41,7 @@ Two safety properties:
 4. **Apply** to run the rewrite in the background. It's cancellable, and the
    result is recorded in the [Activity Log](/usage/activity-log).
 
-<!-- TODO screenshot: URL Changer — preview diff table -->
+![The URL Changer showing a preview of every affected link before applying](/screenshots/url-changer.png)
 
 ## Settings
 

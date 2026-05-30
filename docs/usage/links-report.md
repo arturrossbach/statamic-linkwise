@@ -4,6 +4,8 @@ The Links Report is Linkwise's core screen: for every entry it lists the
 internal-link **suggestions** Linkwise found — in both directions — and lets you
 review and insert them without hand-editing content.
 
+![The Links Report — every entry with its inbound and outbound suggestion counts](/screenshots/links-report.png)
+
 ## What it does
 
 For each entry Linkwise surfaces two kinds of candidate:
@@ -14,6 +16,8 @@ For each entry Linkwise surfaces two kinds of candidate:
 You review candidates in a modal, adjust the anchor text if you want, and insert
 them one at a time or in bulk. Nothing is inserted automatically — suggestions
 are proposals.
+
+![Suggestion counts also surface in the entry editor's Linkwise panel](/screenshots/entry-sidebar.png)
 
 ## How it works
 
@@ -52,7 +56,7 @@ A few rules the engine always follows:
    operation. Progress shows in the banner; the result lands in the
    [Activity Log](/usage/activity-log).
 
-<!-- TODO screenshot: Suggestions modal (Links Report → suggestion count → modal) -->
+![The suggestions modal — review each candidate's target, anchor text, and sentence before inserting](/screenshots/suggestions-modal.png)
 
 ## Settings
 

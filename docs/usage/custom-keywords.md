@@ -28,7 +28,7 @@ leaves, not to match everything.
    entries without custom keywords" helps you find gaps.
 3. Import or export keywords as CSV to bulk-seed from existing keyword research.
 
-<!-- TODO screenshot: Custom Keywords tab — per-entry keyword editing -->
+![The Custom Keywords tab — anchor terms per entry](/screenshots/custom-keywords.png)
 
 ## Settings
 

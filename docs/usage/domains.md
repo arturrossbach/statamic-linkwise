@@ -27,7 +27,7 @@ through a Bard link-mark extension:
    off to the [URL Changer](/usage/url-changer) when you want to change the URLs
    themselves, not just their `rel`.
 
-<!-- TODO screenshot: Domains tab — rel attribute per domain -->
+![The Domains tab — set a rel attribute once per external domain](/screenshots/domains.png)
 
 ## Settings
 

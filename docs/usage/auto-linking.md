@@ -56,7 +56,7 @@ silently on save.
    operation. Large applies run in the background with a progress banner.
 5. Import or export rules as CSV for bulk setup.
 
-<!-- TODO screenshot: Auto-Linking tab — rule list + preview modal -->
+![Creating an auto-link rule — keyword, target, scope, and apply-on-save options](/screenshots/auto-linking.png)
 
 ## Settings
 

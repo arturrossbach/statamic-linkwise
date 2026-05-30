@@ -37,7 +37,7 @@ export default defineConfig({
                 items: [
                     { text: 'Changelog', link: 'https://github.com/arturrossbach/statamic-linkwise/blob/master/CHANGELOG.md' },
                     { text: 'Editions & License', link: '/getting-started/editions' },
-                    { text: 'Statamic Marketplace', link: 'https://statamic.com/addons' },
+                    { text: 'Get Linkwise (Marketplace)', link: 'https://statamic.com/addons/arturrossbach/linkwise' },
                 ],
             },
         ],

@@ -40,7 +40,7 @@ result:
 4. Select several and **bulk-unlink** them in one operation. Export the report
    as CSV. On multilingual sites, filter by locale.
 
-<!-- TODO screenshot: Broken Links report — grouped results + inline fix/ignore/unlink -->
+![The Broken Links report with inline replace, ignore, and unlink actions](/screenshots/broken-links.png)
 
 ## Settings
 
